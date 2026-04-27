@@ -13,28 +13,32 @@
 
 ## TODO Next
 
-### sprint 2
-Ollama/llmafile integration
-Acceptance UI working;
-ai_interaction events recording correctly;
-integrity hash implemented.
-Full session log with AI interactions exports as valid .twff file;
-hash verified.
+### Sprint 2
+
+- Ollama/llmafile integration
+- Acceptance UI working;
+- ai_interaction events recording correctly;
+- integrity hash implemented.
+- Full session log with AI interactions exports as valid .twff file; hash verified.
 
 ### Sprint 3
-Gemini native detection
-Google Drive save option;
-Chrome Web Store developer account setup.
+
+- Gemini native detection
+- Google Drive save option;
+- Chrome Web Store developer account setup.
+- Drive save working with user permission.
+
 Acceptance criteria: Gemini suggestion acceptance detected and logged;
-Drive save working with user permission.
 
 ### Sprint 4
 
-Settings page + internal beta
-Side panel polished; code reviewed and integrated;
-internal beta with everyone.
-Acceptance criteria: No critical bugs in 5-day internal test period;
-privacy constraints confirmed.
+- Settings page + internal beta
+- Side panel polished; code reviewed and integrated;
+- internal beta with everyone.
+- privacy constraints confirmed.
+
+Acceptance criteria: No critical bugs in 3-day internal test period;
+
 
 ## 2. ROADMAP
  
