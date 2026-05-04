@@ -1,0 +1,10 @@
+{
+  "name": "colophon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser extension that records AI writing interactions as a TWFF process log.",
+  "scripts": {
+    "lint": "eslint src/",
+    "build": "echo 'No build step — load src/ directly as unpacked extension.'"
+  }
+}
