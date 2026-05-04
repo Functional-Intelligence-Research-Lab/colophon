@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>Colophon</title>
+</head>
+<body>
+  <div class="container">
+    <h1>Colophon</h1>
+
+    <div id="idle-view">
+      <input type="text" id="session-title" placeholder="Session title (optional)">
+      <button id="btn-start">Start session</button>
+    </div>
+
+    <div id="active-view" hidden>
+      <p class="status">Recording<span class="dot-pulse"></span></p>
+      <p class="meta" id="event-count">0 events</p>
+      <div class="actions">
+        <button id="btn-export">Export .twff</button>
+        <button id="btn-stop" class="secondary">End session</button>
+      </div>
+    </div>
+
+    <p id="message" hidden></p>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
