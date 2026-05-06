@@ -1,0 +1,21 @@
+{
+  "name": "colophon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TWFF process-log recorder for Google Docs — Chrome extension",
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run lint && npm run test && npm run build && echo '\\n✓ All checks passed.'",
+    "status": "npm run build --silent && node tools/status.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "eslint": "^9.0.0",
+    "vitest": "^4.1.5"
+  }
+}
