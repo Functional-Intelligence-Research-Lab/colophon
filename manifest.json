@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Colophon",
+  "version": "0.1.0",
+  "description": "Records AI writing interactions as a TWFF-compatible process log in Google Docs.",
+
+  "permissions": ["activeTab", "storage", "scripting", "sidePanel"],
+  "host_permissions": ["https://docs.google.com/*"],
+
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://docs.google.com/document/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Colophon"
+  },
+
+  "options_page": "options/options.html"
+}
