@@ -1,0 +1,198 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  max-width: 560px;
+  margin: 48px auto;
+  padding: 0 24px 64px;
+  color: #111;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header ── */
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 36px;
+}
+
+h1 { font-size: 20px; font-weight: 700; }
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+/* ── Sections ── */
+section {
+  margin-bottom: 36px;
+  padding-bottom: 36px;
+  border-bottom: 1px solid #e5e7eb;
+}
+section:last-child { border-bottom: none; }
+
+.description {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 14px;
+}
+
+/* ── Save indicator ── */
+.save-indicator {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 500;
+}
+
+/* ── Radio groups ── */
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-group--inline {
+  flex-direction: row;
+  gap: 16px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.radio-option:hover { background: #f9fafb; }
+
+.radio-option input[type="radio"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: #111;
+}
+
+.radio-option input[type="radio"]:checked + .radio-label {
+  color: #111;
+}
+
+.radio-option:has(input:checked) {
+  border-color: #111;
+  background: #f9fafb;
+}
+
+.radio-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.radio-label strong { font-size: 13px; font-weight: 600; }
+
+.radio-desc {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* ── Form fields ── */
+.field {
+  margin-bottom: 16px;
+}
+
+.field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  color: #374151;
+}
+
+.field input[type="url"],
+.field input[type="text"],
+.field input[type="password"] {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #111;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field input:focus { border-color: #111; }
+
+/* ── User ID ── */
+.mono {
+  font-family: 'SFMono-Regular', Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  background: #f3f4f6;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  color: #374151;
+  word-break: break-all;
+}
+
+button {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111;
+  transition: background 0.15s;
+}
+button:hover { background: #f3f4f6; }
+
+/* ── Privacy list ── */
+.privacy-list {
+  list-style: none;
+  margin-bottom: 10px;
+}
+
+.privacy-list li {
+  font-size: 13px;
+  padding: 3px 0 3px 22px;
+  position: relative;
+  color: #374151;
+}
+
+.privacy-list li::before {
+  position: absolute;
+  left: 0;
+  font-weight: 600;
+}
+
+.privacy-list li.ok  { color: #166534; }
+.privacy-list li.ok::before  { content: '✓'; color: #16a34a; }
+.privacy-list li.no  { color: #991b1b; }
+.privacy-list li.no::before  { content: '✕'; color: #dc2626; }
+
+/* ── Misc ── */
+.note {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-top: 6px;
+}
+
+.note code {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  background: #f3f4f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}

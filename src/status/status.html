@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Colophon — Status</title>
+  <link rel="stylesheet" href="status.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>System status</h1>
+      <button id="btn-refresh" class="btn-refresh" title="Re-run all checks">↻ Refresh</button>
+    </header>
+
+    <p id="overall" class="overall overall--checking">Running checks…</p>
+
+    <section>
+      <h2>Permissions</h2>
+      <ul id="check-permissions" class="check-list"></ul>
+    </section>
+
+    <section>
+      <h2>Connections</h2>
+      <ul id="check-connections" class="check-list"></ul>
+    </section>
+
+    <section>
+      <h2>Storage</h2>
+      <ul id="check-storage" class="check-list"></ul>
+    </section>
+
+    <section>
+      <h2>Recording</h2>
+      <ul id="check-recording" class="check-list"></ul>
+    </section>
+
+    <section>
+      <h2>Extension</h2>
+      <ul id="check-extension" class="check-list"></ul>
+    </section>
+
+    <footer>
+      <p class="note">
+        Status reflects the live state of the extension on your machine.
+        If something is red, reload the extension at <code>chrome://extensions</code>
+        or open a Google Docs document and try again.
+      </p>
+    </footer>
+  </main>
+  <script src="status.js"></script>
+</body>
+</html>

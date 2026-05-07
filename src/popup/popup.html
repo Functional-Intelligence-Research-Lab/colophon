@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colophon</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <header>
+    <span id="status-dot" class="dot dot--stopped" aria-hidden="true"></span>
+    <span id="status-label">Stopped</span>
+    <span class="app-name">Colophon</span>
+  </header>
+
+  <section id="stats" class="stats" hidden>
+    <div class="stat">
+      <span class="stat__value" id="stat-duration">0:00</span>
+      <span class="stat__label">Duration</span>
+    </div>
+    <div class="stat">
+      <span class="stat__value" id="stat-edits">0</span>
+      <span class="stat__label">Edits</span>
+    </div>
+    <div class="stat">
+      <span class="stat__value" id="stat-ai">0</span>
+      <span class="stat__label">AI uses</span>
+    </div>
+  </section>
+
+  <section class="actions">
+    <button id="btn-toggle" class="btn btn--primary">Start recording</button>
+    <button id="btn-export" class="btn btn--secondary" disabled>Export .twff</button>
+  </section>
+
+  <footer>
+    <a id="link-status" href="#" role="button">Status</a>
+    <span class="footer-sep">·</span>
+    <a id="link-settings" href="#" role="button">Settings</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
