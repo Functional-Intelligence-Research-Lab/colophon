@@ -61,19 +61,21 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 ## Getting started (development)
 
-<!-- ```bash
+```bash
 git clone https://github.com/Functional-Intelligence-Research-Lab/colophon
 cd colophon
 npm install
-npm run build
-``` -->
+npm run build        # produces dist/
+```
 
 Load unpacked extension in Chrome:
 
 1. Go to `chrome://extensions`
-2. Enable Developer mode
+2. Enable **Developer mode**
 3. Click **Load unpacked**
-4. select the `dist/` folder
+4. Select the `dist/` folder
+
+During development, use `npm run watch` instead of `npm run build` — it rebuilds on every save. Reload the extension in `chrome://extensions` after each rebuild.
 
 To validate a `.twff` export:
 

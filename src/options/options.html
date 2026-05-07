@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Colophon — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Colophon Settings</h1>
+      <span id="save-indicator" class="save-indicator" hidden>Saved</span>
+    </header>
+
+    <!-- ── AI Path ──────────────────────────────────────────── -->
+    <section>
+      <h2>AI assistant</h2>
+      <p class="description">Choose how Colophon records AI interactions.</p>
+
+      <div class="radio-group">
+        <label class="radio-option">
+          <input type="radio" name="aiPath" value="ollama">
+          <span class="radio-label">
+            <strong>Local AI via Ollama</strong>
+            <span class="radio-desc">Runs models on your machine. Nothing leaves your computer.</span>
+          </span>
+        </label>
+
+        <label class="radio-option">
+          <input type="radio" name="aiPath" value="gemini-native">
+          <span class="radio-label">
+            <strong>Gemini (Google Docs built-in)</strong>
+            <span class="radio-desc">Detects when you use "Help me write" in Docs. No API key needed.</span>
+          </span>
+        </label>
+
+        <label class="radio-option">
+          <input type="radio" name="aiPath" value="gemini-api">
+          <span class="radio-label">
+            <strong>Gemini API key</strong>
+            <span class="radio-desc">Use your own Gemini API key. Optional — Sprint 3.</span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- ── Ollama ───────────────────────────────────────────── -->
+    <section id="section-ollama">
+      <h2>Ollama settings</h2>
+
+      <div class="field">
+        <label for="ollama-endpoint">Endpoint</label>
+        <input type="url" id="ollama-endpoint" placeholder="http://localhost:11434">
+        <p class="note">Leave as default unless you run Ollama on a custom port.</p>
+      </div>
+
+      <div class="field">
+        <label for="ollama-model">Model</label>
+        <input type="text" id="ollama-model" placeholder="e.g. qwen2.5:0.5b">
+        <p class="note">
+          Recommended: <code>qwen2.5:0.5b</code> (fast, low RAM).
+          Run <code>ollama list</code> to see installed models.
+        </p>
+      </div>
+    </section>
+
+    <!-- ── Gemini API key ────────────────────────────────────── -->
+    <section id="section-gemini-api" hidden>
+      <h2>Gemini API key</h2>
+
+      <div class="field">
+        <label for="gemini-key">API key</label>
+        <input type="password" id="gemini-key" placeholder="AIza…">
+        <p class="note">Stored locally. Never sent to FIRL servers.</p>
+      </div>
+    </section>
+
+    <!-- ── Output format ─────────────────────────────────────── -->
+    <section>
+      <h2>Export format</h2>
+
+      <div class="radio-group radio-group--inline">
+        <label class="radio-option">
+          <input type="radio" name="outputFormat" value="twff">
+          <span class="radio-label">
+            <strong>.twff</strong>
+            <span class="radio-desc">ZIP container (full format)</span>
+          </span>
+        </label>
+
+        <label class="radio-option">
+          <input type="radio" name="outputFormat" value="json">
+          <span class="radio-label">
+            <strong>.json</strong>
+            <span class="radio-desc">process-log.json only</span>
+          </span>
+        </label>
+      </div>
+    </section>
+
+    <!-- ── User ID ───────────────────────────────────────────── -->
+    <section>
+      <h2>Your anonymous ID</h2>
+      <p class="mono" id="user-id">Loading…</p>
+      <button id="btn-rotate">Generate new ID</button>
+      <p class="note">
+        Generated locally. Never transmitted. Appears in your exported logs.<br>
+        Rotating is permanent — old exports keep their original ID.
+      </p>
+    </section>
+
+    <!-- ── Privacy ───────────────────────────────────────────── -->
+    <section>
+      <h2>What Colophon records</h2>
+      <ul class="privacy-list">
+        <li class="ok">Character counts and edit positions (not the text itself)</li>
+        <li class="ok">Paste events: character count and source</li>
+        <li class="ok">AI interaction type, model name, acceptance decision</li>
+        <li class="ok">Session duration and timestamps</li>
+      </ul>
+      <ul class="privacy-list">
+        <li class="no">Individual keystrokes or typed content</li>
+        <li class="no">Full AI prompts or responses (100-character preview max)</li>
+        <li class="no">Your document text</li>
+        <li class="no">Any data sent to FIRL servers</li>
+      </ul>
+    </section>
+
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
