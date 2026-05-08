@@ -1,4 +1,5 @@
 import { exportTwff } from "../lib/export.js";
+import { ProcessLog } from "../lib/process-log.js";
 
 const idleView = document.getElementById("idle-view");
 const activeView = document.getElementById("active-view");
@@ -8,6 +9,7 @@ const btnStop = document.getElementById("btn-stop");
 const btnExport = document.getElementById("btn-export");
 const eventCount = document.getElementById("event-count");
 const messageEl = document.getElementById("message");
+
 
 function showMessage(text) {
   messageEl.textContent = text;
@@ -54,7 +56,7 @@ btnStop.addEventListener("click", async () => {
 btnExport.addEventListener("click", async () => {
   try {
     const filename = await exportTwff();
-    showMessage(`Exported ${filename}`);
+    showMessage(`Exported ${filename.filename}`);
   } catch (err) {
     showMessage(err.message);
   }

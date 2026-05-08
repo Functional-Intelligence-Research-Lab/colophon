@@ -21,6 +21,9 @@
       "run_at": "document_idle"
     }
   ],
+  "host_permissions": [
+    "*://docs.google.com/*"
+  ],
   "action": {
     "default_popup": "src/popup/popup.html"
   }

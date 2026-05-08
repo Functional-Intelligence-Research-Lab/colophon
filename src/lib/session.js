@@ -9,10 +9,15 @@ export function now() {
   return new Date().toISOString();
 }
 
+export function generateUserId() {
+  return 'anon-'.concat(crypto.randomUUID())
+}
+
 export async function createSession(title) {
   const session = {
     session_id: generateId(),
-    title: title || "Untitled session",
+    user_id: generateUserId(),
+    //title: title || "Untitled session",
     created: now(),
     ended: null,
     events: []
