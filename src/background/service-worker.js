@@ -63,14 +63,11 @@ async function startSession({ tabId, docUrl } = {}) {
     events:      [],
   }
   session.events.push({ timestamp: now, type: 'session_start', meta: {} })
+  console.log('[Colophon SW] session_start', { tabId: tabId ?? null, docId })
   await saveSession(session)
 
   // Tell content script to activate its observers
-  if (tabId) {
-    chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE' }).catch(() => {
-      // Content script not ready — it will check isRecording on next inject
-    })
-  }
+  if (tabId) await activateContentScript(tabId)
 
   return { ok: true, sessionId: session.sessionId }
 }
@@ -81,6 +78,7 @@ async function stopSession() {
 
   session.isRecording = false
   session.events.push({ timestamp: new Date().toISOString(), type: 'session_end', meta: {} })
+  console.log('[Colophon SW] session_stop', { eventCount: session.events.length })
   await saveSession(session)
 
   if (session.tabId) {
@@ -92,8 +90,12 @@ async function stopSession() {
 
 async function appendEvent(event) {
   const session = await getSession()
-  if (!session?.isRecording) return { ok: false }
+  if (!session?.isRecording) {
+    console.log('[Colophon SW] LOG_EVENT rejected', { type: event?.type ?? 'unknown', reason: 'not recording' })
+    return { ok: false }
+  }
   session.events.push(event)
+  console.log('[Colophon SW] LOG_EVENT stored', { type: event.type, meta: event.meta })
   await saveSession(session)
   return { ok: true }
 }
@@ -128,4 +130,28 @@ async function hashDocUrl(url) {
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
     .slice(0, 16)
+}
+
+async function activateContentScript(tabId) {
+  console.log('[Colophon SW] activate content script', { tabId })
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE' })
+    console.log('[Colophon SW] content script activated by message', { tabId })
+    return
+  } catch {
+    console.log('[Colophon SW] content script message failed; injecting', { tabId })
+    // Already-open Docs tabs may not have the content script after extension reload.
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content.js'],
+    })
+    console.log('[Colophon SW] content script injected', { tabId })
+    await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE' })
+    console.log('[Colophon SW] content script activated after inject', { tabId })
+  } catch (err) {
+    console.warn('[Colophon] Could not activate content script:', err.message)
+  }
 }
