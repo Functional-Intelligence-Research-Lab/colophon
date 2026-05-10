@@ -13,6 +13,10 @@
  *   2. SW logs session_end and tells the content script to DEACTIVATE
  */
 
+import { exportTwff } from '../lib/export.js'
+import { ProcessLog } from "../lib/process-log.js";
+
+
 const $ = id => document.getElementById(id)
 
 async function send(type, payload = {}) {
@@ -73,11 +77,11 @@ $('btn-toggle').addEventListener('click', async () => {
 
 $('btn-export').addEventListener('click', async () => {
   try {
-    const { log, error } = await send('EXPORT')
-    if (error) throw new Error(error)
-    downloadLog(log)
+    const result = await exportTwff()
+    showNotice(`Exported ${result.filename}`)
   } catch (err) {
     console.error('[Colophon] Export failed:', err.message)
+    showNotice('Export failed.')
   }
 })
 
@@ -105,21 +109,6 @@ function showNotice(msg) {
   el.textContent = msg
   document.querySelector('.actions').after(el)
   setTimeout(() => el.remove(), 3000)
-}
-
-function downloadLog(log) {
-  const json = JSON.stringify(log, null, 2)
-  const blob = new Blob([json], { type: 'application/json' })
-  const url  = URL.createObjectURL(blob)
-  const ts   = new Date().toISOString().slice(0, 16).replace('T', '-').replaceAll(':', '-')
-  const a    = Object.assign(document.createElement('a'), {
-    href:     url,
-    download: `colophon-${ts}.json`,
-  })
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
 }
 
 function formatDuration(ms) {

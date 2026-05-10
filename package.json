@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TWFF process-log recorder for Google Docs — Chrome extension",
+  "description": "Browser extension that records AI writing interactions as a TWFF process log.",
   "scripts": {
     "build": "node build.js",
     "watch": "node build.js --watch",
