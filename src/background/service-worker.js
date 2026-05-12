@@ -14,7 +14,7 @@
  */
 
 import { getSession, saveSession, clearSession, ensureUserId } from '../shared/storage.js'
-import { buildProcessLog } from '../shared/process-log.js'
+import { ProcessLog } from '../lib/process-log.js'
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -35,14 +35,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 async function handleMessage(msg, _sender) {
-  switch (msg.type) {
-    case 'SESSION_START': return startSession(msg.payload)
-    case 'SESSION_STOP':  return stopSession()
-    case 'LOG_EVENT':     return appendEvent(msg.payload)
-    case 'GET_STATE':     return getState()
-    case 'EXPORT':        return exportSession()
+  const route = msg.type || msg.action;
+
+  switch (route) {
+    case 'SESSION_START': 
+    case 'startSession':
+      return startSession(msg); // Pass the whole msg so we can grab msg.title
+      
+    case 'SESSION_STOP':  
+    case 'endSession':
+      return stopSession();
+      
+    case 'LOG_EVENT':     
+      return appendEvent(msg.payload);
+      
+    case 'GET_STATE':     
+    case 'getSession':
+      return getState();
+      
+    case 'EXPORT':        
+    case 'exportSession':
+      return exportSession();
+      
     default:
-      throw new Error(`Unknown message type: ${msg.type}`)
+      throw new Error(`Unknown message type/action: ${route}`);
   }
 }
 
@@ -53,6 +69,7 @@ async function startSession({ tabId, docUrl } = {}) {
 
   const docId = docUrl ? await hashDocUrl(docUrl) : ''
   const now   = new Date().toISOString()
+
 
   const session = {
     sessionId:   crypto.randomUUID(),
@@ -115,10 +132,21 @@ async function getState() {
 
 async function exportSession() {
   const session = await getSession()
-  if (!session) throw new Error('No session to export.')
+  if (!session) throw new Error('No active session to export.')
+  
   const userId = await ensureUserId()
-  const log    = await buildProcessLog(session, userId)
-  return { log }
+
+  const logger = new ProcessLog(userId);
+  
+  logger.sessionId = session.sessionId;
+  logger.title = session.title;
+  logger.startTime = session.startedAt;
+  logger.events = session.events; 
+
+  const exportData = await logger.export();
+  
+  // Return the {filename, base64}
+  return exportData; 
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
