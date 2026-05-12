@@ -12,7 +12,7 @@ export async function exportTwff() {
             if (response && response.error) {
                 return reject(new Error(response.error));
             }
-            resolve(response.filename);
+            resolve(response);
         });
     });
 }

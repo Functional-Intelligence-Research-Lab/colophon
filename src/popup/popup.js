@@ -78,6 +78,7 @@ $('btn-toggle').addEventListener('click', async () => {
 $('btn-export').addEventListener('click', async () => {
   try {
     const result = await exportTwff()
+    console.log(result)
     showNotice(`Exported ${result.filename}`)
   } catch (err) {
     console.error('[Colophon] Export failed:', err.message)
