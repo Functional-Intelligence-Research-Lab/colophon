@@ -58,6 +58,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
   if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
   if (msg.type === '__PING__')   sendResponse({ ok: true, active: _active })
+  if (msg.action === 'FETCH_DOC_EXPORT') {
+    console.log('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
+    forceFetchExport(msg.docId, msg.format)
+      .then(data => sendResponse(data))
+      .catch(err => sendResponse({ error: err.message }));
+    return true; // Tells Chrome we will send the response asynchronously
+  }
 })
 
 syncRecordingState()
@@ -350,4 +357,25 @@ function send(type, payload = {}) {
   chrome.runtime.sendMessage({ type, payload }).catch(() => {
     // SW may be inactive — Chrome will revive it on the next message
   })
+}
+
+// ── Export Fetcher (Bypasses Auth Blocks) ─────────────────────────────────────
+
+async function forceFetchExport(docId, format) {
+  const url = `https://docs.google.com/document/d/${docId}/export?format=${format}`;
+  const res = await fetch(url);
+  
+  if (!res.ok) {
+      throw new Error(`Google blocked Content Script fetch: ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+          const base64data = reader.result.split(',')[1]; 
+          resolve({ base64: base64data });
+      };
+      reader.readAsDataURL(blob);
+  });
 }

@@ -365,8 +365,8 @@ export class ProcessLog {
      * @returns {Promise<Blob>} A Blob representing the ZIP file.
      */
     async export() {
-        const endTime = this.endSession();
-        const processLogDict = this.toDict(endTime);
+        //const endTime = this.endSession();
+        const processLogDict = this.toDict();
         const xhtmlContent = await this.getXhtmlContentEpub()
         //const xhtmlContent = await this.getHtml()
         const metaData = await this.buildMetadata()
