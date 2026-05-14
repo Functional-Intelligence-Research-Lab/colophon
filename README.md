@@ -50,8 +50,8 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 | Milestone | Target date | Status | Output | Actual date |
 |---|---|---|---|---|
-| Sprint 1 complete | May 10 | [in progress] | Extension can produce a valid .twff export | |
-| Sprint 2 complete | May 24 | [ ] | Ollama ai_interaction recorded | |
+| Sprint 1 complete | May 10 | [X] | Extension can produce a valid .twff export | |
+| Sprint 2 complete | May 24 | [ in progress ] | Ollama ai_interaction recorded | |
 | Sprint 3 complete | Jun 7 | [ ] | Gemini detected; Drive save working | |
 | Internal beta | Jun 14 | [ ] | test, no critical bugs | |
 | Store submission | Jul 5 | [ ] | Passing Chrome review | |
