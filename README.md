@@ -21,10 +21,11 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 ### Sprint 2: {AI Path A} (May 11 – May 24)
 
-- Ollama integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
-- Side panel scaffold
-- `ai_interaction` event schema
-- SHA-256 hash chain for integrity verification
+- [ ] Ollama integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
+- [ ] Side panel scaffold
+- [ ] `ai_interaction` event schema
+- [ ] TWFF v0.2 schema and alignment with dpv
+- [ ] SHA-256 hash chain for integrity verification
 
 <!-- - [ ] Ollama API integration (`localhost:11434`; model selector populated from `/api/tags`) -->
 
