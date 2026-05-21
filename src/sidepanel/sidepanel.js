@@ -1,2 +1,4 @@
-// Side panel — Sprint 2 placeholder
-console.log('[Colophon] Side panel loaded.')
+import { mountColophonPanel } from '../panel/app.js'
+
+const host = document.getElementById('app').attachShadow({ mode: 'open' })
+mountColophonPanel(host, { mode: 'sidepanel' })

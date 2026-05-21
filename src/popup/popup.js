@@ -1,102 +1,154 @@
-/**
- * popup.js — toolbar popup logic
- *
- * Opens when the user clicks the Colophon icon.
- *
- * Start recording flow:
- *   1. Popup gets the active tab ID (activeTab permission, user-gesture context)
- *   2. Sends SESSION_START { tabId, docUrl } to the service worker
- *   3. SW creates session and tells the content script to ACTIVATE
- *
- * Stop recording flow:
- *   1. Popup sends SESSION_STOP to SW
- *   2. SW logs session_end and tells the content script to DEACTIVATE
- */
-
 import { exportTwff } from '../lib/export.js'
-import { ProcessLog } from "../lib/process-log.js";
-
 
 const $ = id => document.getElementById(id)
+
+const ACTIVITY_FALLBACK = [
+  { type: 'ai', title: 'AI suggested a rephrase', meta: ['2m ago', 'You dismissed'] },
+  { type: 'edit', title: 'You edited a paragraph', meta: ['2m ago'] },
+  { type: 'source', title: 'You added a source', meta: ['2m ago'] },
+  { type: 'ai', title: 'AI suggested an example', meta: ['2m ago', 'You dismissed'] },
+]
 
 async function send(type, payload = {}) {
   return chrome.runtime.sendMessage({ type, payload })
 }
 
-// ── State refresh ─────────────────────────────────────────────────────────────
-
 async function refresh() {
-  let state
+  const tab = await getActiveDocTab()
+  $('doc-title').textContent = formatDocTitle(tab?.title)
+
+  let state = null
   try {
     state = await send('GET_STATE')
   } catch {
-    return // SW not ready yet — will refresh on next tick
-  }
-  if (!state) return
-
-  const { session, stats } = state
-  const recording = session?.isRecording ?? false
-
-  $('status-dot').className     = `dot ${recording ? 'dot--active' : 'dot--stopped'}`
-  $('status-label').textContent = recording ? 'Recording' : 'Stopped'
-  $('btn-toggle').textContent   = recording ? 'Stop recording' : 'Start recording'
-
-  const statsEl = $('stats')
-  if (session) {
-    statsEl.hidden                  = false
-    $('stat-edits').textContent    = stats.editCount
-    $('stat-ai').textContent       = stats.aiCount
-    $('stat-duration').textContent = formatDuration(stats.elapsed)
-  } else {
-    statsEl.hidden = true
+    // The popup still renders the static dashboard if the worker is waking.
   }
 
-  // Export requires at least one event beyond session_start
+  const session = state?.session ?? null
+  renderScores(session)
+  renderActivity(session)
+
   const eventCount = session?.events?.length ?? 0
   $('btn-export').disabled = eventCount < 2
 }
 
-// ── Buttons ───────────────────────────────────────────────────────────────────
+function renderScores(session) {
+  const events = session?.events ?? []
+  const editCount = events.filter(event => event.type === 'edit').length
+  const aiCount = events.filter(event => event.type === 'ai_interaction').length
+  const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
+  const total = Math.max(1, editCount + aiCount + sourceCount)
 
-$('btn-toggle').addEventListener('click', async () => {
-  const state = await send('GET_STATE')
+  const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 80
+  const ai = session ? clampPercent(Math.round((aiCount / total) * 100)) : 80
+  const source = session ? clampPercent(Math.round((sourceCount / total) * 100)) : 80
 
-  if (state?.session?.isRecording) {
-    await send('SESSION_STOP')
-  } else {
-    const tab = await getActiveDocTab()
-    if (!tab) {
-      showNotice('Open a Google Docs document first.')
-      return
-    }
-    await send('SESSION_START', { tabId: tab.id, docUrl: tab.url })
+  setScore('own', own)
+  setScore('ai', ai)
+  setScore('source', source)
+}
+
+function setScore(id, value) {
+  $(`score-${id}`).textContent = `${value}%`
+  $(`bar-${id}`).style.width = `${Math.max(8, value)}%`
+}
+
+function clampPercent(value) {
+  return Math.min(100, Math.max(0, value))
+}
+
+function renderActivity(session) {
+  const items = activityFromSession(session)
+  $('activity-list').innerHTML = items.map(ActivityItem).join('')
+}
+
+function activityFromSession(session) {
+  const events = session?.events ?? []
+  const mapped = events
+    .filter(event => !['session_start', 'session_end', 'focus_change'].includes(event.type))
+    .slice(-4)
+    .reverse()
+    .map(eventToActivity)
+
+  return mapped.length ? mapped : ACTIVITY_FALLBACK
+}
+
+function eventToActivity(event) {
+  if (event.type === 'ai_interaction') {
+    return { type: 'ai', title: 'AI suggested an edit', meta: [relativeTime(event.timestamp)] }
   }
+  if (event.type === 'paste') {
+    return { type: 'source', title: 'You added a source', meta: [relativeTime(event.timestamp)] }
+  }
+  return { type: 'edit', title: 'You edited a paragraph', meta: [relativeTime(event.timestamp)] }
+}
 
-  await refresh()
+function ActivityItem(item) {
+  const meta = item.meta.map((part, index) => (
+    index === 0 ? `<span>${part}</span>` : `<span class="activity-dot">•</span><span>${part}</span>`
+  )).join('')
+
+  return `
+    <article class="activity-item">
+      <div class="activity-mark activity-mark--${item.type}">${activityIcon(item.type)}</div>
+      <div class="activity-copy">
+        <p class="activity-title">${item.title}</p>
+        <p class="activity-meta">${meta}</p>
+      </div>
+    </article>
+  `
+}
+
+function activityIcon(type) {
+  if (type === 'edit') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5 16.5 5a2.2 2.2 0 0 1 3.1 3.1L7.1 20.6 3.5 21l.5-3.5Z"/><path d="m14.5 7.1 2.4 2.4"/></svg>'
+  }
+  if (type === 'source') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M10.5 6.5 12 5a4 4 0 0 1 5.7 5.7l-2 2a4 4 0 0 1-5.7 0"/><path d="M13.5 17.5 12 19a4 4 0 0 1-5.7-5.7l2-2a4 4 0 0 1 5.7 0"/></svg>'
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2 5.5 5.5 2-5.5 2-2 5.5-2-5.5-5.5-2 5.5-2 2-5.5Z"/></svg>'
+}
+
+$('btn-settings').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage()
+})
+
+$('btn-full-log').addEventListener('click', async () => {
+  try {
+    const win = await chrome.windows.getCurrent()
+    await chrome.sidePanel.open({ windowId: win.id })
+    window.close()
+  } catch (err) {
+    console.error('[Colophon] Could not open side panel:', err.message)
+    showNotice('Side panel could not open.')
+  }
 })
 
 $('btn-export').addEventListener('click', async () => {
   try {
     const result = await exportTwff()
-    console.log(result)
-    showNotice(`Exported ${result.filename}`)
+    showNotice(`Exported ${result.filename}`, false)
   } catch (err) {
     console.error('[Colophon] Export failed:', err.message)
-    showNotice('Export failed.')
+    showNotice('Start recording before exporting.')
   }
 })
 
-$('link-settings').addEventListener('click', e => {
-  e.preventDefault()
-  chrome.runtime.openOptionsPage()
-})
+$('btn-floating').addEventListener('click', async () => {
+  const tab = await getActiveDocTab()
+  if (!tab) {
+    showNotice('Open a Google Docs document first.')
+    return
+  }
 
-$('link-status').addEventListener('click', e => {
-  e.preventDefault()
-  chrome.tabs.create({ url: chrome.runtime.getURL('status/status.html') })
+  try {
+    await sendToContent(tab.id, { type: 'TOGGLE_FLOATING_PANEL' })
+    window.close()
+  } catch (err) {
+    console.error('[Colophon] Could not toggle floating panel:', err.message)
+    showNotice('Reload the document and try again.')
+  }
 })
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function getActiveDocTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -104,21 +156,48 @@ async function getActiveDocTab() {
   return tab
 }
 
-function showNotice(msg) {
-  const el = document.createElement('p')
-  el.style.cssText = 'font-size:11px;color:#e53e3e;padding:0 14px 10px;margin:0'
-  el.textContent = msg
-  document.querySelector('.actions').after(el)
-  setTimeout(() => el.remove(), 3000)
+async function sendToContent(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message)
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content.js'],
+    })
+    return chrome.tabs.sendMessage(tabId, message)
+  }
 }
 
-function formatDuration(ms) {
-  if (!ms) return '0:00'
-  const s = Math.floor(ms / 1000)
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+function formatDocTitle(title = '') {
+  return title
+    .replace(/ - Google Docs$/i, '')
+    .trim() || 'Untitled document'
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+function relativeTime(timestamp) {
+  const then = new Date(timestamp).getTime()
+  if (!Number.isFinite(then)) return 'Just now'
+
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000))
+  if (seconds < 60) return 'Just now'
+
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
+}
+
+function showNotice(message, isError = true) {
+  const notice = $('notice')
+  notice.textContent = message
+  notice.style.color = isError ? '#b42318' : '#2f955c'
+  notice.hidden = false
+  clearTimeout(notice._timer)
+  notice._timer = setTimeout(() => {
+    notice.hidden = true
+  }, 2600)
+}
 
 refresh()
-setInterval(refresh, 1000)
+setInterval(refresh, 1200)
