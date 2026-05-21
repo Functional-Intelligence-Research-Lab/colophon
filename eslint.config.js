@@ -1,5 +1,8 @@
 export default [
   {
+    ignores: ['src/lib/jszip.js', 'src/lib/jszip.min.js'],
+  },
+  {
     files: ['src/**/*.js'],
     rules: {
       'no-unused-vars':    ['warn', { argsIgnorePattern: '^_' }],
