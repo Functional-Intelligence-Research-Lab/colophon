@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Popup preview</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body { display: flex; align-items: flex-start; justify-content: center; background: #f3f4f6; padding: 24px; }
+    iframe { width: 380px; height: 800px; border: 1px solid #d1d5db; border-radius: 12px; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
+  </style>
+</head>
+<body>
+  <iframe id="popup-frame"></iframe>
+
+  <script type="module">
+    // Fetch the real popup.html, inject the chrome.* mock as the FIRST script
+    // so popup.js sees a valid chrome object the moment it runs.
+    const POPUP_URL = '../../src/popup/popup.html'
+
+    const mock = `
+      const now = Date.now()
+      const session = {
+        sessionId: 'b0834568-8519-482a-a467-550975974938',
+        startedAt: new Date(now - 12 * 60 * 1000).toISOString(),
+        isRecording: true,
+        events: [
+          { timestamp: new Date(now - 12 * 60 * 1000).toISOString(), type: 'session_start',  meta: {} },
+          { timestamp: new Date(now - 7  * 60 * 1000).toISOString(), type: 'ai_interaction', meta: { interaction_type: 'paraphrase', model: 'qwen2.5:0.5b', output_length: 100, acceptance: 'rejected' } },
+          { timestamp: new Date(now - 5  * 60 * 1000).toISOString(), type: 'edit',           meta: { char_delta: 800, position_start: 0, position_end: 800, source: 'human' } },
+          { timestamp: new Date(now - 3  * 60 * 1000).toISOString(), type: 'paste',          meta: { char_count: 100, source: 'external', position_start: 800, position_end: 900 } },
+          { timestamp: new Date(now - 2  * 60 * 1000).toISOString(), type: 'ai_interaction', meta: { interaction_type: 'brainstorm', model: 'qwen2.5:0.5b', output_length: 0, acceptance: 'rejected' } },
+        ],
+      }
+      const stats = {
+        editCount: 1,
+        aiCount:   2,
+        elapsed:   now - new Date(session.startedAt).getTime(),
+      }
+      window.chrome = {
+        runtime: {
+          sendMessage: async (msg) => {
+            if (msg.type === 'GET_STATE') return { session, stats }
+            return {}
+          },
+          openOptionsPage: () => {},
+          getManifest:     () => ({ name: 'Colophon', version: '0.1.0', manifest_version: 3 }),
+          getURL:          (p) => p,
+          id:              'demo-id',
+        },
+        tabs: {
+          query:  async () => [{ id: 1, url: 'https://docs.google.com/document/d/abc/edit', title: 'Untitled document - Google Docs', windowId: 1 }],
+          create: () => {},
+        },
+        sidePanel: { open: () => {} },
+      }
+    `
+
+    async function loadPopup() {
+      const html = await fetch(POPUP_URL).then(r => r.text())
+      // Inject mock as the first <script> right after <head>
+      const patched = html.replace(
+        /<head([^>]*)>/i,
+        `<head$1><script>${mock}</script><base href="../../src/popup/">`,
+      )
+      const frame = document.getElementById('popup-frame')
+      frame.srcdoc = patched
+    }
+
+    loadPopup()
+  </script>
+</body>
+</html>

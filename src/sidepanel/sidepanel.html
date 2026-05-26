@@ -2,21 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Colophon — AI Panel</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 13px;
-      padding: 24px 16px;
-      color: #6b7280;
-      text-align: center;
-    }
-    h2 { font-size: 15px; color: #111; margin-bottom: 8px; }
-  </style>
+  <title>Colophon — Full Log</title>
+  <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
-  <h2>AI Panel</h2>
-  <p>Ollama integration arrives in Sprint 2.</p>
-  <script src="sidepanel.js"></script>
+  <header class="sp-header">
+    <h1>Activity log</h1>
+    <span id="session-id" class="sp-session"></span>
+  </header>
+
+  <section class="sp-summary" id="summary" hidden>
+    <span class="chip" id="chip-recording">Stopped</span>
+    <span class="chip chip--muted" id="chip-count">0 events</span>
+    <span class="chip chip--muted" id="chip-duration">0:00</span>
+  </section>
+
+  <ul class="sp-timeline" id="timeline">
+    <li class="sp-empty" id="empty">No session yet. Open the popup and click <strong>Start recording</strong>.</li>
+  </ul>
+
+  <footer class="sp-footer">
+    <span>Private and local</span>
+    <a href="https://github.com/Functional-Intelligence-Research-Lab/twff" target="_blank" rel="noopener">TWFF ↗</a>
+  </footer>
+
+  <script type="module" src="sidepanel.js"></script>
 </body>
 </html>
