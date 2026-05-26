@@ -1,5 +1,9 @@
 export default [
   {
+    // Skip vendored third-party libraries (e.g. JSZip)
+    ignores: ['src/lib/jszip.js', 'src/lib/jszip.min.js', 'node_modules/**', 'dist/**'],
+  },
+  {
     files: ['src/**/*.js'],
     rules: {
       'no-unused-vars':    ['warn', { argsIgnorePattern: '^_' }],
