@@ -8,20 +8,20 @@
   "host_permissions": ["https://docs.google.com/*"],
 
   "background": {
-    "service_worker": "src/background/service-worker.js",
+    "service_worker": "background/service-worker.js",
     "type" : "module"
   },
 
   "content_scripts": [
     {
       "matches": ["https://docs.google.com/document/*"],
-      "js": ["src/content/content.js"],
+      "js": ["content/content.js"],
       "run_at": "document_idle"
     }
   ],
 
   "action": {
-    "default_popup": "src/popup/popup.html",
+    "default_popup": "popup/popup.html",
     "default_title": "Colophon"
   },
 
