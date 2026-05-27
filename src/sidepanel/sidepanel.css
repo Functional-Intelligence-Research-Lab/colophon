@@ -1,0 +1,560 @@
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f9;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6b70;
+  --border-color: #e5e5e5;
+
+  --ai-color: #5c3ce6;
+  --ai-bg: #f2effc;
+
+  --user-color: #2b8a5d;
+  --user-bg: #e8f4ec;
+
+  --diff-red: #e04a4a;
+  --diff-green: #2b8a5d;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    "Atkinson Hyperlegible",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Top Navigation ─────────────── */
+.top-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--bg-primary);
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand .logo {
+  width: 24px;
+  height: 24px;
+  color: #000;
+}
+
+.brand h1 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.nav-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ─── Scrollable Main Content ─────────────── */
+.scroll-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 0 20px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* ──── Project Context Header ─────────────── */
+.project-context {
+  margin-top: 8px;
+}
+
+.context-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.context-header svg {
+  width: 16px;
+  height: 16px;
+}
+
+.context-card {
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 16px;
+  position: relative;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+}
+
+.context-card h3 {
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  padding-right: 24px;
+}
+
+.context-card p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.context-card .chevron {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+}
+
+/* ──── Timeline Architecture ───────────────*/
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  position: relative;
+  padding-left: 36px;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background-color: var(--border-color);
+  z-index: 1;
+}
+
+.timeline-event {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+/* ───── Timeline Nodes ───────────────*/
+.node {
+  position: absolute;
+  left: -36px;
+  top: -2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background-color: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 4px var(--bg-primary);
+}
+
+.node svg {
+  width: 14px;
+  height: 14px;
+}
+
+.timeline-event.ai .node {
+  color: var(--ai-color);
+}
+.timeline-event.user .node {
+  color: var(--user-color);
+}
+
+.node.solid {
+  background-color: var(--user-color);
+  color: white;
+}
+.node.solid svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ──── Event Log Formatting ───────────────*/
+.event-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.author {
+  font-family: monospace;
+  font-size: 0.75rem;
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+.timeline-event.ai .author {
+  color: var(--ai-color);
+  border-color: #d8cff8;
+  background: var(--ai-bg);
+}
+.timeline-event.user .author {
+  color: var(--user-color);
+  border-color: #c3e2d1;
+  background: var(--user-bg);
+}
+.timeline-event.user-action .author {
+  color: var(--user-color);
+  border-color: #c3e2d1;
+  background: var(--user-bg);
+}
+
+.time {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.text-only {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+  padding-left: 16px;
+}
+
+/* ──── Card Style ───────────────*/
+.card {
+  border: none;
+  border-left: 3px solid var(--border-color); 
+  border-radius: 0;
+  padding: 8px 0 8px 16px;
+  margin-top: 4px;
+  background-color: transparent;
+}
+
+.suggestion-card {
+  border-left-color: var(--ai-color);
+}
+
+.suggestion-card p {
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.actions button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-use {
+  background-color: var(--ai-bg);
+  color: var(--ai-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d8cff8;
+}
+
+.btn-use:hover {
+  background-color: #e5defa;
+}
+
+.btn-use svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-dismiss {
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color) !important;
+}
+
+.btn-dismiss:hover {
+  background-color: var(--bg-secondary);
+}
+
+.diff-card {
+  border-left-color: var(--ai-color);
+}
+
+.diff-block {
+  display: flex;
+  gap: 12px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  /*font-family: monospace; /* Monospace for code/diff feeling */
+}
+
+.diff-block .indicator {
+  width: 2px;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+.diff-block.removed .indicator {
+  background-color: var(--diff-red);
+}
+.diff-block.added .indicator {
+  background-color: var(--diff-green);
+}
+
+.diff-arrow {
+  color: #b0b0b0;
+  display: flex;
+  justify-content: flex-start;
+  margin: 6px 0 6px 14px;
+}
+.diff-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.link {
+  color: var(--ai-color);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.card-footer .small svg {
+  width: 16px;
+  height: 16px;
+}
+
+.source-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background-color: transparent;
+  border-left: 3px solid var(--border-color);
+  padding: 8px 0 8px 16px;
+  position: relative;
+  cursor: pointer;
+}
+
+.source-icon {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+.source-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.source-info h4 {
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+  color: var(--text-primary);
+}
+.source-info p {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.image-card {
+  margin-top: 4px;
+  padding-left: 16px;
+  border-left: 3px solid var(--user-color);
+}
+.img-placeholder {
+  background-color: #e5e5e5;
+  border-radius: 4px;
+  height: 120px;
+  width: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  border: 1px dashed #b0b0b0;
+}
+
+.ellipsis {
+  color: var(--text-secondary);
+  font-weight: bold;
+  letter-spacing: 2px;
+  margin-top: 4px;
+  padding-left: 16px;
+}
+
+.mb-2 {
+  margin-bottom: 8px;
+  padding-left: 16px;
+}
+
+/*── Bottom Command Bar ───────────────*/
+.input-container {
+  padding: 16px 20px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+}
+
+.input-box {
+  display: flex;
+  align-items: center;
+  border: none;
+  border-bottom: 2px solid var(--border-color);
+  border-radius: 0;
+  padding: 4px 0 8px 0;
+  transition: border-color 0.2s;
+}
+
+.input-box:focus-within {
+  border-bottom-color: var(--text-primary);
+}
+
+.input-box input {
+  flex-grow: 1;
+  border: none;
+  outline: none;
+  font-size: 0.85rem;
+  font-family: monospace; 
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.input-box input::placeholder {
+  color: #a0a0a0;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+}
+
+.send-btn {
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px; 
+  width: auto;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 0.7rem;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.send-btn:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.send-btn svg {
+  display: none; 
+}
+
+.send-btn::after {
+  content: "SEND"; 
+}
+
+/* ───── Footer ─────────────── */
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px 20px 20px;
+  background: var(--bg-primary);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  /* font-family: monospace;  */
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status .dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--user-color);
+  border-radius: 50%;
+}
+
+.app-footer .status .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  transition: all 0.3s ease;
+}
+
+.app-footer .status .dot.connected {
+  background-color: #4CAF50; 
+  box-shadow: 0 0 5px rgba(76, 175, 80, 0.5);
+}
+
+.app-footer .status .dot.disconnected {
+  background-color: var(--text-secondary, #888);
+}
