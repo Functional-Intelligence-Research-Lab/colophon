@@ -100,7 +100,7 @@ $("link-status").addEventListener("click", (e) => {
 
 // ────── sidepanel ───────────────
 document.addEventListener("DOMContentLoaded", () => {
-  const openTimelineBtn = document.getElementById("open-timeline-btn");
+  const openTimelineBtn = document.getElementById("btn-view-log");
 
   openTimelineBtn.addEventListener("click", async () => {
     try {
