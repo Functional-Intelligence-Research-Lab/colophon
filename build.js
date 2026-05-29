@@ -43,6 +43,7 @@ async function build() {
   await copyFile('src/status/status.html',     'dist/status/status.html')
   await copyFile('src/status/status.css',      'dist/status/status.css')
   await copyFile('src/sidepanel/sidepanel.html', 'dist/sidepanel/sidepanel.html')
+  await copyFile('src/sidepanel/sidepanel.css', 'dist/sidepanel/sidepanel.css')
 
   if (await exists('icons')) {
     await cp('icons', 'dist/icons', { recursive: true })

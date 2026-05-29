@@ -401,7 +401,7 @@ const TimelineRenderer = {
 
           } catch (msgErr) {
             // Auto-paste failed! Fall back, but STILL log the interaction
-            console.warn("Auto-paste failed or blocked. Falling back to manual paste.");
+            console.warn("Auto-paste failed or blocked. Falling back to manual paste.", msgErr);
             useBtn.innerHTML = "Copied! Press Ctrl+V";
             useBtn.style.backgroundColor = "var(--text-secondary)";
             useBtn.style.color = "white";
