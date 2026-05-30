@@ -26,8 +26,8 @@
   },
 
   "side_panel": {
-    "default_path": "src/sidepanel/sidepanel.html"
+    "default_path": "sidepanel/sidepanel.html"
   },
 
-  "options_page": "src/options/options.html"
+  "options_page": "options/options.html"
 }
