@@ -4,12 +4,19 @@
   "version": "0.1.0",
   "description": "Records AI writing interactions as a TWFF-compatible process log in Google Docs.",
 
-  "permissions": ["activeTab", "storage", "scripting", "downloads", "sidePanel"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "downloads",
+    "sidePanel",
+    "clipboardWrite"
+  ],
   "host_permissions": ["https://docs.google.com/*"],
 
   "background": {
     "service_worker": "background/service-worker.js",
-    "type" : "module"
+    "type": "module"
   },
 
   "content_scripts": [

@@ -13,50 +13,64 @@
  * SW → content:  ACTIVATE / DEACTIVATE (via chrome.tabs.sendMessage)
  */
 
-import { getSession, saveSession, clearSession, ensureUserId } from '../shared/storage.js'
-import { ProcessLog } from '../lib/process-log.js'
+import {
+  getSession,
+  saveSession,
+  clearSession,
+  ensureUserId,
+} from "../shared/storage.js";
+import { ProcessLog } from "../lib/process-log.js";
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[Colophon] Installed.')
-})
+  console.log("[Colophon] Installed.");
+});
 
 // ── Message routing ───────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message, sender)
     .then(sendResponse)
-    .catch(err => {
-      console.error('[Colophon]', err.message)
-      sendResponse({ error: err.message })
-    })
-  return true // keep port open for async response
-})
+    .catch((err) => {
+      console.error("[Colophon]", err.message);
+      sendResponse({ error: err.message });
+    });
+  return true; // keep port open for async response
+});
 
 async function handleMessage(msg, _sender) {
   const route = msg.type || msg.action;
 
   switch (route) {
-    case 'SESSION_START': 
-    case 'startSession':
+    case "SESSION_START":
+    case "startSession":
       return startSession(msg); // Pass the whole msg so we can grab msg.title
-      
-    case 'SESSION_STOP':  
-    case 'endSession':
+
+    case "SESSION_STOP":
+    case "endSession":
       return stopSession();
-      
-    case 'LOG_EVENT':     
+
+    case "LOG_EVENT":
       return appendEvent(msg.payload);
-      
-    case 'GET_STATE':     
-    case 'getSession':
+
+    case "GET_STATE":
+    case "getSession":
       return getState();
-      
-    case 'EXPORT':        
-    case 'exportSession':
+
+    case "EXPORT":
+    case "exportSession":
       return exportSession();
-      
+
+    case 'UPDATE_METADATA':
+      return updateMetadata(msg.payload);
+
+    case 'UPDATE_EVENT_STATE': 
+      return updateEventState(msg.payload);
+
+    case 'SYNC_TIMELINE':
+      return { ok: true, ignored: true };
+
     default:
       throw new Error(`Unknown message type/action: ${route}`);
   }
@@ -65,121 +79,192 @@ async function handleMessage(msg, _sender) {
 // ── Session management ────────────────────────────────────────────────────────
 
 async function startSession({ tabId, docUrl } = {}) {
-  await clearSession()
+  await clearSession();
 
-  const docId = docUrl ? await hashDocUrl(docUrl) : ''
-  const now   = new Date().toISOString()
-
+  const docId = docUrl ? await hashDocUrl(docUrl) : "";
+  const now = new Date().toISOString();
 
   const session = {
-    sessionId:   crypto.randomUUID(),
-    startedAt:   now,
-    tabId:       tabId ?? null,
+    sessionId: crypto.randomUUID(),
+    startedAt: now,
+    tabId: tabId ?? null,
     docId,
     isRecording: true,
-    events:      [],
-  }
-  session.events.push({ timestamp: now, type: 'session_start', meta: {} })
-  console.log('[Colophon SW] session_start', { tabId: tabId ?? null, docId })
-  await saveSession(session)
+    events: [],
+    metadata: {
+      assignment_prompt: ""
+    }
+  };
+  session.events.push({ timestamp: now, type: "session_start", meta: {} });
+  console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+  await saveSession(session);
 
   // Tell content script to activate its observers
-  if (tabId) await activateContentScript(tabId)
+  if (tabId) await activateContentScript(tabId);
 
-  return { ok: true, sessionId: session.sessionId }
+  return { ok: true, sessionId: session.sessionId };
 }
 
 async function stopSession() {
-  const session = await getSession()
-  if (!session) return { ok: false, reason: 'no session' }
+  const session = await getSession();
+  if (!session) return { ok: false, reason: "no session" };
 
-  session.isRecording = false
-  session.events.push({ timestamp: new Date().toISOString(), type: 'session_end', meta: {} })
-  console.log('[Colophon SW] session_stop', { eventCount: session.events.length })
-  await saveSession(session)
+  session.isRecording = false;
+  session.events.push({
+    timestamp: new Date().toISOString(),
+    type: "session_end",
+    meta: {},
+  });
+  console.log("[Colophon SW] session_stop", {
+    eventCount: session.events.length,
+  });
+  await saveSession(session);
 
   if (session.tabId) {
-    chrome.tabs.sendMessage(session.tabId, { type: 'DEACTIVATE' }).catch(() => {})
+    chrome.tabs
+      .sendMessage(session.tabId, { type: "DEACTIVATE" })
+      .catch(() => {});
   }
 
-  return { ok: true }
+  return { ok: true };
 }
 
 async function appendEvent(event) {
-  const session = await getSession()
+  const session = await getSession();
   if (!session?.isRecording) {
-    console.log('[Colophon SW] LOG_EVENT rejected', { type: event?.type ?? 'unknown', reason: 'not recording' })
-    return { ok: false }
+    console.log("[Colophon SW] LOG_EVENT rejected", {
+      type: event?.type ?? "unknown",
+      reason: "not recording",
+    });
+    return { ok: false };
   }
-  session.events.push(event)
-  console.log('[Colophon SW] LOG_EVENT stored', { type: event.type, meta: event.meta })
-  await saveSession(session)
-  return { ok: true }
+  session.events.push(event);
+  console.log("[Colophon SW] LOG_EVENT stored", {
+    type: event.type,
+    meta: event.meta,
+  });
+  await saveSession(session);
+
+  // Broadcast to Side Panel whenever an event is logged
+  chrome.runtime.sendMessage({ 
+    action: 'SYNC_TIMELINE', 
+    events: session.events 
+  }).catch(() => {});
+
+  return { ok: true };
 }
 
 async function getState() {
-  const session = await getSession()
-  if (!session) return { session: null, stats: null }
+  const session = await getSession();
+  if (!session) return { session: null, stats: null };
 
-  const editCount = session.events.filter(e => e.type === 'edit').length
-  const aiCount   = session.events.filter(e => e.type === 'ai_interaction').length
-  const elapsed   = session.isRecording
+  const editCount = session.events.filter((e) => e.type === "edit").length;
+  const aiCount = session.events.filter(
+    (e) => e.type === "ai_interaction",
+  ).length;
+  const elapsed = session.isRecording
     ? Date.now() - new Date(session.startedAt).getTime()
-    : 0
+    : 0;
 
-  return { session, stats: { editCount, aiCount, elapsed } }
+  return { session, stats: { editCount, aiCount, elapsed } };
 }
 
 async function exportSession() {
-  const session = await getSession()
-  if (!session) throw new Error('No active session to export.')
-  
-  const userId = await ensureUserId()
+  const session = await getSession();
+  if (!session) throw new Error("No active session to export.");
+
+  const userId = await ensureUserId();
 
   const logger = new ProcessLog(userId);
-  
+
   logger.sessionId = session.sessionId;
   logger.title = session.title;
   logger.startTime = session.startedAt;
-  logger.events = session.events; 
+  logger.events = session.events;
 
   const exportData = await logger.export();
-  
+
   // Return the {filename, base64}
-  return exportData; 
+  return exportData;
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
 async function hashDocUrl(url) {
-  const path = new URL(url).pathname
-  const buf  = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path))
+  const path = new URL(url).pathname;
+  const buf = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(path),
+  );
   return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 16);
 }
 
 async function activateContentScript(tabId) {
-  console.log('[Colophon SW] activate content script', { tabId })
+  console.log("[Colophon SW] activate content script", { tabId });
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE' })
-    console.log('[Colophon SW] content script activated by message', { tabId })
-    return
+    await chrome.tabs.sendMessage(tabId, { type: "ACTIVATE" });
+    console.log("[Colophon SW] content script activated by message", { tabId });
+    return;
   } catch {
-    console.log('[Colophon SW] content script message failed; injecting', { tabId })
+    console.log("[Colophon SW] content script message failed; injecting", {
+      tabId,
+    });
     // Already-open Docs tabs may not have the content script after extension reload.
   }
 
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content/content.js'],
-    })
-    console.log('[Colophon SW] content script injected', { tabId })
-    await chrome.tabs.sendMessage(tabId, { type: 'ACTIVATE' })
-    console.log('[Colophon SW] content script activated after inject', { tabId })
+      files: ["content/content.js"],
+    });
+    console.log("[Colophon SW] content script injected", { tabId });
+    await chrome.tabs.sendMessage(tabId, { type: "ACTIVATE" });
+    console.log("[Colophon SW] content script activated after inject", {
+      tabId,
+    });
   } catch (err) {
-    console.warn('[Colophon] Could not activate content script:', err.message)
+    console.warn("[Colophon] Could not activate content script:", err.message);
   }
+}
+
+// Helper function to update the session state for metadata.assignment_prompt
+
+async function updateMetadata({ key, value }) {
+  const session = await getSession()
+  if (typeof session === 'undefined' || !session) {
+    console.error("[Colophon BG] Cannot update metadata: Session not active.");
+    return { status: 'error', message: 'Session not active' };
+  }
+
+  if (!session.metadata) {
+    session.metadata = {};
+  }
+
+  session.metadata[key] = value;
+  console.log(`[Colophon BG] Metadata updated: ${key} =`, value);
+  
+  await saveSession(session);
+
+  return { status: 'success' };
+}
+
+async function updateEventState({ eventTimestamp, status }) {
+  const session = await getSession();
+  if (!session) return { status: 'error' };
+
+  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  if (event) {
+    if (!event.meta) event.meta = {};
+    event.meta.status = status;
+    await saveSession(session);
+    
+    chrome.runtime.sendMessage({ 
+      action: 'SYNC_TIMELINE', 
+      events: session.events 
+    }).catch(() => {});
+  }
+  return { status: 'success' };
 }
