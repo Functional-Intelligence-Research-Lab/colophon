@@ -1,3 +1,5 @@
+import { mountColophonPanel } from '../panel/app.js'
+
 /**
  * content.js — Colophon content script
  *
@@ -44,6 +46,8 @@ let _blurredAt  = null
 let _lastPasteAt = 0
 let _pendingPaste = null
 let _listenerTargets = []
+let _floatingPanel = null
+let _floatingPinned = false
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -57,6 +61,10 @@ console.log('[Colophon Content] injected', {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
   if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
+  if (msg.type === 'TOGGLE_FLOATING_PANEL') {
+    toggleFloatingPanel()
+    sendResponse({ ok: true, open: !!_floatingPanel })
+  }
   if (msg.type === '__PING__')   sendResponse({ ok: true, active: _active })
   if (msg.action === 'FETCH_DOC_EXPORT') {
     console.log('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
@@ -378,4 +386,102 @@ async function forceFetchExport(docId, format) {
       };
       reader.readAsDataURL(blob);
   });
+}
+
+// ── Floating in-page panel ────────────────────────────────────────────────────
+
+function toggleFloatingPanel() {
+  if (_floatingPanel) {
+    destroyFloatingPanel()
+    return
+  }
+  createFloatingPanel()
+}
+
+function createFloatingPanel() {
+  const host = document.createElement('div')
+  host.id = 'colophon-floating-panel'
+  host.style.position = 'fixed'
+  host.style.top = '72px'
+  host.style.right = '24px'
+  host.style.zIndex = '2147483647'
+  host.style.width = 'min(360px, calc(100vw - 28px))'
+  host.style.height = 'min(720px, calc(100vh - 28px))'
+
+  const shadow = host.attachShadow({ mode: 'open' })
+  const shell = document.createElement('div')
+  shell.className = 'floating-shell'
+  shell.style.position = 'static'
+  shadow.append(shell)
+
+  document.documentElement.append(host)
+
+  const panel = mountColophonPanel(shell, {
+    mode: 'floating',
+    onClose: destroyFloatingPanel,
+    onPin: toggleFloatingPin,
+  })
+
+  _floatingPanel = { host, shadow, panel }
+  attachFloatingDrag()
+}
+
+function destroyFloatingPanel() {
+  if (!_floatingPanel) return
+  _floatingPanel.panel.destroy()
+  _floatingPanel.host.remove()
+  _floatingPanel = null
+  _floatingPinned = false
+}
+
+function toggleFloatingPin() {
+  if (!_floatingPanel) return
+  _floatingPinned = !_floatingPinned
+  _floatingPanel.host.style.boxShadow = _floatingPinned
+    ? '0 0 0 2px rgba(93, 63, 211, 0.28)'
+    : ''
+  _floatingPanel.host.dataset.pinned = String(_floatingPinned)
+}
+
+function attachFloatingDrag() {
+  const panel = _floatingPanel
+  if (!panel) return
+
+  let drag = null
+
+  panel.shadow.addEventListener('pointerdown', event => {
+    if (_floatingPinned) return
+    const handle = event.target.closest?.('[data-role="drag-handle"]')
+    if (!handle) return
+
+    const rect = panel.host.getBoundingClientRect()
+    panel.host.style.left = `${rect.left}px`
+    panel.host.style.top = `${rect.top}px`
+    panel.host.style.right = 'auto'
+
+    drag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    }
+    handle.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  })
+
+  panel.shadow.addEventListener('pointermove', event => {
+    if (!drag || event.pointerId !== drag.pointerId) return
+
+    const width = panel.host.offsetWidth
+    const height = panel.host.offsetHeight
+    const nextLeft = Math.min(Math.max(8, event.clientX - drag.offsetX), window.innerWidth - width - 8)
+    const nextTop = Math.min(Math.max(8, event.clientY - drag.offsetY), window.innerHeight - height - 8)
+
+    panel.host.style.left = `${nextLeft}px`
+    panel.host.style.top = `${nextTop}px`
+  })
+
+  panel.shadow.addEventListener('pointerup', event => {
+    if (!drag || event.pointerId !== drag.pointerId) return
+    drag = null
+  })
 }

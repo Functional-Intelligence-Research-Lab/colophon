@@ -17,7 +17,7 @@ export async function createSession(title) {
   const session = {
     session_id: generateId(),
     user_id: generateUserId(),
-    //title: title || "Untitled session",
+    title: title || "Untitled session",
     created: now(),
     ended: null,
     events: []

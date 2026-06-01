@@ -21,6 +21,13 @@ import { exportTwff } from '../lib/export.js'
 
 const $ = id => document.getElementById(id)
 
+const ACTIVITY_FALLBACK = [
+  { type: 'ai', title: 'AI suggested a rephrase', meta: ['2m ago', 'You dismissed'] },
+  { type: 'edit', title: 'You edited a paragraph', meta: ['2m ago'] },
+  { type: 'source', title: 'You added a source', meta: ['2m ago'] },
+  { type: 'ai', title: 'AI suggested an example', meta: ['2m ago', 'You dismissed'] },
+]
+
 const TWFF_REPO = 'https://github.com/Functional-Intelligence-Research-Lab/twff'
 
 // Keep popup data live while open
@@ -48,246 +55,142 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 window.addEventListener('unload', () => clearInterval(_refreshTimer))
 
-// ── State refresh ─────────────────────────────────────────────────────────────
-
 async function refresh() {
-  let state
+  const tab = await getActiveDocTab()
+  $('doc-title').textContent = formatDocTitle(tab?.title)
+
+  let state = null
   try {
     state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
   } catch {
-    return showNotice('Service worker not reachable. Reload the extension.')
-  }
-  if (!state) return
-
-  const session   = state.session ?? null
-  const events    = session?.events ?? []
-  const recording = session?.isRecording ?? false
-
-  renderToggle(recording, !!session)
-  renderVerdict(events, recording)
-  renderBreakdown(events)
-  renderTimeline(events)
-
-  // Export needs at least one event past session_start
-  $('btn-export').disabled = events.length < 2
-}
-
-// ── Toggle button ─────────────────────────────────────────────────────────────
-
-function renderToggle(recording, hasSession) {
-  const btn = $('btn-toggle')
-  if (recording) {
-    btn.textContent = 'Stop recording'
-    btn.classList.remove('btn--primary'); btn.classList.add('btn--secondary')
-  } else {
-    btn.textContent = hasSession ? 'Start a new session' : 'Start recording'
-    btn.classList.add('btn--primary'); btn.classList.remove('btn--secondary')
-  }
-}
-
-async function onToggleClick() {
-  const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' }).catch(() => null)
-  if (state?.session?.isRecording) {
-    await chrome.runtime.sendMessage({ type: 'SESSION_STOP' })
-  } else {
-    const tab = await getActiveDocTab()
-    if (!tab) return showNotice('Open a Google Docs document first.')
-    await chrome.runtime.sendMessage({ type: 'SESSION_START', payload: { tabId: tab.id, docUrl: tab.url } })
-  }
-  await refresh()
-}
-
-// ── Verdict banner ────────────────────────────────────────────────────────────
-
-function renderVerdict(events, recording) {
-  const banner    = $('verdict')
-  const labelEl   = $('verdict-label')
-  const subEl     = $('verdict-subtitle')
-
-  const { ai, source } = computeRatios(events)
-
-  let tone = 'good', label = 'mostly original', subtitle = 'AI is used lightly for editing'
-
-  if (events.length <= 1) {
-    tone     = 'good'
-    label    = recording ? 'recording' : 'not yet started'
-    subtitle = recording ? 'Activity will appear here as you write.' : 'Press Start to begin a session.'
-  } else if (ai > 0.5 || (ai + source) > 0.7) {
-    tone     = 'bad'
-    label    = 'heavily AI-assisted'
-    subtitle = `${Math.round(ai * 100)}% of changes came from AI`
-  } else if (ai > 0.25 || source > 0.3) {
-    tone     = 'warn'
-    label    = 'mixed authorship'
-    subtitle = 'A meaningful portion came from AI or external sources'
-  } else {
-    tone     = 'good'
-    label    = 'mostly original'
-    subtitle = ai > 0 ? 'AI is used lightly for editing' : 'No AI assistance recorded'
+    // The popup still renders the static dashboard if the worker is waking.
   }
 
-  banner.classList.remove('verdict--good', 'verdict--warn', 'verdict--bad')
-  banner.classList.add(`verdict--${tone}`)
-  labelEl.textContent = label
-  subEl.textContent   = subtitle
+  const session = state?.session ?? null
+  renderScores(session)
+  renderActivity(session)
+
+  const eventCount = session?.events?.length ?? 0
+  $('btn-export').disabled = eventCount < 2
 }
 
-// ── Breakdown bars ────────────────────────────────────────────────────────────
+function renderScores(session) {
+  const events = session?.events ?? []
+  const editCount = events.filter(event => event.type === 'edit').length
+  const aiCount = events.filter(event => event.type === 'ai_interaction').length
+  const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
+  const total = Math.max(1, editCount + aiCount + sourceCount)
 
-function renderBreakdown(events) {
-  const { own, ai, source } = computeRatios(events)
-  setBar('own',    own)
-  setBar('ai',     ai)
-  setBar('source', source)
+  const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 80
+  const ai = session ? clampPercent(Math.round((aiCount / total) * 100)) : 80
+  const source = session ? clampPercent(Math.round((sourceCount / total) * 100)) : 80
+
+  setScore('own', own)
+  setScore('ai', ai)
+  setScore('source', source)
 }
 
-function setBar(key, ratio) {
-  const pct = Math.round(ratio * 100)
-  $(`bar-${key}`).style.width   = `${pct}%`
-  $(`pct-${key}`).textContent   = `${pct}%`
+function setScore(id, value) {
+  $(`score-${id}`).textContent = `${value}%`
+  $(`bar-${id}`).style.width = `${Math.max(8, value)}%`
 }
 
-function computeRatios(events) {
-  let ownChars = 0, aiChars = 0, sourceChars = 0
-  for (const e of events) {
-    const m = e.meta || {}
-    if (e.type === 'edit')           ownChars    += Math.abs(m.char_delta ?? 0)
-    else if (e.type === 'paste')     sourceChars += m.char_count ?? 0
-    else if (e.type === 'ai_interaction') aiChars += m.output_length ?? 0
-  }
-  const total = ownChars + aiChars + sourceChars
-  if (total === 0) return { own: 0, ai: 0, source: 0 }
-  return {
-    own:    ownChars    / total,
-    ai:     aiChars     / total,
-    source: sourceChars / total,
-  }
+function clampPercent(value) {
+  return Math.min(100, Math.max(0, value))
 }
 
-// ── Recent activity timeline ──────────────────────────────────────────────────
+function renderActivity(session) {
+  const items = activityFromSession(session)
+  $('activity-list').innerHTML = items.map(ActivityItem).join('')
+}
 
-function renderTimeline(events) {
-  const list  = $('timeline')
-  const empty = $('timeline-empty')
-
-  // Show 3 most recent events that are not session_start / session_end
-  const visible = events
-    .filter(e => e.type !== 'session_start' && e.type !== 'session_end')
-    .slice(-3)
+function activityFromSession(session) {
+  const events = session?.events ?? []
+  const mapped = events
+    .filter(event => !['session_start', 'session_end', 'focus_change'].includes(event.type))
+    .slice(-4)
     .reverse()
+    .map(eventToActivity)
 
-  if (visible.length === 0) {
-    empty.hidden = false
-    list.querySelectorAll('.timeline__item').forEach(n => n.remove())
-    return
-  }
-  empty.hidden = true
-
-  list.querySelectorAll('.timeline__item').forEach(n => n.remove())
-  for (const event of visible) list.appendChild(renderTimelineItem(event))
+  return mapped.length ? mapped : ACTIVITY_FALLBACK
 }
 
-function renderTimelineItem(event) {
-  const li = document.createElement('li')
-  li.className = 'timeline__item'
-
-  const meta = event.meta || {}
-  const ago  = formatAgo(event.timestamp)
-  let iconKind, iconSvg, label, statusText = ''
-
-  switch (event.type) {
-    case 'ai_interaction':
-      iconKind   = 'ai'
-      iconSvg    = sparkleSvg()
-      label      = labelForAi(meta)
-      statusText = labelForAcceptance(meta.acceptance)
-      break
-    case 'paste':
-      iconKind   = 'source'
-      iconSvg    = linkSvg()
-      label      = 'You added a source'
-      break
-    case 'edit':
-    default:
-      iconKind   = 'edit'
-      iconSvg    = pencilSvg()
-      label      = 'You edited a paragraph'
-      break
+function eventToActivity(event) {
+  if (event.type === 'ai_interaction') {
+    return { type: 'ai', title: 'AI suggested an edit', meta: [relativeTime(event.timestamp)] }
   }
+  if (event.type === 'paste') {
+    return { type: 'source', title: 'You added a source', meta: [relativeTime(event.timestamp)] }
+  }
+  return { type: 'edit', title: 'You edited a paragraph', meta: [relativeTime(event.timestamp)] }
+}
 
-  li.innerHTML = `
-    <span class="timeline__icon timeline__icon--${iconKind}">${iconSvg}</span>
-    <span class="timeline__body">
-      <div class="timeline__label"></div>
-      <div class="timeline__meta">
-        <span class="timeline__meta__ago"></span>${statusText ? '<span class="timeline__meta__sep">·</span><span class="timeline__meta__status"></span>' : ''}
+function ActivityItem(item) {
+  const meta = item.meta.map((part, index) => (
+    index === 0 ? `<span>${part}</span>` : `<span class="activity-dot">•</span><span>${part}</span>`
+  )).join('')
+
+  return `
+    <article class="activity-item">
+      <div class="activity-mark activity-mark--${item.type}">${activityIcon(item.type)}</div>
+      <div class="activity-copy">
+        <p class="activity-title">${item.title}</p>
+        <p class="activity-meta">${meta}</p>
       </div>
-    </span>`
-  li.querySelector('.timeline__label').textContent = label
-  li.querySelector('.timeline__meta__ago').textContent = ago
-  if (statusText) li.querySelector('.timeline__meta__status').textContent = statusText
-  return li
+    </article>
+  `
 }
 
-function labelForAi(meta) {
-  const verbs = { paraphrase: 'rephrase', draft: 'a draft', summarize: 'a summary', expand: 'an expansion', continue: 'a continuation', completion: 'a completion', brainstorm: 'an example' }
-  return `AI suggested ${verbs[meta.interaction_type] ?? 'a change'}`
+function activityIcon(type) {
+  if (type === 'edit') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5 16.5 5a2.2 2.2 0 0 1 3.1 3.1L7.1 20.6 3.5 21l.5-3.5Z"/><path d="m14.5 7.1 2.4 2.4"/></svg>'
+  }
+  if (type === 'source') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M10.5 6.5 12 5a4 4 0 0 1 5.7 5.7l-2 2a4 4 0 0 1-5.7 0"/><path d="M13.5 17.5 12 19a4 4 0 0 1-5.7-5.7l2-2a4 4 0 0 1 5.7 0"/></svg>'
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2 5.5 5.5 2-5.5 2-2 5.5-2-5.5-5.5-2 5.5-2 2-5.5Z"/></svg>'
 }
 
-function labelForAcceptance(a) {
-  if (a === 'fully_accepted')     return 'You accepted'
-  if (a === 'partially_accepted') return 'You partially accepted'
-  if (a === 'modified')           return 'You modified it'
-  if (a === 'rejected')           return 'You dismissed'
-  return ''
-}
+$('btn-settings').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage()
+})
 
-// ── Inline SVG icons ──────────────────────────────────────────────────────────
+$('btn-full-log').addEventListener('click', async () => {
+  try {
+    const win = await chrome.windows.getCurrent()
+    await chrome.sidePanel.open({ windowId: win.id })
+    window.close()
+  } catch (err) {
+    console.error('[Colophon] Could not open side panel:', err.message)
+    showNotice('Side panel could not open.')
+  }
+})
 
-function sparkleSvg() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/>
-    <path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14z"/>
-  </svg>`
-}
-
-function pencilSvg() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 20h9"/>
-    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
-  </svg>`
-}
-
-function linkSvg() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-  </svg>`
-}
-
-// ── Buttons (export, view full log) ───────────────────────────────────────────
-
-async function onExportClick() {
+$('btn-export').addEventListener('click', async () => {
   try {
     const result = await exportTwff()
-    showNotice(`Exported ${result?.filename ?? 'file'}`, 'good')
+    showNotice(`Exported ${result.filename}`, false)
   } catch (err) {
-    showNotice(`Export failed: ${err.message}`)
+    console.error('[Colophon] Export failed:', err.message)
+    showNotice('Start recording before exporting.')
   }
-}
+})
 
-async function onViewLogClick() {
-  // Per issue #30: "View full log" navigates to the side panel
-  const tab = await getActiveTabAny()
+$('btn-floating').addEventListener('click', async () => {
+  const tab = await getActiveDocTab()
+  if (!tab) {
+    showNotice('Open a Google Docs document first.')
+    return
+  }
+
   try {
-    await chrome.sidePanel.open({ windowId: tab?.windowId })
-  } catch {
-    // sidePanel.open requires a user gesture (we have one) and the API to exist
-    showNotice('Side panel unavailable. Reload the extension.')
+    await sendToContent(tab.id, { type: 'TOGGLE_FLOATING_PANEL' })
+    window.close()
+  } catch (err) {
+    console.error('[Colophon] Could not toggle floating panel:', err.message)
+    showNotice('Reload the document and try again.')
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+})
 
 async function getActiveDocTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
@@ -295,39 +198,48 @@ async function getActiveDocTab() {
   return tab
 }
 
-async function getActiveTabAny() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-  return tab
+async function sendToContent(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message)
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content/content.js'],
+    })
+    return chrome.tabs.sendMessage(tabId, message)
+  }
 }
 
-async function setBrandTooltip() {
-  // Brand stays as "Colophon"; the active doc title moves to the tooltip
-  // so it's still discoverable on hover without competing with the wordmark.
-  const tab = await getActiveTabAny()
-  if (!tab?.title) return
-  const clean = tab.title.replace(/\s*[-–]\s*Google\s*Docs.*$/i, '').trim()
-  if (clean) $('brand').title = `Colophon — ${clean}`
+function formatDocTitle(title = '') {
+  return title
+    .replace(/ - Google Docs$/i, '')
+    .trim() || 'Untitled document'
 }
 
-function showNotice(msg, tone = 'bad') {
-  const existing = document.querySelector('.notice')
-  if (existing) existing.remove()
-  const el = document.createElement('p')
-  el.className = 'notice'
-  el.style.color = tone === 'good' ? 'var(--c-good-fg)' : 'var(--c-bad-fg)'
-  el.textContent = msg
-  document.querySelector('.actions').after(el)
-  setTimeout(() => el.remove(), 3000)
+function relativeTime(timestamp) {
+  const then = new Date(timestamp).getTime()
+  if (!Number.isFinite(then)) return 'Just now'
+
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000))
+  if (seconds < 60) return 'Just now'
+
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
 }
 
-function formatAgo(iso) {
-  const ms = Date.now() - new Date(iso).getTime()
-  const s  = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60)        return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60)        return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24)        return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
+function showNotice(message, isError = true) {
+  const notice = $('notice')
+  notice.textContent = message
+  notice.style.color = isError ? '#b42318' : '#2f955c'
+  notice.hidden = false
+  clearTimeout(notice._timer)
+  notice._timer = setTimeout(() => {
+    notice.hidden = true
+  }, 2600)
 }
+
+refresh()
+setInterval(refresh, 1200)

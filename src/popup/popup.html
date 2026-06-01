@@ -7,99 +7,86 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
+  <main class="popup-shell">
+    <header class="topbar">
+      <h1 id="doc-title">Untitled document</h1>
+      <button id="btn-settings" class="icon-button" type="button" aria-label="Open settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 2-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-2.9v-.2a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-2-2 .1-.1A1.7 1.7 0 0 0 5.2 15a1.7 1.7 0 0 0-1.6-1H3.4v-2.9h.2a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-2 .1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1.1-1.6v-.2h2.9v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 2 2-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1.1h.2V14H21a1.7 1.7 0 0 0-1.6 1Z"/>
+        </svg>
+      </button>
+    </header>
 
-  <!-- ── Header ─────────────────────────────────────────────── -->
-  <header class="header">
-    <h1 class="brand" id="brand" title="Colophon — TWFF process log recorder">Colophon</h1>
-    <button class="icon-btn" id="link-settings" aria-label="Settings" title="Settings">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-      </svg>
-    </button>
-  </header>
-
-  <!-- ── Originality verdict ─────────────────────────────────── -->
-  <section class="verdict" id="verdict">
-    <div class="verdict__icon" id="verdict-icon">
-      <!-- Leaf SVG -->
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/>
-        <path d="M2 21c0-3 1.85-5.36 5.08-6"/>
-      </svg>
-    </div>
-    <div class="verdict__text">
-      <p class="verdict__title">
-        Your writing is <span id="verdict-label" class="verdict__label">mostly original</span>
-      </p>
-      <p class="verdict__subtitle" id="verdict-subtitle">AI is used lightly for editing</p>
-    </div>
-  </section>
-
-  <!-- ── Breakdown ──────────────────────────────────────────── -->
-  <section class="card breakdown">
-    <h2 class="card__title">Breakdown</h2>
-    <div class="bars">
-      <div class="bar-row">
-        <span class="bar-row__label">Own writing</span>
-        <div class="bar"><div class="bar__fill bar__fill--own"    id="bar-own"    style="width:0%"></div></div>
-        <span class="bar-row__pct"   id="pct-own">0%</span>
+    <section class="score-card" aria-label="Writing originality summary">
+      <div class="summary">
+        <div class="leaf-mark">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>
+          </svg>
+        </div>
+        <div>
+          <p class="summary-title">Your writing is <strong>mostly original</strong></p>
+          <p class="summary-subtitle">AI is used lightly for editing</p>
+        </div>
       </div>
-      <div class="bar-row">
-        <span class="bar-row__label">AI Paraphrase</span>
-        <div class="bar"><div class="bar__fill bar__fill--ai"     id="bar-ai"     style="width:0%"></div></div>
-        <span class="bar-row__pct"   id="pct-ai">0%</span>
-      </div>
-      <div class="bar-row">
-        <span class="bar-row__label">External Source</span>
-        <div class="bar"><div class="bar__fill bar__fill--source" id="bar-source" style="width:0%"></div></div>
-        <span class="bar-row__pct"   id="pct-source">0%</span>
-      </div>
-    </div>
-  </section>
 
-  <!-- ── Recent activity ────────────────────────────────────── -->
-  <section class="activity">
-    <h2 class="activity__title">Recent Activity</h2>
-    <ul class="timeline" id="timeline">
-      <li class="timeline__empty" id="timeline-empty">No activity yet. Start recording to begin.</li>
-    </ul>
-  </section>
+      <div class="breakdown">
+        <h2>Breakdown</h2>
+        <div class="metric">
+          <span>Own writing</span>
+          <div class="bar"><span class="bar-fill bar-fill--own" id="bar-own"></span></div>
+          <strong id="score-own">80%</strong>
+        </div>
+        <div class="metric">
+          <span>AI Paraphrase</span>
+          <div class="bar"><span class="bar-fill bar-fill--ai" id="bar-ai"></span></div>
+          <strong id="score-ai">80%</strong>
+        </div>
+        <div class="metric">
+          <span>External Source</span>
+          <div class="bar"><span class="bar-fill bar-fill--source" id="bar-source"></span></div>
+          <strong id="score-source">80%</strong>
+        </div>
+      </div>
+    </section>
 
-  <!-- ── Actions ────────────────────────────────────────────── -->
-  <section class="actions">
-    <button id="btn-toggle" class="btn btn--primary">Start recording</button>
-    <button id="btn-view-log" class="btn btn--ghost">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-      </svg>
+    <section class="activity-section">
+      <h2>Recent Activity</h2>
+      <div id="activity-list" class="activity-list"></div>
+    </section>
+
+    <button id="btn-full-log" class="log-row" type="button">
+      <span class="doc-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 3h7l4 4v14H7V3Z"/>
+          <path d="M14 3v5h5M9 13h6M9 17h5"/>
+        </svg>
+      </span>
       <span>View full log</span>
-      <span class="btn__arrow">→</span>
+      <svg class="arrow-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 12h14M13 6l6 6-6 6"/>
+      </svg>
     </button>
-    <button id="btn-export" class="btn btn--secondary" disabled>Export .twff</button>
-  </section>
 
-  <!-- ── Footer ─────────────────────────────────────────────── -->
-  <footer class="footer">
-    <span class="footer__left">
-      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-      </svg>
-      Private and local
-    </span>
-    <a class="footer__twff" id="link-twff"
-       href="https://github.com/Functional-Intelligence-Research-Lab/twff"
-       target="_blank" rel="noopener">
-      TWFF
-      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-        <polyline points="15 3 21 3 21 9"/>
-        <line x1="10" y1="14" x2="21" y2="3"/>
-      </svg>
-    </a>
-  </footer>
+    <footer class="footer">
+      <div class="privacy">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="6" y="10" width="12" height="10" rx="2"/>
+          <path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/>
+        </svg>
+        <span>Private and local</span>
+      </div>
+      <button id="btn-export" class="export-link" type="button">TWFF</button>
+      <button id="btn-floating" class="external-button" type="button" aria-label="Float panel in document">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M14 5h5v5M13 11l6-6M19 14v5H5V5h5"/>
+        </svg>
+      </button>
+    </footer>
+
+    <p id="notice" class="notice" hidden></p>
+  </main>
 
   <script type="module" src="popup.js"></script>
 </body>

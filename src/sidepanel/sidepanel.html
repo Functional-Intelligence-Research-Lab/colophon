@@ -2,30 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Colophon — Full Log</title>
-  <link rel="stylesheet" href="sidepanel.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colophon</title>
+  <style>
+    html, body, #app {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: #fff;
+      overflow: hidden;
+    }
+  </style>
 </head>
 <body>
-  <header class="sp-header">
-    <h1>Activity log</h1>
-    <span id="session-id" class="sp-session"></span>
-  </header>
-
-  <section class="sp-summary" id="summary" hidden>
-    <span class="chip" id="chip-recording">Stopped</span>
-    <span class="chip chip--muted" id="chip-count">0 events</span>
-    <span class="chip chip--muted" id="chip-duration">0:00</span>
-  </section>
-
-  <ul class="sp-timeline" id="timeline">
-    <li class="sp-empty" id="empty">No session yet. Open the popup and click <strong>Start recording</strong>.</li>
-  </ul>
-
-  <footer class="sp-footer">
-    <span>Private and local</span>
-    <a href="https://github.com/Functional-Intelligence-Research-Lab/twff" target="_blank" rel="noopener">TWFF ↗</a>
-  </footer>
-
-  <script type="module" src="sidepanel.js"></script>
+  <div id="app"></div>
+  <script src="sidepanel.js"></script>
 </body>
 </html>
