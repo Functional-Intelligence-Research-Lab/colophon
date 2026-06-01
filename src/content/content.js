@@ -73,6 +73,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(err => sendResponse({ error: err.message }));
     return true; // Tells Chrome we will send the response asynchronously
   }
+  if (msg.action === 'GET_TITLE') {
+    sendResponse({ title: getDocsTitle() });
+  }
+
+  if (msg.action === 'APPLY_SUGGESTION') {
+    insertTextIntoDocs(msg.text)
+      .then(() => sendResponse({ status: "success" }))
+      .catch(err => sendResponse({ status: "error", message: err.message }));
+    return true; // Tells Chrome we will send the response asynchronously
+  }
 })
 
 syncRecordingState()
@@ -278,6 +288,9 @@ function flushEdit() {
 
 function onPaste(e) {
   if (!_active) return
+  if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') {
+    return;
+  }
   const text = e.clipboardData?.getData('text/plain') ?? ''
   console.log('[Colophon Content] paste event', { charCount: text.length, target: describeElement(e.target) })
   markPaste(text)
@@ -484,4 +497,79 @@ function attachFloatingDrag() {
     if (!drag || event.pointerId !== drag.pointerId) return
     drag = null
   })
+}
+
+// ── Get Live Title ───────────────────────────────────────────────────
+
+function getDocsTitle() {
+  const titleInput = document.querySelector('.docs-title-input');
+  if (titleInput && titleInput.value && titleInput.value.trim() !== "") {
+    return titleInput.value;
+  }
+
+  const titleInner = document.querySelector('.docs-title-inner');
+  if (titleInner && titleInner.innerText && titleInner.innerText.trim() !== "") {
+     return titleInner.innerText;
+  }
+
+  const branding = document.querySelector('.docs-branding');
+  if (branding) {
+    const nearbyInput = branding.parentElement.querySelector('input[type="text"]');
+    if (nearbyInput && nearbyInput.value && nearbyInput.value.trim() !== "") {
+      return nearbyInput.value;
+    }
+  }
+
+  const fallbackTitle = document.title.replace(' - Google Docs', '').trim();
+
+  if (!fallbackTitle || fallbackTitle === "Untitled document" || fallbackTitle === "Google Docs") {
+    return "Untitled Document";
+  }
+
+  return fallbackTitle;
+}
+
+// ── Insert AI Text into Docs Canvas ──────────────────────────────────
+async function insertTextIntoDocs(textToInsert) {
+  try {
+    let targetElement = null;
+
+    const frames = [
+      ...document.querySelectorAll('.docs-texteventtarget-iframe'),
+      ...document.querySelectorAll('iframe[aria-hidden="true"]'),
+    ];
+
+    for (const frame of frames) {
+      const doc = frame.contentDocument || frame.contentWindow?.document;
+      if (doc) {
+        targetElement = doc.activeElement || doc.body;
+        break;
+      }
+    }
+
+    if (!targetElement) {
+      throw new Error("Could not find Google Docs input element to paste into.");
+    }
+
+    targetElement.focus();
+
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData('text/plain', textToInsert);
+    dataTransfer.setData('application/x-colophon-ai', 'true');
+
+    const pasteEvent = new ClipboardEvent('paste', {
+      clipboardData: dataTransfer,
+      bubbles: true,
+      cancelable: true
+    });
+
+    targetElement.dispatchEvent(pasteEvent);
+
+    console.log("[Colophon Content] Auto-paste executed successfully.");
+    return true;
+
+  } catch (error) {
+    console.error("[Colophon Content] Insertion Error:", error);
+    throw error;
+  }
 }
