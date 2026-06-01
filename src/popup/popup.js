@@ -36,21 +36,62 @@ let _refreshTimer = null
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-  $('link-twff').href = TWFF_REPO
-
-  await setBrandTooltip()
   await refresh()
 
   _refreshTimer = setInterval(refresh, 1000)
 
-  $('link-settings').addEventListener('click', e => {
-    e.preventDefault()
-    chrome.runtime.openOptionsPage()
-  })
+  const settingsButton = $('btn-settings')
+  if (settingsButton) {
+    settingsButton.addEventListener('click', () => {
+      chrome.runtime.openOptionsPage()
+    })
+  }
 
-  $('btn-toggle').addEventListener('click', onToggleClick)
-  $('btn-export').addEventListener('click', onExportClick)
-  $('btn-view-log').addEventListener('click', onViewLogClick)
+  const fullLogButton = $('btn-full-log')
+  if (fullLogButton) {
+    fullLogButton.addEventListener('click', async () => {
+      try {
+        const win = await chrome.windows.getCurrent()
+        await chrome.sidePanel.open({ windowId: win.id })
+        window.close()
+      } catch (err) {
+        console.error('[Colophon] Could not open side panel:', err.message)
+        showNotice('Side panel could not open.')
+      }
+    })
+  }
+
+  const exportButton = $('btn-export')
+  if (exportButton) {
+    exportButton.addEventListener('click', async () => {
+      try {
+        const result = await exportTwff()
+        showNotice(`Exported ${result.filename}`, false)
+      } catch (err) {
+        console.error('[Colophon] Export failed:', err.message)
+        showNotice('Start recording before exporting.')
+      }
+    })
+  }
+
+  const floatingButton = $('btn-floating')
+  if (floatingButton) {
+    floatingButton.addEventListener('click', async () => {
+      const tab = await getActiveDocTab()
+      if (!tab) {
+        showNotice('Open a Google Docs document first.')
+        return
+      }
+
+      try {
+        await sendToContent(tab.id, { type: 'TOGGLE_FLOATING_PANEL' })
+        window.close()
+      } catch (err) {
+        console.error('[Colophon] Could not toggle floating panel:', err.message)
+        showNotice('Reload the document and try again.')
+      }
+    })
+  }
 })
 
 window.addEventListener('unload', () => clearInterval(_refreshTimer))
@@ -151,46 +192,6 @@ function activityIcon(type) {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2 5.5 5.5 2-5.5 2-2 5.5-2-5.5-5.5-2 5.5-2 2-5.5Z"/></svg>'
 }
 
-$('btn-settings').addEventListener('click', () => {
-  chrome.runtime.openOptionsPage()
-})
-
-$('btn-full-log').addEventListener('click', async () => {
-  try {
-    const win = await chrome.windows.getCurrent()
-    await chrome.sidePanel.open({ windowId: win.id })
-    window.close()
-  } catch (err) {
-    console.error('[Colophon] Could not open side panel:', err.message)
-    showNotice('Side panel could not open.')
-  }
-})
-
-$('btn-export').addEventListener('click', async () => {
-  try {
-    const result = await exportTwff()
-    showNotice(`Exported ${result.filename}`, false)
-  } catch (err) {
-    console.error('[Colophon] Export failed:', err.message)
-    showNotice('Start recording before exporting.')
-  }
-})
-
-$('btn-floating').addEventListener('click', async () => {
-  const tab = await getActiveDocTab()
-  if (!tab) {
-    showNotice('Open a Google Docs document first.')
-    return
-  }
-
-  try {
-    await sendToContent(tab.id, { type: 'TOGGLE_FLOATING_PANEL' })
-    window.close()
-  } catch (err) {
-    console.error('[Colophon] Could not toggle floating panel:', err.message)
-    showNotice('Reload the document and try again.')
-  }
-})
 
 async function getActiveDocTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
