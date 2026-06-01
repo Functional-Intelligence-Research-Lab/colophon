@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <base href="../../src/popup/">
+  <title>Colophon (preview)</title>
+  <script>
+    // Mock chrome.* APIs with a sample session that produces the design state:
+    // ~80% own, ~10% AI, ~10% external — verdict: "mostly original"
+    (function () {
+      const now = Date.now()
+      const session = {
+        sessionId: 'b0834568-8519-482a-a467-550975974938',
+        startedAt: new Date(now - 12 * 60 * 1000).toISOString(),
+        isRecording: true,
+        events: [
+          { timestamp: new Date(now - 12 * 60 * 1000).toISOString(), type: 'session_start',  meta: {} },
+          { timestamp: new Date(now -  7 * 60 * 1000).toISOString(), type: 'ai_interaction', meta: { interaction_type: 'paraphrase', model: 'qwen2.5:0.5b', output_length: 100, acceptance: 'rejected' } },
+          { timestamp: new Date(now -  5 * 60 * 1000).toISOString(), type: 'edit',           meta: { char_delta: 800, position_start: 0, position_end: 800, source: 'human' } },
+          { timestamp: new Date(now -  3 * 60 * 1000).toISOString(), type: 'paste',          meta: { char_count: 100, source: 'external', position_start: 800, position_end: 900 } },
+          { timestamp: new Date(now -  2 * 60 * 1000).toISOString(), type: 'ai_interaction', meta: { interaction_type: 'brainstorm', model: 'qwen2.5:0.5b', output_length: 0, acceptance: 'rejected' } },
+        ],
+      }
+      const stats = { editCount: 1, aiCount: 2, elapsed: now - new Date(session.startedAt).getTime() }
+      window.chrome = {
+        runtime: {
+          sendMessage:     async (m) => m.type === 'GET_STATE' ? { session, stats } : {},
+          openOptionsPage: () => {},
+          getManifest:     () => ({ name: 'Colophon', version: '0.1.0', manifest_version: 3 }),
+          getURL:          (p) => p,
+          id:              'demo',
+        },
+        tabs: {
+          query:  async () => [{ id: 1, url: 'https://docs.google.com/document/d/abc/edit', title: 'Untitled document - Google Docs', windowId: 1 }],
+          create: () => {},
+        },
+        sidePanel: { open: () => {} },
+      }
+    })()
+  </script>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <header class="header">
+    <h1 class="brand" id="brand" title="Colophon — TWFF process log recorder">Colophon</h1>
+    <button class="icon-btn" id="link-settings" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+  </header>
+
+  <section class="verdict" id="verdict">
+    <div class="verdict__icon" id="verdict-icon">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/>
+        <path d="M2 21c0-3 1.85-5.36 5.08-6"/>
+      </svg>
+    </div>
+    <div class="verdict__text">
+      <p class="verdict__title">Your writing is <span id="verdict-label" class="verdict__label">mostly original</span></p>
+      <p class="verdict__subtitle" id="verdict-subtitle">AI is used lightly for editing</p>
+    </div>
+  </section>
+
+  <section class="card breakdown">
+    <h2 class="card__title">Breakdown</h2>
+    <div class="bars">
+      <div class="bar-row">
+        <span class="bar-row__label">Own writing</span>
+        <div class="bar"><div class="bar__fill bar__fill--own"    id="bar-own"    style="width:0%"></div></div>
+        <span class="bar-row__pct"   id="pct-own">0%</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-row__label">AI Paraphrase</span>
+        <div class="bar"><div class="bar__fill bar__fill--ai"     id="bar-ai"     style="width:0%"></div></div>
+        <span class="bar-row__pct"   id="pct-ai">0%</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-row__label">External Source</span>
+        <div class="bar"><div class="bar__fill bar__fill--source" id="bar-source" style="width:0%"></div></div>
+        <span class="bar-row__pct"   id="pct-source">0%</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="activity">
+    <h2 class="activity__title">Recent Activity</h2>
+    <ul class="timeline" id="timeline">
+      <li class="timeline__empty" id="timeline-empty">No activity yet. Start recording to begin.</li>
+    </ul>
+  </section>
+
+  <section class="actions">
+    <button id="btn-toggle" class="btn btn--primary">Start recording</button>
+    <button id="btn-view-log" class="btn btn--ghost">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+      <span>View full log</span>
+      <span class="btn__arrow">→</span>
+    </button>
+    <button id="btn-export" class="btn btn--secondary" disabled>Export .twff</button>
+  </section>
+
+  <footer class="footer">
+    <span class="footer__left">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+      Private and local
+    </span>
+    <a class="footer__twff" id="link-twff" href="https://github.com/Functional-Intelligence-Research-Lab/twff" target="_blank" rel="noopener">
+      TWFF
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/>
+        <line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+    </a>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
