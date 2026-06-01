@@ -71,8 +71,8 @@ check('permission: storage',                            manifest?.permissions?.i
 check('permission: scripting',                          manifest?.permissions?.includes('scripting'))
 check('permission: sidePanel',                          manifest?.permissions?.includes('sidePanel'))
 
-// Strict per issue #2: ONLY those four permissions, nothing extra
-const allowed = ['activeTab', 'storage', 'scripting', 'sidePanel']
+// Strict per issue #2 plus Sprint 2 export/panel permissions.
+const allowed = ['activeTab', 'storage', 'scripting', 'downloads', 'sidePanel']
 const extra   = (manifest?.permissions ?? []).filter(p => !allowed.includes(p))
 check(`No extra permissions (got: ${(manifest?.permissions ?? []).join(', ') || 'none'})`, extra.length === 0)
 
@@ -142,7 +142,7 @@ check('Per-event hash chain (computeEventHash)',    pl.includes('computeEventHas
 check('_integrity block written',                   pl.includes('_integrity'))
 check('buildProcessLog exported',                   pl.includes('export async function buildProcessLog'))
 check('.twff ZIP export (JSZip — issue #23)',
-  existsSync('node_modules/jszip'), { required: false })
+  existsSync('src/lib/jszip.js') || existsSync('node_modules/jszip'), { required: false })
 
 // ── Tests
 console.log(head('Automated tests'))

@@ -32,5 +32,9 @@
     "default_title": "Colophon"
   },
 
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+
   "options_page": "options/options.html"
 }

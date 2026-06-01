@@ -1,0 +1,8 @@
+Atkinson Hyperlegible Font
+Copyright © 2020-2024 Braille Institute of America, Inc.
+Licensed under the SIL Open Font License, Version 1.1.
+
+This font is licensed under the SIL Open Font License, Version 1.1.
+This license is available with a FAQ at: https://openfontlicense.org
+
+Source: https://fonts.google.com/specimen/Atkinson+Hyperlegible

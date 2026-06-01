@@ -22,10 +22,10 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 ### Sprint 2: {AI Path A} (May 11 – May 24)
 
 - [ ] Ollama integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
-- [ ] Side panel scaffold
+- [X] Side panel scaffold
 - [ ] `ai_interaction` event schema
-- [ ] TWFF v0.2 schema and alignment with dpv
-- [ ] SHA-256 hash chain for integrity verification
+- [X] TWFF v0.2 schema (alignment with dpv moved to v0.3)
+- [x] SHA-256 hash chain for integrity verification
 
 <!-- - [ ] Ollama API integration (`localhost:11434`; model selector populated from `/api/tags`) -->
 
@@ -33,12 +33,12 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 - Detect Gemini native suggestions in Google Docs DOM
 - Gemini API test
-- Google Drive save option
+- [ ] Google Drive save option
 - Chrome Web Store setup
+- [ ] settings page
 
 ### Sprint 4: internal beta (Jun 8 – Jun 21)
 
-- Settings page
 - Side panel polish
 - Internal beta
 
