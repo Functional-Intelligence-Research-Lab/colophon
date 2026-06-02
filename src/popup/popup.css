@@ -61,8 +61,10 @@ button {
 }
 
 .popup-shell {
-  min-height: 620px;
-  padding: 24px 18px 22px;
+  /* Reduce min-height to avoid popup scrollbars in Chrome's action popup */
+  min-height: 520px;
+  padding: 18px 14px 14px;
+  box-sizing: border-box;
 }
 
 .topbar {
@@ -318,6 +320,38 @@ svg {
   font-size: 18px;
   font-weight: 650;
   text-align: left;
+}
+
+.record-button {
+  width: 100%;
+  height: 44px;
+  border: 1px solid #5e45ce;
+  border-radius: 5px;
+  background: #5e45ce;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 6px 0 16px;
+}
+
+.record-button:hover {
+  background: #4732a5;
+}
+
+.record-button:disabled {
+  background: #c3b8f2;
+  border-color: #c3b8f2;
+  color: #fff;
+  cursor: default;
+}
+
+.record-button--stop {
+  background: #d92f2f;
+  border-color: #d92f2f;
+}
+
+.record-button--stop:hover {
+  background: #b42222;
 }
 
 .doc-icon {

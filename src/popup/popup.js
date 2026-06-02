@@ -22,10 +22,7 @@ import { exportTwff } from '../lib/export.js'
 const $ = id => document.getElementById(id)
 
 const ACTIVITY_FALLBACK = [
-  { type: 'ai', title: 'AI suggested a rephrase', meta: ['2m ago', 'You dismissed'] },
-  { type: 'edit', title: 'You edited a paragraph', meta: ['2m ago'] },
-  { type: 'source', title: 'You added a source', meta: ['2m ago'] },
-  { type: 'ai', title: 'AI suggested an example', meta: ['2m ago', 'You dismissed'] },
+  { type: 'info', title: 'No activity yet', meta: ['Start recording in Google Docs to watch events.'] },
 ]
 
 const TWFF_REPO = 'https://github.com/Functional-Intelligence-Research-Lab/twff'
@@ -58,6 +55,27 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('[Colophon] Could not open side panel:', err.message)
         showNotice('Side panel could not open.')
       }
+    })
+  }
+
+  const recordButton = $('btn-record')
+  if (recordButton) {
+    recordButton.addEventListener('click', async () => {
+      const tab = await getActiveDocTab()
+      const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
+      const isRecording = state?.session?.isRecording
+
+      if (isRecording) {
+        await chrome.runtime.sendMessage({ type: 'SESSION_STOP' })
+      } else {
+        if (!tab) {
+          showNotice('Open a Google Docs document first.')
+          return
+        }
+        await chrome.runtime.sendMessage({ type: 'SESSION_START', tabId: tab.id, docUrl: tab.url })
+      }
+
+      await refresh()
     })
   }
 
@@ -110,9 +128,27 @@ async function refresh() {
   const session = state?.session ?? null
   renderScores(session)
   renderActivity(session)
+  renderRecordButton(session, tab)
 
   const eventCount = session?.events?.length ?? 0
   $('btn-export').disabled = eventCount < 2
+}
+
+function renderRecordButton(session, tab) {
+  const button = $('btn-record')
+  if (!button) return
+
+  const isRecording = session?.isRecording
+  button.textContent = isRecording ? 'Stop recording' : 'Start recording'
+  button.disabled = !tab && !isRecording
+
+  if (isRecording) {
+    button.classList.add('record-button--stop')
+  } else {
+    button.classList.remove('record-button--stop')
+  }
+
+  button.title = button.disabled ? 'Open a Google Docs document first.' : ''
 }
 
 function renderScores(session) {
@@ -122,9 +158,9 @@ function renderScores(session) {
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
   const total = Math.max(1, editCount + aiCount + sourceCount)
 
-  const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 80
-  const ai = session ? clampPercent(Math.round((aiCount / total) * 100)) : 80
-  const source = session ? clampPercent(Math.round((sourceCount / total) * 100)) : 80
+  const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 0
+  const ai = session ? clampPercent(Math.round((aiCount / total) * 100)) : 0
+  const source = session ? clampPercent(Math.round((sourceCount / total) * 100)) : 0
 
   setScore('own', own)
   setScore('ai', ai)
@@ -157,6 +193,9 @@ function activityFromSession(session) {
 }
 
 function eventToActivity(event) {
+  if (event.type === 'info') {
+    return { type: 'info', title: event.title, meta: event.meta }
+  }
   if (event.type === 'ai_interaction') {
     return { type: 'ai', title: 'AI suggested an edit', meta: [relativeTime(event.timestamp)] }
   }
@@ -188,6 +227,9 @@ function activityIcon(type) {
   }
   if (type === 'source') {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M10.5 6.5 12 5a4 4 0 0 1 5.7 5.7l-2 2a4 4 0 0 1-5.7 0"/><path d="M13.5 17.5 12 19a4 4 0 0 1-5.7-5.7l2-2a4 4 0 0 1 5.7 0"/></svg>'
+  }
+  if (type === 'info') {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><circle cx="12" cy="16.5" r=".5"/></svg>'
   }
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.5 2 5.5 5.5 2-5.5 2-2 5.5-2-5.5-5.5-2 5.5-2 2-5.5Z"/></svg>'
 }
