@@ -75,6 +75,54 @@ button {
   margin-bottom: 18px;
 }
 
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  font-size: 24px;
+}
+
+.tooltip-icon {
+  cursor: pointer;
+  transform: translateY(-15%);
+  vertical-align: middle;
+  transition: stroke 0.3s ease;
+}
+
+.tooltip-container:hover .tooltip-icon {
+  stroke: #6749d7;
+}
+
+.tooltip-text {
+  opacity: 0;
+  visibility: hidden;
+  position: absolute;
+  top: 110%;
+  transform: translateX(-80%);
+  background-color: #3d3b3d;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+  
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+  
+  animation: showOnLoad 3s ease-in-out;
+}
+
+.tooltip-container:hover .tooltip-text {
+  opacity: 1;
+  visibility: visible;
+  animation: none; 
+}
+
+@keyframes showOnLoad {
+  0%   { opacity: 1; visibility: visible; }
+  80%  { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
 .topbar h1 {
   margin: 0;
   min-width: 0;
