@@ -38,7 +38,7 @@ export const ANNOTATION_TYPES = {
     * Call export() to produce a .twff ZIP container as bytes.
      */
 export class ProcessLog {
-    static SPEC_VERSION = "0.1.0";
+    static SPEC_VERSION = "0.2.0";
 
     constructor(userId = null) {
         this.sessionId = crypto.randomUUID();
