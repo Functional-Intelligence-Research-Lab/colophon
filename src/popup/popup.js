@@ -185,7 +185,7 @@ function activityFromSession(session) {
   const events = session?.events ?? []
   const mapped = events
     .filter(event => !['session_start', 'session_end', 'focus_change'].includes(event.type))
-    .slice(-4)
+    .slice(-3)
     .reverse()
     .map(eventToActivity)
 
