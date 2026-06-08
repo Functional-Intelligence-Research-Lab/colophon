@@ -10,7 +10,8 @@
     "scripting",
     "downloads",
     "sidePanel",
-    "clipboardWrite"
+    "clipboardWrite",
+    "nativeMessaging"
   ],
   "host_permissions": ["https://docs.google.com/*"],
 
