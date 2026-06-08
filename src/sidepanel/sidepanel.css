@@ -558,3 +558,68 @@ body {
 .app-footer .status .dot.disconnected {
   background-color: var(--text-secondary, #888);
 }
+
+.app-footer .status .dot.available {
+  background-color: #f59e0b;
+}
+
+/* ───── Model status banner ─────────────── */
+.model-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.model-banner.download,
+.model-banner.launch {
+  border-color: var(--ai-color);
+  background: var(--ai-bg);
+}
+
+.model-banner .banner-text {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.model-banner .banner-text.error {
+  color: var(--diff-red);
+}
+
+.model-banner .banner-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ai-color);
+  background: var(--ai-color);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.model-banner .banner-btn:hover {
+  opacity: 0.85;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--ai-color);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
