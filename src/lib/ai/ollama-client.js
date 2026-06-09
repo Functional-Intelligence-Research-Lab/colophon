@@ -54,7 +54,8 @@ export async function complete(userMessage, opts = {}) {
     }
 
     const data = await res.json();
-    const text = data.choices?.[0]?.message?.content?.trim() ?? '';
+    const raw = data.choices?.[0]?.message?.content ?? '';
+    const text = raw.replace(/<\|[^|>]+\|>/g, '').trim();
     const modelName = data.model || model;
     return { text, model: modelName };
   } finally {
