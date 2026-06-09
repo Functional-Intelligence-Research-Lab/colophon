@@ -48,6 +48,12 @@ let _pendingPaste = null
 let _listenerTargets = []
 let _floatingPanel = null
 let _floatingPinned = false
+let _checkpointTimer = null
+
+function _getDocText() {
+  return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
+    .map(p => p.textContent).join('\n').slice(0, 20000)
+}
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -83,6 +89,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .catch(err => sendResponse({ status: "error", message: err.message }));
     return true; // Tells Chrome we will send the response asynchronously
   }
+
+  if (msg.action === 'GET_EDITOR_TEXT') {
+    // Best-effort read of visible paragraph text from the Docs canvas
+    const paras = document.querySelectorAll('.kix-paragraphrenderer');
+    const text = Array.from(paras).map(p => p.textContent).join('\n').slice(0, 4000);
+    sendResponse({ text });
+  }
 })
 
 syncRecordingState()
@@ -100,6 +113,19 @@ function activate() {
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
   waitForEditor(attachObserver)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // Periodic checkpoints every 5 minutes
+  _checkpointTimer = setInterval(() => {
+    const text = _getDocText()
+    const words = text.trim().split(/\s+/).filter(Boolean).length
+    chrome.runtime.sendMessage({
+      action: 'LOG_EVENT',
+      payload: {
+        type: 'checkpoint',
+        timestamp: new Date().toISOString(),
+        meta: { char_count_total: text.length, word_count_total: words },
+      },
+    }).catch(() => {})
+  }, 5 * 60 * 1000)
   console.log('[Colophon Content] recording activated', {
     activeElement: describeElement(document.activeElement),
     hasEditor: !!document.querySelector(EDITOR_SELECTOR),
@@ -189,6 +215,8 @@ function deactivate() {
   _observer?.disconnect()
   _observer = null
   clearTimeout(_debounce)
+  clearInterval(_checkpointTimer)
+  _checkpointTimer = null
   flushEdit() // flush anything buffered before stopping
   _editBuffer = null
   console.log('[Colophon Content] recording deactivated')
@@ -336,7 +364,8 @@ function emitPaste(text, fallbackCharCount = null) {
     hasPreview: text.length > 0,
     fallback: fallbackCharCount !== null,
   })
-  send('LOG_EVENT', {
+
+  const event = {
     timestamp: new Date().toISOString(),
     type: 'paste',
     meta: {
@@ -346,7 +375,22 @@ function emitPaste(text, fallbackCharCount = null) {
       position_end:   charCount,
       output_preview: formatPreview(text),
     },
-  })
+  }
+
+  if (text.length > 0) {
+    // Wait for the DOM to reflect the paste, then capture surrounding context
+    setTimeout(() => {
+      const doc = _getDocText()
+      const idx = doc.indexOf(text.slice(0, 50))
+      if (idx >= 0) {
+        event.meta.content_before = doc.slice(Math.max(0, idx - 300), idx)
+        event.meta.content_after  = doc.slice(idx + text.length, idx + text.length + 300)
+      }
+      send('LOG_EVENT', event)
+    }, 200)
+  } else {
+    send('LOG_EVENT', event)
+  }
 }
 
 // ── Focus tracking ────────────────────────────────────────────────────────────
