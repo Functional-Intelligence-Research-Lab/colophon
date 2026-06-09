@@ -21,9 +21,9 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 ### Sprint 2: {AI Path A} (May 11 – May 24)
 
-- [ ] Ollama integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
+- [~] Llamafile integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
 - [X] Side panel scaffold
-- [ ] `ai_interaction` event schema
+- [X] `ai_interaction` event schema
 - [X] TWFF v0.2 schema (alignment with dpv moved to v0.3)
 - [x] SHA-256 hash chain for integrity verification
 
@@ -31,18 +31,17 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 ### Sprint 3: AI Path B  (May 25 – Jun 7)
 
-- Detect Gemini native suggestions in Google Docs DOM
-- Gemini API test
+- [ ] Detect Gemini native suggestions in Google Docs DOM
 - [ ] Google Drive save option
 - Chrome Web Store setup
-- [ ] settings page
+- [~] settings page
 
-### Sprint 4: internal beta (Jun 8 – Jun 21)
+### Sprint 4: internal beta (Jun 21 - Jul 1)
 
-- Side panel polish
+- [~] Side panel polish
 - Internal beta
 
-### Sprint 5 — Release (Jun 22 – Jul 5)
+### Sprint 5 — Release (Jul 5)
 
 - Chrome Web Store submission
 - User-facing README: install, first use, privacy, TWFF export
