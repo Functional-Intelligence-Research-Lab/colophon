@@ -15,8 +15,8 @@ Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 - [X] [#1](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/2) Manifest V3 scaffold
 - [X] [#2](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/20) Session lifecycle
-- [ ] [#3](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/21) Edit event capture
-- [ ] [#4](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/22) Popup UI
+- [X] [#3](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/21) Edit event capture
+- [X] [#4](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/22) Popup UI
 - [X] [#5](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/23) Local JSON export → `.twff`
 
 ### Sprint 2: {AI Path A} (May 11 – May 24)
