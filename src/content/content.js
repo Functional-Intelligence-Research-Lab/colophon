@@ -452,6 +452,7 @@ function createFloatingPanel() {
 
   const panel = mountColophonPanel(shell, {
     mode: 'floating',
+    docTitle: getDocsTitle(),
     onClose: destroyFloatingPanel,
     onPin: toggleFloatingPin,
   })

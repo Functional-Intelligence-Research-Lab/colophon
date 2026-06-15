@@ -14,10 +14,12 @@ function mark(item) {
 
 function head(item) {
   const actorClass = item.kind === 'you' ? 'actor--you' : item.kind === 'quiet' ? 'actor--quiet' : ''
+  const labelClass = item.kind === 'ai' ? 'label--ai' : item.kind === 'you' ? 'label--you' : ''
   return `
     <div class="item-head">
       <span class="actor ${actorClass}">${item.actor}</span>
-      <span>${item.label}</span>
+      <span class="head-sep">•</span>
+      <span class="${labelClass}">${item.label}</span>
       <span class="time">${item.time}</span>
     </div>
   `
@@ -27,7 +29,7 @@ function suggestionCard(item) {
   if (item.state === 'applying') {
     return `
       <div class="card card--ai">
-        <div class="item-head"><span class="actor">AI</span><span>Applying</span><span class="time">${item.time}</span></div>
+        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>Applying</span><span class="time">${item.time}</span></div>
         <p class="card-copy">Applying to document...</p>
         <div class="progress"><span></span></div>
       </div>
@@ -37,7 +39,7 @@ function suggestionCard(item) {
   if (item.state === 'applied') {
     return `
       <div class="card card--applied">
-        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span>Applied</span><span class="time">${item.time}</span></div>
+        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${item.time}</span></div>
         <p class="card-copy">Concrete example added.</p>
         <p class="card-note">You can edit it anytime.</p>
         <button class="button button--ghost" data-action="view-changes">View changes ${icons.chevron}</button>
@@ -48,7 +50,7 @@ function suggestionCard(item) {
   if (item.state === 'changes') {
     return `
       <div class="card card--applied">
-        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span>Applied</span><span class="time">${item.time}</span></div>
+        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${item.time}</span></div>
         <div class="diff">
           <div class="diff-line diff-line--old">Many companies are looking at ways to reduce their environmental impact...</div>
           <div class="diff-line diff-line--new">For example, Patagonia redesigned its packaging in 2022, eliminating 80% of virgin plastic from shipments...</div>
@@ -73,7 +75,8 @@ function suggestionCard(item) {
       : ''
     return `
       <div class="card card--ai">
-        <div class="thread">
+        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>${item.label}</span><span class="time">${item.time}</span></div>
+        <div class="thread" style="margin-top:8px">
           <div class="thread-bubble">${item.copy}</div>
           ${extra}
         </div>
@@ -88,11 +91,11 @@ function suggestionCard(item) {
 
   return `
     <div class="card card--ai">
+      <div class="item-head" style="margin-bottom:10px"><span class="actor">AI</span><span class="head-sep">•</span><span>${item.label}</span><span class="time">${item.time}</span></div>
       <p class="card-copy">${item.copy}</p>
       <div class="actions-row">
-        ${button('Use', 'button--primary', 'use-suggestion', icons.check)}
-        ${button('Dismiss', '', 'dismiss-suggestion')}
-        ${button('Reply', 'button--ghost', 'reply-suggestion')}
+        ${button('Use', 'button--primary', 'use-suggestion', `<span class="btn-check">${icons.check}</span>`)}
+        ${button('Dismiss', 'button--dismiss', 'dismiss-suggestion')}
       </div>
     </div>
   `
@@ -120,10 +123,14 @@ function itemBody(item) {
           <div class="diff-line diff-line--old">Consider adding a concrete example to strengthen the claim...</div>
           <div class="diff-line diff-line--new">Consider adding a concrete example to strengthen the claim...</div>
         </div>
-        ${button('View diff', 'button--ghost', 'view-diff')}
+        <div class="view-diff-row">
+          ${button('View diff', 'button--ghost', 'view-diff')}
+          <span class="diff-copy">${icons.doc}</span>
+        </div>
       </div>
     `
   }
+  if (item.type === 'accepted') return ''
   if (item.type === 'source') return `<p class="card-copy">${item.copy}</p>${sourceCard(item)}`
   if (item.type === 'image') return `<div class="image-thumb" role="img" aria-label="Added image preview"></div><div class="ellipsis">...</div>`
   return `<p class="card-copy">${item.copy}</p>`
@@ -134,21 +141,27 @@ export function TimelineItem(item) {
     <article class="timeline-item" data-id="${item.id}">
       ${mark(item)}
       <div class="item-main">
-        ${head(item)}
+        ${item.type !== 'suggestion' ? head(item) : ''}
         ${itemBody(item)}
       </div>
     </article>
   `
 }
 
-export function ProjectContext() {
+export function ProjectContext({ title = '', prompt = '' } = {}) {
   return `
     <section class="context-card">
       <div class="context-label">Assignment title</div>
       <div class="context-row">
-        <div class="context-text">Create a proposal that analyzes current packaging waste and recommends practical, scalable solutions....</div>
+        <div class="context-text">${title || 'Untitled document'}</div>
         ${icons.chevron}
       </div>
+      <div
+        class="context-prompt${prompt ? '' : ' context-prompt--empty'}"
+        contenteditable="true"
+        data-action="edit-prompt"
+        data-placeholder="Describe the assignment or task…"
+      >${prompt}</div>
     </section>
   `
 }
