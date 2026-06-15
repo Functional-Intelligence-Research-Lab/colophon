@@ -691,3 +691,141 @@ async function insertTextIntoDocs(textToInsert) {
     throw error;
   }
 }
+
+// ── IN-PAGE TOAST NOTIFICATION ─────────────────────────────────
+
+async function checkAndInjectStartToast() {
+  console.log("[Colophon] Checking if start toast is needed...");
+
+  const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
+  const isRecording = state?.session?.isRecording;
+  
+  if (isRecording) {
+    console.log("[Colophon] Session already active. Skipping toast.");
+    return; 
+  }
+
+  if (document.getElementById('colophon-inpage-toast')) return;
+
+  console.log("[Colophon] Injecting Trusted-Type safe toast into Google Docs!");
+
+  const toast = document.createElement('div');
+  toast.id = 'colophon-inpage-toast';
+
+  toast.style.cssText = `
+    position: fixed;
+    top: 24px; 
+    right: 24px;
+    background: #202124;
+    color: #fff;
+    padding: 16px 20px;
+    border-radius: 8px;
+    font-family: 'Google Sans', Arial, sans-serif;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    z-index: 2147483647;
+    opacity: 0;
+    transform: translateY(-20px); 
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  `;
+
+  const infoWrapper = document.createElement('div');
+  infoWrapper.style.display = 'flex';
+  infoWrapper.style.alignItems = 'center';
+  infoWrapper.style.gap = '8px';
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("width", "20"); svg.setAttribute("height", "20");
+  svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "#0288d1"); svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
+
+  const circle = document.createElementNS(svgNS, "circle");
+  circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "10");
+
+  const line1 = document.createElementNS(svgNS, "line");
+  line1.setAttribute("x1", "12"); line1.setAttribute("y1", "16"); line1.setAttribute("x2", "12"); line1.setAttribute("y2", "12");
+
+  const line2 = document.createElementNS(svgNS, "line");
+  line2.setAttribute("x1", "12"); line2.setAttribute("y1", "8"); line2.setAttribute("x2", "12.01"); line2.setAttribute("y2", "8");
+
+  svg.append(circle, line1, line2);
+
+  const textNode = document.createElement('span');
+  textNode.textContent = "Colophon is inactive. Start recording before you edit!";
+
+  infoWrapper.append(svg, textNode);
+
+  const startBtn = document.createElement('button');
+  startBtn.id = 'colophon-quick-start';
+  startBtn.textContent = 'Start Session';
+  startBtn.style.cssText = `
+    background: #0288d1;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+  `;
+
+  toast.append(infoWrapper, startBtn);
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  }, 100);
+
+  const removeToast = () => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-20px)';
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 400); 
+  };
+
+  const timeoutId = setTimeout(removeToast, 30000);
+
+  startBtn.addEventListener('mouseenter', () => startBtn.style.background = '#0277bd');
+  startBtn.addEventListener('mouseleave', () => startBtn.style.background = '#0288d1');
+
+  startBtn.addEventListener('click', async () => {
+    clearTimeout(timeoutId);
+
+    startBtn.textContent = 'Starting...';
+    startBtn.style.background = '#28a745'; 
+    startBtn.style.cursor = 'default';
+
+    const currentUrl = window.location.href;
+
+    await chrome.runtime.sendMessage({ type: 'SESSION_START', docUrl: currentUrl }, () => {
+
+      toast.replaceChildren();
+      
+      const successSpan = document.createElement('span');
+      successSpan.style.color = '#28a745';
+      successSpan.style.fontWeight = 'bold';
+      successSpan.textContent = 'Session Started!';
+      
+      toast.appendChild(successSpan);
+      setTimeout(removeToast, 2000);
+    });
+  });
+}
+
+// ── BOOT UP FOR TOAST NOTIFICATION──
+function initColophonUI() {
+  setTimeout(checkAndInjectStartToast, 2000); 
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  initColophonUI();
+} else {
+  window.addEventListener('load', initColophonUI);
+}
