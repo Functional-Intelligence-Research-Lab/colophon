@@ -623,3 +623,83 @@ body {
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+
+/* ───── Selection context banner ─────────────── */
+.selection-banner {
+  margin: 0 20px 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff8ee;
+  border: 1px solid #f0c060;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sel-quote {
+  color: var(--text-primary);
+  font-style: italic;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sel-input {
+  flex: 1;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  outline: none;
+  font-size: 0.8rem;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 2px 0;
+}
+
+.sel-input::placeholder {
+  color: #b0a080;
+}
+
+.sel-ask {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #c08020;
+  background: #c08020;
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sel-ask:hover {
+  opacity: 0.85;
+}
+
+.sel-ask:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sel-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.sel-dismiss:hover {
+  color: var(--text-primary);
+}
