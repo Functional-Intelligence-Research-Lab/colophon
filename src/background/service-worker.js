@@ -16,7 +16,8 @@
 import {
   getSession,
   saveSession,
-  clearSession,
+  getSessionByDocId,
+  saveSessionByDocId,
   ensureUserId,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
@@ -27,6 +28,8 @@ import { HOST_PY_B64 } from "../generated/host-py-b64.js";
 const NATIVE_HOST = 'com.colophon.llamahost';
 let _nativePort = null;
 let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'
+let _lastSelection = { text: '' };
+let _lastDocContext = null;
 
 function getNativePort() {
   if (_nativePort) return _nativePort;
@@ -175,6 +178,19 @@ async function handleMessage(msg, _sender) {
     case 'UPDATE_EVENT_ACCEPTANCE':
       return updateEventAcceptance(msg.payload);
 
+    case 'SELECTION_CHANGED':
+      _lastSelection = msg.payload ?? { text: '' };
+      chrome.runtime.sendMessage({ action: 'SELECTION_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
+      return { ok: true };
+
+    case 'UPDATE_DOC_CONTEXT':
+      _lastDocContext = msg.payload ?? null;
+      chrome.runtime.sendMessage({ action: 'DOC_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
+      return { ok: true };
+
+    case 'GET_SELECTION':
+      return { ok: true, ..._lastSelection };
+
     case 'REQUEST_SETUP_SCRIPT': {
       const info = await chrome.runtime.getPlatformInfo();
       const extId = chrome.runtime.id;
@@ -192,24 +208,39 @@ async function handleMessage(msg, _sender) {
 // ── Session management ────────────────────────────────────────────────────────
 
 async function startSession({ tabId, docUrl } = {}) {
-  await clearSession();
-
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
   const now = new Date().toISOString();
 
-  const session = {
-    sessionId: crypto.randomUUID(),
-    startedAt: now,
-    tabId: tabId ?? null,
-    docId,
-    isRecording: true,
-    events: [],
-    metadata: {
-      assignment_prompt: ""
-    }
-  };
-  session.events.push({ timestamp: now, type: "session_start", meta: {} });
-  console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+  // Persist the currently-active session under its docId before switching away
+  const prevSession = await getSession();
+  if (prevSession?.docId && prevSession.docId !== docId) {
+    await saveSessionByDocId(prevSession.docId, prevSession);
+  }
+
+  // Resume an existing session for this document if one exists
+  let session = docId ? await getSessionByDocId(docId) : null;
+  if (session) {
+    session.isRecording = true;
+    session.tabId = tabId ?? null;
+    session.events.push({ timestamp: now, type: "session_resume", meta: {} });
+    console.log("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
+  } else {
+    const userId = await ensureUserId();
+    session = {
+      sessionId: crypto.randomUUID(),
+      startedAt: now,
+      tabId: tabId ?? null,
+      docId,
+      isRecording: true,
+      events: [],
+      authors: { [userId]: { label: 'Author 1', color: '#5c3ce6' } },
+      metadata: {
+        assignment_prompt: ""
+      }
+    };
+    session.events.push({ timestamp: now, type: "session_start", meta: {} });
+    console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+  }
   await saveSession(session);
 
   // Tell content script to activate its observers
@@ -253,6 +284,7 @@ async function stopSession() {
     eventCount: session.events.length,
   });
   await saveSession(session);
+  if (session.docId) await saveSessionByDocId(session.docId, session);
 
   if (session.tabId) {
     chrome.tabs
@@ -272,7 +304,8 @@ async function appendEvent(event) {
     });
     return { ok: false };
   }
-  session.events.push(event);
+  const userId = await ensureUserId();
+  session.events.push({ author_id: userId, ...event });
   console.log("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
     meta: event.meta,
@@ -300,7 +333,7 @@ async function getState() {
     ? Date.now() - new Date(session.startedAt).getTime()
     : 0;
 
-  return { session, stats: { editCount, aiCount, elapsed } };
+  return { session, stats: { editCount, aiCount, elapsed }, docContext: _lastDocContext };
 }
 
 async function exportSession() {
