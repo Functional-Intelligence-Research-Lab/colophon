@@ -285,6 +285,13 @@ body {
   line-height: 1.5;
 }
 
+.suggestion-warning {
+  font-size: 0.78rem;
+  color: #b45309;
+  margin-bottom: 8px;
+  margin-top: -4px;
+}
+
 .actions {
   display: flex;
   gap: 12px;

@@ -10,6 +10,26 @@ function debounce(func, wait) {
 }
 
 let activeTabId = null;
+let _assignmentPrompt = '';
+let _docContext = null;
+
+function _isMetaCommentary(text) {
+  if (!text || text.length < 15) return true;
+  const lower = text.toLowerCase().trim();
+  return [
+    'the selected text is not provided',
+    'please provide the text',
+    "i don't have",
+    "i'm unable",
+    "i'm sorry",
+    'as an ai',
+    'as a language model',
+    'as an assistant',
+    'i cannot',
+    'i need more context',
+    'could you please provide',
+  ].some(p => lower.includes(p));
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
 
@@ -58,7 +78,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     }, 800); 
 
-    promptElement.addEventListener('input', (e) => autoSavePrompt(e.target.textContent));
+    promptElement.addEventListener('input', (e) => {
+      _assignmentPrompt = e.target.textContent.trim();
+      autoSavePrompt(e.target.textContent);
+    });
   }
 
   // Boot the dynamic renderer
@@ -67,6 +90,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   ModelStatus.init();
   // Wire the chat input box
   ChatInput.init();
+  // Wire highlight-to-AI selection banner
+  SelectionContext.init();
 });
 
 
@@ -79,6 +104,7 @@ const TimelineRenderer = {
   init() {
 
     chrome.runtime.sendMessage({ action: 'GET_STATE' }, (response) => {
+      if (response?.docContext) _docContext = response.docContext;
       if (response?.session?.events) {
         this.render(response.session.events);
 
@@ -103,13 +129,17 @@ const TimelineRenderer = {
         // ──────────────────────────────────────────
       }
       if (response?.session?.metadata?.assignment_prompt) {
-         document.querySelector('.context-card p').textContent = response.session.metadata.assignment_prompt;
+        _assignmentPrompt = response.session.metadata.assignment_prompt;
+        document.querySelector('.context-card p').textContent = _assignmentPrompt;
       }
     });
 
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.action === 'SYNC_TIMELINE') {
         this.render(msg.events);
+      }
+      if (msg.action === 'DOC_CONTEXT_UPDATE') {
+        _docContext = { text: msg.text, cursorIndex: msg.cursorIndex, selectedText: msg.selectedText };
       }
     });
 
@@ -181,12 +211,14 @@ const TimelineRenderer = {
       const fullText = evt.meta.text || "No preview available.";
       const isLong = fullText.length > 100;
       const preview = isLong ? `${fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>` : fullText;
+      const isWarning = _isMetaCommentary(fullText);
 
       contentHTML = `
         <div class="card suggestion-card">
           <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
+          ${isWarning ? '<p class="suggestion-warning">⚠ This looks like a model comment, not insertable text.</p>' : ''}
           <div class="actions">
-            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Use</button>
+            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> ${isWarning ? 'Insert anyway' : 'Use'}</button>
             <button class="btn-dismiss">Dismiss</button>
           </div>
         </div>
@@ -333,25 +365,25 @@ const TimelineRenderer = {
         TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'dismissed' } });
         chrome.runtime.sendMessage({
           action: 'UPDATE_EVENT_STATE',
-          payload: { eventTimestamp: cardTimestamp, status: 'dismissed' } 
-        });
+          payload: { eventTimestamp: cardTimestamp, status: 'dismissed' }
+        }).catch(() => {});
 
         chrome.runtime.sendMessage({
           action: 'LOG_EVENT',
-          payload: { 
-            type: 'ai_interaction', 
+          payload: {
+            type: 'ai_interaction',
             timestamp: new Date().toISOString(),
-            meta: { 
-              model: "local/unknown", // Hardcoded placeholder for compliance
-              output_preview: textPreview.substring(0, 100), 
-              position_start: 0, // Fallback integer
-              position_end: 0, // Fallback integer
-              acceptance: 'rejected', // Standard schema enum
-              ai_chars: 0, 
+            meta: {
+              model: "local/unknown",
+              output_preview: textPreview.substring(0, 100),
+              position_start: 0,
+              position_end: 0,
+              acceptance: 'rejected',
+              ai_chars: 0,
               reason: 'User dismissed suggestion.'
             }
           }
-        });
+        }).catch(() => {});
         return; 
       }
 
@@ -373,7 +405,7 @@ const TimelineRenderer = {
           chrome.runtime.sendMessage({
             action: 'UPDATE_EVENT_STATE',
             payload: { eventTimestamp: cardTimestamp, status: 'used' }
-          });
+          }).catch(() => {});
 
           const interactionTimestamp = new Date().toISOString();
           chrome.runtime.sendMessage({
@@ -386,13 +418,13 @@ const TimelineRenderer = {
                 output_preview: textToInsert.substring(0, 100),
                 position_start: 0,
                 position_end: textToInsert.length,
-                acceptance: 'fully_accepted', // refined by similarity check below
+                acceptance: 'fully_accepted',
                 content_before: "[snapshot unavailable]",
                 content_after: textToInsert,
                 ai_chars: textToInsert.length
               }
             }
-          });
+          }).catch(() => {});
 
           // Refine acceptance after the document has a moment to update
           if (activeTabId) {
@@ -426,6 +458,51 @@ const TimelineRenderer = {
     });
   }
 };
+
+// ── System prompt builder ─────────────────────────────────────────────────────
+
+async function _buildSystemPrompt() {
+  const base = 'You are a concise writing assistant embedded in Google Docs. Help the user with their writing. Keep replies short and direct. [CURSOR] in the document text marks the user\'s current insertion point — treat everything before it as what the user has written so far.';
+  const parts = [base];
+
+  if (_assignmentPrompt) parts.push(`Assignment context: ${_assignmentPrompt}`);
+
+  // Prefer proactively-pushed context (captured while doc was focused); fall back to live fetch
+  let ctx = _docContext;
+  if (!ctx) {
+    try {
+      if (activeTabId) {
+        const tab = await chrome.tabs.get(activeTabId);
+        if (tab.url?.startsWith('https://docs.google.com/document/')) {
+          const res = await chrome.tabs.sendMessage(activeTabId, { action: 'GET_EDITOR_TEXT' });
+          if (res?.text?.trim().length > 20) ctx = res;
+        }
+      }
+    } catch { /* content script not ready or not on a Docs page */ }
+  }
+
+  if (ctx?.text?.trim().length > 20) {
+    const idx = typeof ctx.cursorIndex === 'number' ? ctx.cursorIndex : ctx.text.length;
+    const before = ctx.text.slice(Math.max(0, idx - 2000), idx);
+    const after  = ctx.text.slice(idx, idx + 500);
+    let docSection = `Document (user is writing here):\n---\n${before}`;
+    if (after) docSection += `[CURSOR]${after}`;
+    docSection += '\n---';
+    parts.push(docSection);
+  }
+
+  // Include any active text selection so regular chat is also selection-aware
+  const sel = SelectionContext._state;
+  if (sel?.text?.length >= 10) {
+    parts.push(
+      `The user has highlighted this text:\n"${sel.text.slice(0, 600)}"` +
+      (sel.context_before ? `\nContext before: "${sel.context_before.slice(-200)}"` : '') +
+      (sel.context_after  ? `\nContext after: "${sel.context_after.slice(0, 200)}"` : '')
+    );
+  }
+
+  return parts.join('\n\n');
+}
 
 // ── Acceptance Similarity Scoring ─────────────────────────────────────────────
 function jaccardSimilarity(a, b) {
@@ -500,17 +577,12 @@ const ChatInput = {
     input.disabled = true;
     sendBtn.disabled = true;
 
-    // Log the pending ai_interaction event immediately so it appears in the timeline
     const pendingTimestamp = new Date().toISOString();
-    const pendingEvent = {
-      type: 'ai_suggestion',
-      timestamp: pendingTimestamp,
-      meta: { text: '…thinking' },
-    };
-    TimelineRenderer.render([pendingEvent]);
+    TimelineRenderer.render([{ type: 'ai_suggestion', timestamp: pendingTimestamp, meta: { text: '…thinking' } }]);
 
     try {
-      const { text: reply, model } = await complete(text, { endpoint: this._endpoint });
+      const systemPrompt = await _buildSystemPrompt();
+      const { text: reply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
 
       // Replace the placeholder card with the real suggestion
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
@@ -633,7 +705,7 @@ const ModelStatus = {
       setup_downloaded: {
         text: 'Run the downloaded file, then:',
         actionLabel: 'Check again',
-        actionFn: () => chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }),
+        actionFn: () => chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }).catch(() => {}),
       },
       download: {
         text: 'No local model found.',
@@ -643,7 +715,7 @@ const ModelStatus = {
       launch: {
         text: 'Model downloaded.',
         actionLabel: 'Start AI',
-        actionFn: () => chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }),
+        actionFn: () => chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {}),
       },
     };
 
@@ -693,7 +765,7 @@ const ModelStatus = {
       <span class="banner-text">Downloading… <span id="dl-label">starting</span></span>
       <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
     `;
-    chrome.runtime.sendMessage({ action: 'REQUEST_DOWNLOAD_MODEL' });
+    chrome.runtime.sendMessage({ action: 'REQUEST_DOWNLOAD_MODEL' }).catch(() => {});
   },
 
   _onProgress(label, percent) {
@@ -712,5 +784,143 @@ const ModelStatus = {
 
   _hideBanner() {
     if (this.bannerEl) this.bannerEl.style.display = 'none';
+  },
+};
+
+// ── Highlight-to-AI Selection Context ─────────────────────────────────────────
+const SelectionContext = {
+  el: null,
+  _state: { text: '', context_before: '', context_after: '' },
+
+  init() {
+    this.el = document.getElementById('selection-banner');
+
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.action !== 'SELECTION_CONTEXT_UPDATE') return;
+      if (msg.text && msg.text.length >= 10) {
+        this._state = {
+          text: msg.text,
+          context_before: msg.context_before || '',
+          context_after: msg.context_after || '',
+        };
+        this._show();
+      } else {
+        this._hide();
+      }
+    });
+
+    // Catch selections that happened before the sidepanel opened
+    chrome.runtime.sendMessage({ action: 'GET_SELECTION' }, (res) => {
+      if (chrome.runtime.lastError) return;
+      if (res?.text?.length >= 10) {
+        this._state = {
+          text: res.text,
+          context_before: res.context_before || '',
+          context_after: res.context_after || '',
+        };
+        this._show();
+      }
+    });
+  },
+
+  _show() {
+    if (!this.el) return;
+    const preview = this._state.text.length > 80
+      ? this._state.text.slice(0, 80) + '…'
+      : this._state.text;
+
+    this.el.style.display = 'block';
+    this.el.innerHTML = `
+      <div class="sel-quote">"${preview}"</div>
+      <div class="sel-row">
+        <input class="sel-input" placeholder="Ask something about this…" type="text">
+        <button class="sel-ask banner-btn">Ask AI</button>
+        <button class="sel-dismiss" aria-label="Dismiss">✕</button>
+      </div>
+    `;
+
+    const input = this.el.querySelector('.sel-input');
+    const askBtn = this.el.querySelector('.sel-ask');
+    const dismissBtn = this.el.querySelector('.sel-dismiss');
+
+    const submit = () => this._submit(input.value.trim());
+    askBtn.addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+    dismissBtn.addEventListener('click', () => this._dismiss());
+  },
+
+  _hide() {
+    if (!this.el) return;
+    this.el.style.display = 'none';
+  },
+
+  _dismiss() {
+    this._hide();
+    if (activeTabId) {
+      chrome.tabs.sendMessage(activeTabId, { action: 'CLEAR_SELECTION' }).catch(() => {});
+    }
+  },
+
+  async _submit(question) {
+    const { text, context_before, context_after } = this._state;
+
+    const systemPrompt =
+      await _buildSystemPrompt() +
+      `\n\nThe user has selected this passage:\n"${text.slice(0, 400)}"` +
+      (context_before ? `\nContext before: "${context_before.slice(-200)}"` : '') +
+      (context_after  ? `\nContext after: "${context_after.slice(0, 200)}"` : '');
+
+    const userMessage = question || `Review this selection and give brief feedback.`;
+
+    const pendingTimestamp = new Date().toISOString();
+    TimelineRenderer.render([{ type: 'ai_suggestion', timestamp: pendingTimestamp, meta: { text: '…thinking' } }]);
+
+    const askBtn = this.el?.querySelector('.sel-ask');
+    if (askBtn) { askBtn.disabled = true; askBtn.textContent = '…'; }
+
+    try {
+      const { text: reply, model } = await complete(userMessage, {
+        endpoint: ChatInput._endpoint,
+        systemPrompt,
+      });
+
+      const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
+      if (existing) existing.remove();
+      TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
+
+      const now = new Date().toISOString();
+      TimelineRenderer.render([{ type: 'ai_suggestion', timestamp: now, meta: { text: reply, model } }]);
+
+      chrome.runtime.sendMessage({
+        action: 'LOG_EVENT',
+        payload: {
+          type: 'ai_interaction',
+          timestamp: now,
+          meta: {
+            model,
+            output_preview: reply.substring(0, 200),
+            position_start: 0,
+            position_end: 0,
+            acceptance: 'pending',
+            ai_chars: reply.length,
+            context: text.slice(0, 200),
+          },
+        },
+      });
+
+      if (activeTabId) {
+        setTimeout(() => scoreAcceptance(now, reply, activeTabId), 1500);
+      }
+    } catch (err) {
+      const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
+      if (existing) existing.remove();
+      TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
+      const errMsg = err.name === 'AbortError'
+        ? 'Request timed out. Is the local AI running?'
+        : `AI error: ${err.message}`;
+      ModelStatus._onError(errMsg);
+    } finally {
+      if (askBtn) { askBtn.disabled = false; askBtn.textContent = 'Ask AI'; }
+    }
   },
 };

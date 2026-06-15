@@ -49,10 +49,61 @@ let _listenerTargets = []
 let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
+let _selectionDebounce = null
 
 function _getDocText() {
   return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
     .map(p => p.textContent).join('\n').slice(0, 20000)
+}
+
+function _pushDocContext() {
+  const paras = Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
+  const text = paras.map(p => p.textContent).join('\n')
+  const cursorEl = document.querySelector('.kix-cursor')
+  let cursorIndex = text.length
+  if (cursorEl) {
+    const cursorPara = cursorEl.closest('.kix-paragraphrenderer')
+    if (cursorPara) {
+      let offset = 0
+      for (const para of paras) {
+        if (para === cursorPara) break
+        offset += para.textContent.length + 1
+      }
+      cursorIndex = offset
+    }
+  }
+  const selectedText = window.getSelection()?.toString().trim() ?? ''
+  chrome.runtime.sendMessage({
+    action: 'UPDATE_DOC_CONTEXT',
+    payload: { text, cursorIndex, selectedText },
+  }).catch(() => {})
+}
+
+let _docContextDebounce = null
+function _schedulePushDocContext() {
+  clearTimeout(_docContextDebounce)
+  _docContextDebounce = setTimeout(_pushDocContext, 1000)
+}
+
+function onSelectionChange() {
+  clearTimeout(_selectionDebounce)
+  _selectionDebounce = setTimeout(() => {
+    const text = window.getSelection()?.toString().trim() ?? ''
+    if (text.length < 10) {
+      chrome.runtime.sendMessage({ action: 'SELECTION_CHANGED', payload: { text: '' } }).catch(() => {})
+      _pushDocContext()
+      return
+    }
+    const doc = _getDocText()
+    const idx = doc.indexOf(text.slice(0, 50))
+    const context_before = idx >= 0 ? doc.slice(Math.max(0, idx - 300), idx) : ''
+    const context_after  = idx >= 0 ? doc.slice(idx + text.length, idx + text.length + 300) : ''
+    chrome.runtime.sendMessage({
+      action: 'SELECTION_CHANGED',
+      payload: { text, context_before, context_after },
+    }).catch(() => {})
+    _pushDocContext()
+  }, 600)
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -67,6 +118,11 @@ console.log('[Colophon Content] injected', {
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
   if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
+  if (msg.action === 'CLEAR_SELECTION') {
+    clearTimeout(_selectionDebounce)
+    window.getSelection()?.removeAllRanges()
+    sendResponse({ ok: true })
+  }
   if (msg.type === 'TOGGLE_FLOATING_PANEL') {
     toggleFloatingPanel()
     sendResponse({ ok: true, open: !!_floatingPanel })
@@ -91,14 +147,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.action === 'GET_EDITOR_TEXT') {
-    // Best-effort read of visible paragraph text from the Docs canvas
-    const paras = document.querySelectorAll('.kix-paragraphrenderer');
-    const text = Array.from(paras).map(p => p.textContent).join('\n').slice(0, 4000);
-    sendResponse({ text });
+    const paras = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
+    const text = paras.map(p => p.textContent).join('\n');
+    // Try to locate cursor position by paragraph
+    const cursorEl = document.querySelector('.kix-cursor');
+    let cursorIndex = text.length;
+    if (cursorEl) {
+      const cursorPara = cursorEl.closest('.kix-paragraphrenderer');
+      if (cursorPara) {
+        let offset = 0;
+        for (const para of paras) {
+          if (para === cursorPara) break;
+          offset += para.textContent.length + 1;
+        }
+        cursorIndex = offset;
+      }
+    }
+    sendResponse({ text, cursorIndex });
   }
 })
 
 syncRecordingState()
+document.addEventListener('selectionchange', onSelectionChange)
+document.addEventListener('mouseup', onSelectionChange)
+document.addEventListener('keyup', _schedulePushDocContext)
+window.addEventListener('blur', _pushDocContext)
 
 // ── Activation ────────────────────────────────────────────────────────────────
 
@@ -212,6 +285,7 @@ function deactivate() {
   _active = false
   detachInputListeners()
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  clearTimeout(_selectionDebounce)
   _observer?.disconnect()
   _observer = null
   clearTimeout(_debounce)
