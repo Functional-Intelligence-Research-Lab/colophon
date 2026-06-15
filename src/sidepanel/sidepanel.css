@@ -285,6 +285,12 @@ body {
   line-height: 1.5;
 }
 
+/* Native Gemini suggestions are a read-only record (accepted/rejected in
+   Google's own UI), so there are no action buttons and no bottom margin. */
+.suggestion-card--readonly p {
+  margin-bottom: 0;
+}
+
 .actions {
   display: flex;
   gap: 12px;

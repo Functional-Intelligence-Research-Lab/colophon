@@ -1,4 +1,5 @@
 import { mountColophonPanel } from '../panel/app.js'
+import { createGeminiDetector } from './gemini-detector.js'
 
 /**
  * content.js — Colophon content script
@@ -48,6 +49,23 @@ let _pendingPaste = null
 let _listenerTargets = []
 let _floatingPanel = null
 let _floatingPinned = false
+
+// Native Google Docs Gemini ("Help me write" / "Refine") suggestion detector.
+// Emits ai_suggestion / ai_interaction events via the same send() path as edits.
+const _geminiDetector = createGeminiDetector({
+  emit: event => send('LOG_EVENT', event),
+  log: (...args) => console.log(...args),
+  warn: (...args) => console.warn(...args),
+  // When a Gemini suggestion is accepted, Docs inserts the text. Mark the paste
+  // suppression window so the resulting edit/paste isn't double-logged as a
+  // human edit — the ai_interaction event already records that insertion.
+  onResolve: ({ accepted }) => {
+    if (accepted) {
+      _lastPasteAt = Date.now()
+      _pendingPaste = { startedAt: Date.now(), text: '', logged: true }
+    }
+  },
+})
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -99,6 +117,8 @@ function activate() {
   watchTextEventIframe()
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
   waitForEditor(attachObserver)
+  // Native Gemini suggestion detection (Help me write / Refine)
+  _geminiDetector.start()
   document.addEventListener('visibilitychange', onVisibilityChange)
   console.log('[Colophon Content] recording activated', {
     activeElement: describeElement(document.activeElement),
@@ -185,6 +205,7 @@ function deactivate() {
   if (!_active) return
   _active = false
   detachInputListeners()
+  _geminiDetector.stop()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   _observer?.disconnect()
   _observer = null
