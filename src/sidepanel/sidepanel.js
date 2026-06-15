@@ -1,3 +1,8 @@
+// Dev-only: inject a fake AI suggestion card on a fresh session so the panel
+// can be demoed without triggering Gemini. Keep false on shared branches — when
+// true it writes a fake event into the live, tamper-evident process log.
+const DEBUG_MOCK = false;
+
 // ── Utility: Debounce Function ───────────────────────────────────────────────
 function debounce(func, wait) {
   let timeout;
@@ -78,8 +83,12 @@ const TimelineRenderer = {
       if (response?.session?.events) {
         this.render(response.session.events);
 
-        // ── TEMPORARY MOCK DATA FOR TEAM TESTING ──
-        if (response.session.events.length === 1 && response.session.events[0].type === 'session_start') {
+        // ── MOCK DATA FOR TEAM TESTING (dev only) ──
+        // Off by default: real Gemini detection now emits ai_suggestion events,
+        // and this block previously LOG_EVENT'd a fake suggestion into the live
+        // session on every panel open — polluting the tamper-evident log. Flip
+        // DEBUG_MOCK to true locally to demo a card without triggering Gemini.
+        if (DEBUG_MOCK && response.session.events.length === 1 && response.session.events[0].type === 'session_start') {
           const now = Date.now();
           const mockSuggestion = {
             timestamp: new Date(now + 1000).toISOString(), 
@@ -173,20 +182,35 @@ const TimelineRenderer = {
     
     else if (evt.type === 'ai_suggestion') {
       typeClass = 'ai';
-      authorLabel = 'AI • Suggestion';
-      const fullText = evt.meta.text || "No preview available.";
+      const fullText = evt.meta.text || evt.meta.output_preview || "No preview available.";
       const isLong = fullText.length > 100;
       const preview = isLong ? `${fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>` : fullText;
 
-      contentHTML = `
-        <div class="card suggestion-card">
-          <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
-          <div class="actions">
-            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Use</button>
-            <button class="btn-dismiss">Dismiss</button>
+      // Native Google Docs Gemini suggestions are accepted/rejected in Google's
+      // own UI, not ours — so we render them as a read-only record (no Use/
+      // Dismiss buttons). Colophon-generated suggestions keep the interactive
+      // card so the user can insert/dismiss them from the panel.
+      const isNativeGemini = evt.meta.model === 'google/gemini';
+
+      if (isNativeGemini) {
+        authorLabel = 'Gemini • Suggested';
+        contentHTML = `
+          <div class="card suggestion-card suggestion-card--readonly">
+            <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
           </div>
-        </div>
-      `;
+        `;
+      } else {
+        authorLabel = 'AI • Suggestion';
+        contentHTML = `
+          <div class="card suggestion-card">
+            <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
+            <div class="actions">
+              <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> Use</button>
+              <button class="btn-dismiss">Dismiss</button>
+            </div>
+          </div>
+        `;
+      }
     }
     
     else if (evt.type === 'ai_interaction') {
