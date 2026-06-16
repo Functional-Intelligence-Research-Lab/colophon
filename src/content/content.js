@@ -279,19 +279,40 @@ function bufferEdit(delta) {
     }
     return
   }
+  const nowMs = Date.now()
   if (!_editBuffer) {
-    _editBuffer = { timestamp: new Date().toISOString(), delta: 0 }
+    // keystrokes/firstAt/lastAt drive edit-velocity (chars-per-minute). They
+    // only count real keystrokes — paste-inserted text is excluded above by the
+    // PASTE_SUPPRESSION_MS guard, so velocity never mixes typing with pasting.
+    _editBuffer = { timestamp: new Date().toISOString(), delta: 0, keystrokes: 0, firstAt: nowMs, lastAt: nowMs }
     console.log('[Colophon Content] edit buffer started', { delta })
   }
   _editBuffer.delta += delta
+  _editBuffer.keystrokes += 1
+  _editBuffer.lastAt = nowMs
   console.log('[Colophon Content] edit buffer updated', { delta, total: _editBuffer.delta })
   clearTimeout(_debounce)
   _debounce = setTimeout(flushEdit, DEBOUNCE_MS)
 }
 
+// Above this chars-per-minute a burst is implausibly fast for human typing
+// (~250 wpm ≈ 1250 cpm is near the world record), so we flag it for review.
+const HUMAN_CPM_CEILING = 1500
+
+// Edit velocity in chars/minute over the active typing span (first→last
+// keystroke). Returns null when the span is too short to be meaningful (a
+// single keystroke), so downstream code can treat it as "not measured".
+function editVelocity(buffer) {
+  if (!buffer || buffer.keystrokes < 2) return null
+  const spanMs = buffer.lastAt - buffer.firstAt
+  if (spanMs <= 0) return null
+  return Math.round((buffer.keystrokes / spanMs) * 60000)
+}
+
 function flushEdit() {
   if (!_editBuffer) return
-  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta })
+  const cpm = editVelocity(_editBuffer)
+  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm })
   send('LOG_EVENT', {
     timestamp: _editBuffer.timestamp,
     type: 'edit',
@@ -300,6 +321,10 @@ function flushEdit() {
       position_end:   Math.max(0, _editBuffer.delta),
       char_delta:     _editBuffer.delta,
       source:         'human',
+      // Edit velocity (chars/min) over this burst, and a flag when it exceeds
+      // plausible human typing speed — a signal for AI-pasted-then-disguised
+      // text. null cpm = burst too short to measure.
+      ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: cpm > HUMAN_CPM_CEILING } : {}),
     },
   })
   _editBuffer = null
