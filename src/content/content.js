@@ -1,5 +1,7 @@
 import { mountColophonPanel } from '../panel/app.js'
 import { createGeminiDetector } from './gemini-detector.js'
+import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
+import { classifyInsertion } from './block-insertion.js'
 
 /**
  * content.js — Colophon content script
@@ -188,6 +190,11 @@ function attachTextEventIframe() {
   }
 }
 
+// Always-on recording (spike). When true, a Doc load auto-starts a session so
+// text written before any "Start recording" click is still captured — closing
+// the opt-in blind spot. Flip to false to revert to manual/opt-in recording.
+const AUTO_RECORD = true
+
 async function syncRecordingState() {
   try {
     const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
@@ -195,9 +202,18 @@ async function syncRecordingState() {
       hasSession: !!state?.session,
       isRecording: !!state?.session?.isRecording,
     })
-    if (state?.session?.isRecording) activate()
+    if (state?.session?.isRecording) {
+      activate()
+      return
+    }
+    if (AUTO_RECORD) {
+      // SW derives tab/url from the sender and won't clobber a live session.
+      const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
+      console.log('[Colophon Content] auto-record requested', res)
+      if (res?.ok) activate()
+    }
   } catch {
-    // Popup activation remains the main path if the service worker is waking.
+    // Popup activation remains the fallback path if the service worker is waking.
   }
 }
 
@@ -229,9 +245,10 @@ function onKeydown(e) {
   }
 
   // Backspace/Delete remove a character; everything else adds one
-  const delta = (e.key === 'Backspace' || e.key === 'Delete') ? -1 : 1
+  const isDelete = (e.key === 'Backspace' || e.key === 'Delete')
+  const delta = isDelete ? -1 : 1
   console.log('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
-  bufferEdit(delta)
+  bufferEdit(delta, isDelete)
 }
 
 // ── Edit capture: MutationObserver (secondary) ────────────────────────────────
@@ -271,7 +288,7 @@ function onMutation(mutations) {
 
 // ── Shared buffer + debounce ──────────────────────────────────────────────────
 
-function bufferEdit(delta) {
+function bufferEdit(delta, isDelete = false) {
   if (Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
     console.log('[Colophon Content] edit suppressed after paste', { delta })
     if (_pendingPaste && !_pendingPaste.logged && delta > 0) {
@@ -279,19 +296,27 @@ function bufferEdit(delta) {
     }
     return
   }
+  const nowMs = Date.now()
   if (!_editBuffer) {
-    _editBuffer = { timestamp: new Date().toISOString(), delta: 0 }
+    // The velocity tracker only sees keystrokes that pass the paste guard above,
+    // so velocity never mixes typing with pasting. It handles pauses (idle gaps)
+    // and churn (backspace/delete) internally — see edit-velocity.js.
+    _editBuffer = { timestamp: new Date().toISOString(), delta: 0, velocity: createVelocityTracker() }
     console.log('[Colophon Content] edit buffer started', { delta })
   }
   _editBuffer.delta += delta
+  _editBuffer.velocity.record(isDelete, nowMs)
   console.log('[Colophon Content] edit buffer updated', { delta, total: _editBuffer.delta })
   clearTimeout(_debounce)
   _debounce = setTimeout(flushEdit, DEBOUNCE_MS)
 }
 
+
 function flushEdit() {
   if (!_editBuffer) return
-  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta })
+  const v = _editBuffer.velocity.summary()
+  const cpm = v.chars_per_min
+  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, churn: v.churn_keys })
   send('LOG_EVENT', {
     timestamp: _editBuffer.timestamp,
     type: 'edit',
@@ -300,6 +325,12 @@ function flushEdit() {
       position_end:   Math.max(0, _editBuffer.delta),
       char_delta:     _editBuffer.delta,
       source:         'human',
+      // Edit velocity (chars/min) over active typing time (pauses excluded),
+      // with a flag when it exceeds plausible human speed — a signal for
+      // AI-pasted-then-disguised text. churn_keys = backspace/delete count.
+      // null cpm = burst too short to measure.
+      ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
+      churn_keys: v.churn_keys,
     },
   })
   _editBuffer = null
@@ -326,11 +357,35 @@ function onBeforeInput(e) {
 
 function onInput(e) {
   if (!_active) return
+  const inputType = e.inputType ?? ''
+  const insertedLength = e.data?.length ?? 0
   console.log('[Colophon Content] input event', {
-    inputType: e.inputType ?? '',
-    dataLength: e.data?.length ?? 0,
+    inputType,
+    dataLength: insertedLength,
     target: describeElement(e.target),
   })
+
+  // Block-insertion detection: a large chunk arriving in one input frame wasn't
+  // typed. Classify paste vs AI vs unknown ("humanised"/injected text). Paste
+  // and AI already have dedicated events; we emit a block_insertion signal only
+  // for the UNKNOWN case so we don't double-log what onPaste / the Gemini
+  // detector already cover.
+  const { isBlock, origin, chars } = classifyInsertion({ inputType, insertedLength })
+  if (isBlock && origin === 'unknown') {
+    console.log('[Colophon Content] block insertion (unattributed)', { chars, inputType })
+    send('LOG_EVENT', {
+      timestamp: new Date().toISOString(),
+      type: 'edit',
+      meta: {
+        position_start: 0,
+        position_end:   chars,
+        char_delta:     chars,
+        source:         'unknown',       // not typed, not a known paste/AI insert
+        block_insertion: true,
+        block_chars:     chars,
+      },
+    })
+  }
 }
 
 function markPaste(text) {
