@@ -43,8 +43,13 @@ describe('gemini-selectors classification', () => {
   })
 
   it('only treats a container as Gemini when it has a Gemini cue', () => {
-    const withGeminiName = fakeEl({ ariaLabel: 'Gemini suggestion' })
-    expect(looksLikeGeminiSuggestion(withGeminiName)).toBe(true)
+    // "Gemini" alone is too broad (matches Ask Gemini button, menu items, etc.)
+    const withGeminiOnly = fakeEl({ ariaLabel: 'Gemini suggestion' })
+    expect(looksLikeGeminiSuggestion(withGeminiOnly)).toBe(false)
+
+    // "Help me write" is the specific feature label — should still match
+    const withHelpMeWrite = fakeEl({ ariaLabel: 'Help me write' })
+    expect(looksLikeGeminiSuggestion(withHelpMeWrite)).toBe(true)
 
     const withAcceptButton = fakeEl({
       text: 'Some draft text',

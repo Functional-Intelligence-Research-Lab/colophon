@@ -396,9 +396,14 @@ function onVisibilityChange() {
 
 function send(type, payload = {}) {
   console.log('[Colophon Content] send message', { type, payloadType: payload?.type ?? null })
-  chrome.runtime.sendMessage({ type, payload }).catch(() => {
-    // SW may be inactive — Chrome will revive it on the next message
-  })
+  try {
+    chrome.runtime.sendMessage({ type, payload }).catch(() => {
+      // SW may be inactive — Chrome will revive it on the next message
+    })
+  } catch {
+    // Extension context invalidated: extension was reloaded mid-session.
+    // Silently drop the message — refreshing the tab will restore the connection.
+  }
 }
 
 // ── Export Fetcher (Bypasses Auth Blocks) ─────────────────────────────────────

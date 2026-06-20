@@ -77,14 +77,19 @@ export const REFINE_LABELS = [
  * lower-confidence than a semantic match.
  */
 export const SUGGESTION_CONTAINER_SELECTORS = [
-  // Semantic first — a modal/dialog popover that contains a Gemini accept action.
+  // Barkick response area — checked first because it is the primary surface.
+  // More specific than any aria-label selector; only present when a response exists.
+  '.appsElementsSidekickBarkickTopBox',
+
+  // Semantic selectors for the classic "Help me write" popover.
+  // NOTE: '[aria-label*="Gemini" i]' (standalone) is intentionally omitted — it
+  // matches too many permanent UI elements (Ask Gemini button, menu items, etc.)
+  // and blocks detection of the real response container.
   '[role="dialog"]',
   '[role="region"][aria-label*="Gemini" i]',
   '[aria-label*="Help me write" i]',
-  '[aria-label*="Gemini" i]',
 
   // Class-based fallbacks (obfuscated, expected to drift over time).
-  '.kixWizBarkickWrapper',   // bottom Gemini pill/bar wrapper
   '.docs-gm-promo-container',
   '#docs-instant-bubble',    // "Refine" bubble shown on a text selection
 ]
@@ -96,7 +101,7 @@ export const SUGGESTION_CONTAINER_SELECTORS = [
  */
 export const GEMINI_PRESENCE_SELECTORS = [
   '.appsElementsSidekickEntryPointRoot', // "Ask Gemini" side-panel entry button
-  '.kixWizBarkickWrapper',
+  '.kixWizBarkickContainer',             // bottom Gemini bar (was .kixWizBarkickWrapper — drifted)
   '[aria-label*="Gemini" i]',
 ]
 
@@ -155,7 +160,13 @@ export function findSuggestionContainer(root = document) {
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
   const name = accessibleName(container)
-  if (name.includes('gemini') || name.includes('help me write')) return true
+  // "help me write" is specific to this feature. "gemini" alone is intentionally
+  // excluded — it matches the Ask Gemini button, menu items, and other permanent
+  // UI elements that are not suggestion containers.
+  if (name.includes('help me write')) return true
+  // Barkick response area: identified by the Gemini spark icon inside it.
+  // The spark icon is only rendered once a response exists (not on the empty bar).
+  if (container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) return true
   const buttons = container.querySelectorAll?.('button, [role="button"]') ?? []
   for (const b of buttons) {
     const bn = accessibleName(b)
