@@ -106,9 +106,11 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     }
 
     const container = findSuggestionContainer(document)
+    log('[Colophon Gemini] scan', { container: container?.className ?? null })
 
     if (container) {
       const text = extractSuggestionText(container)
+      log('[Colophon Gemini] extracted text', { len: text.length, preview: text.slice(0, 60) })
       // New suggestion, or the text changed (Refine/regenerate produced a new
       // draft) — treat as a fresh suggestion.
       if (text && (!_current || _current.text !== text)) {
@@ -163,6 +165,7 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     // _current is the meaningful guard: it is only set while a suggestion is on
     // screen, and stop() clears it. (No _active check so the logic is testable
     // without starting the observer.)
+    log('[Colophon Gemini] click', { hasCurrent: !!_current, target: e.target?.className ?? null })
     if (!_current || _current.resolved) return
 
     // Walk up from the click target to find a button/role=button with a
@@ -172,7 +175,9 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       // Duck-typed element check (works in tests without a DOM): needs the
       // getAttribute/textContent surface that classifyAction reads.
       if (typeof node.getAttribute !== 'function') continue
+      const name = accessibleName(node)
       const action = classifyAction(node)
+      log('[Colophon Gemini] click walk', { i, tag: node.tagName, name, action })
       if (action === 'accept') {
         resolveCurrent('fully_accepted', null, node)
         return
@@ -234,10 +239,15 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
 
   function extractSuggestionText(container) {
     if (!container || !looksLikeGeminiSuggestion(container)) return ''
-    // The draft is the popover's prose, not its button labels. Clone, strip
-    // interactive controls, then read the remaining text.
-    const clone = container.cloneNode(true)
-    clone.querySelectorAll('button, [role="button"], textarea, input').forEach(n => n.remove())
+    // For the Barkick bar the response prose lives in a specific sub-container.
+    // Scoping to it avoids picking up the user's own prompt text (which lives in
+    // a sibling input area in the same outer wrapper).
+    const responseArea = container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseContainerOneSystem') ?? container
+    const clone = responseArea.cloneNode(true)
+    // Strip interactive controls and the icon/controls top-row so only prose remains.
+    clone.querySelectorAll(
+      'button, [role="button"], textarea, input, .appsElementsSidekickBarkickTopBoxResponseTopRow'
+    ).forEach(n => n.remove())
     const text = (clone.textContent ?? '').trim().replace(/\s+/g, ' ')
     return text
   }
