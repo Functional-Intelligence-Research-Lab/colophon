@@ -21,13 +21,24 @@ function eventToItem(evt) {
   const meta = evt.meta ?? {}
 
   switch (evt.type) {
-    case 'edit':
+    case 'edit': {
+      const deltaWords = Number(meta.delta_words ?? 0)
+      const charDelta = Number(meta.char_delta ?? 0)
+      const hasContentPreview = typeof meta.content_after === 'string' && meta.content_after.length > 0
+      const hasWordDelta = Number.isFinite(deltaWords) && deltaWords !== 0
+      const hasCharDelta = Number.isFinite(charDelta) && charDelta !== 0
+
+      if (!hasContentPreview && !hasWordDelta && !hasCharDelta) return null
+
       return {
         id, type: 'edit', kind: 'you', actor: 'You', label: 'Edited', time,
-        copy: meta.content_after
+        copy: hasContentPreview
           ? `"${meta.content_after.slice(0, 60)}"`
-          : `${meta.delta_words || 0} words edited`,
+          : hasWordDelta
+            ? `${Math.abs(deltaWords)} ${Math.abs(deltaWords) === 1 ? 'word' : 'words'} ${deltaWords > 0 ? 'added' : 'removed'}`
+            : `${Math.abs(charDelta)} ${Math.abs(charDelta) === 1 ? 'char' : 'chars'} ${charDelta > 0 ? 'added' : 'removed'}`,
       }
+    }
 
     case 'paste':
       return {

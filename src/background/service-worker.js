@@ -161,6 +161,14 @@ async function appendEvent(event) {
     });
     return { ok: false };
   }
+  if (isNoOpEditEvent(event)) {
+    console.log("[Colophon SW] LOG_EVENT ignored", {
+      type: event?.type ?? "unknown",
+      reason: "zero edit",
+      meta: event?.meta,
+    });
+    return { ok: true, ignored: true };
+  }
   session.events.push(event);
   console.log("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
@@ -175,6 +183,20 @@ async function appendEvent(event) {
   }).catch(() => {});
 
   return { ok: true };
+}
+
+function isNoOpEditEvent(event) {
+  if (event?.type !== "edit") return false;
+  const meta = event.meta ?? {};
+  const deltaWords = Number(meta.delta_words ?? 0);
+  const charDelta = Number(meta.char_delta ?? 0);
+  const contentAfter = typeof meta.content_after === "string" ? meta.content_after : "";
+
+  return contentAfter.length === 0
+    && Number.isFinite(deltaWords)
+    && Number.isFinite(charDelta)
+    && deltaWords === 0
+    && charDelta === 0;
 }
 
 async function getState() {
