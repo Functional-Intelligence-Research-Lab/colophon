@@ -50,6 +50,9 @@ let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
 let _selectionDebounce = null
+let _rollingBaselineState = "";
+let _baselineTimer = null;
+let _isFetchingBaseline = false;
 
 function _getDocText() {
   return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
@@ -220,8 +223,8 @@ function attachInputListeners(target, label) {
   if (!target || _listenerTargets.some(item => item.target === target)) return
   target.addEventListener('keydown', onKeydown, true)
   target.addEventListener('paste', onPaste, true)
-  target.addEventListener('beforeinput', onBeforeInput, true)
-  target.addEventListener('input', onInput, true)
+  //target.addEventListener('beforeinput', onBeforeInput, true)
+  //target.addEventListener('input', onInput, true)
   _listenerTargets.push({ target, label })
   console.log('[Colophon Content] input listeners attached', { label })
 }
@@ -230,8 +233,8 @@ function detachInputListeners() {
   for (const { target, label } of _listenerTargets) {
     target.removeEventListener('keydown', onKeydown, true)
     target.removeEventListener('paste', onPaste, true)
-    target.removeEventListener('beforeinput', onBeforeInput, true)
-    target.removeEventListener('input', onInput, true)
+    //target.removeEventListener('beforeinput', onBeforeInput, true)
+    //target.removeEventListener('input', onInput, true)
     console.log('[Colophon Content] input listeners detached', { label })
   }
   _listenerTargets = []
@@ -354,11 +357,8 @@ function onMutation(mutations) {
 
 function bufferEdit(delta) {
   if (Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
-    console.log('[Colophon Content] edit suppressed after paste', { delta })
-    if (_pendingPaste && !_pendingPaste.logged && delta > 0) {
-      emitPaste('', delta)
-    }
-    return
+    console.log('[Colophon Content] Edit suppressed after paste', { delta })
+    return;
   }
   if (!_editBuffer) {
     _editBuffer = { timestamp: new Date().toISOString(), delta: 0 }
@@ -389,55 +389,69 @@ function flushEdit() {
 // ── Paste capture ─────────────────────────────────────────────────────────────
 
 function onPaste(e) {
-  if (!_active) return
-  if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') {
-    return;
+  if (!_active) return;
+  
+  const now = Date.now();
+  if (now - _lastPasteAt < 100) {
+    console.warn('[Colophon Content] Ghost paste detected and destroyed.');
+    return; 
   }
-  const text = e.clipboardData?.getData('text/plain') ?? ''
-  console.log('[Colophon Content] paste event', { charCount: text.length, target: describeElement(e.target) })
-  markPaste(text)
+  
+  _lastPasteAt = now;
+
+  if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') return;
+  
+  const text = e.clipboardData?.getData('text/plain') ?? '';
+  if (!text) return;
+
+  console.log('[TWFF] Paste intercepted. Running Async Emitter...');
+  emitPaste(text);
 }
+// function onPaste(e) {
+//   if (!_active) return
+//   if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') {
+//     return;
+//   }
+//   const text = e.clipboardData?.getData('text/plain') ?? ''
+//   console.log('[Colophon Content] paste event', { charCount: text.length, target: describeElement(e.target) })
+//   markPaste(text)
+// }
 
-function onBeforeInput(e) {
-  if (!_active || e.inputType !== 'insertFromPaste') return
-  const text = e.dataTransfer?.getData('text/plain') ?? e.data ?? ''
-  console.log('[Colophon Content] beforeinput paste', { charCount: text.length, target: describeElement(e.target) })
-  markPaste(text)
-}
+// function onBeforeInput(e) {
+//   if (!_active || e.inputType !== 'insertFromPaste') return
+//   const text = e.dataTransfer?.getData('text/plain') ?? e.data ?? ''
+//   console.log('[Colophon Content] beforeinput paste', { charCount: text.length, target: describeElement(e.target) })
+//   markPaste(text)
+// }
 
-function onInput(e) {
-  if (!_active) return
-  console.log('[Colophon Content] input event', {
-    inputType: e.inputType ?? '',
-    dataLength: e.data?.length ?? 0,
-    target: describeElement(e.target),
-  })
-}
+// function onInput(e) {
+//   if (!_active) return
+//   console.log('[Colophon Content] input event', {
+//     inputType: e.inputType ?? '',
+//     dataLength: e.data?.length ?? 0,
+//     target: describeElement(e.target),
+//   })
+// }
 
-function markPaste(text) {
-  const now = Date.now()
-  if (!_pendingPaste || now - _pendingPaste.startedAt >= PASTE_SUPPRESSION_MS) {
-    _pendingPaste = { startedAt: now, text: '', logged: false }
-  }
+// function markPaste(text) {
+//   const now = Date.now()
+//   if (!_pendingPaste || now - _pendingPaste.startedAt >= PASTE_SUPPRESSION_MS) {
+//     _pendingPaste = { startedAt: now, text: '', logged: false }
+//   }
 
-  _lastPasteAt = now
-  if (text.length > _pendingPaste.text.length) {
-    _pendingPaste.text = text
-  }
+//   _lastPasteAt = now
+//   if (text.length > _pendingPaste.text.length) {
+//     _pendingPaste.text = text
+//   }
 
-  if (_pendingPaste.text && !_pendingPaste.logged) {
-    emitPaste(_pendingPaste.text)
-  }
-}
+//   if (_pendingPaste.text && !_pendingPaste.logged) {
+//     emitPaste(_pendingPaste.text)
+//   }
+// }
 
-function emitPaste(text, fallbackCharCount = null) {
-  const charCount = fallbackCharCount ?? text.length
-  if (_pendingPaste) _pendingPaste.logged = true
-  console.log('[Colophon Content] paste emit', {
-    charCount,
-    hasPreview: text.length > 0,
-    fallback: fallbackCharCount !== null,
-  })
+async function emitPaste(text) {
+  const charCount = text.length;
+  //if (typeof _pendingPaste !== 'undefined' && _pendingPaste) _pendingPaste.logged = true;
 
   const event = {
     timestamp: new Date().toISOString(),
@@ -448,24 +462,82 @@ function emitPaste(text, fallbackCharCount = null) {
       position_start: 0,
       position_end:   charCount,
       output_preview: formatPreview(text),
+      content_before: "",
+      content_after:  ""
     },
-  }
+  };
 
-  if (text.length > 0) {
-    // Wait for the DOM to reflect the paste, then capture surrounding context
-    setTimeout(() => {
-      const doc = _getDocText()
-      const idx = doc.indexOf(text.slice(0, 50))
-      if (idx >= 0) {
-        event.meta.content_before = doc.slice(Math.max(0, idx - 300), idx)
-        event.meta.content_after  = doc.slice(idx + text.length, idx + text.length + 300)
+  const docStateBefore = _rollingBaselineState;
+
+  setTimeout(async () => {
+    
+    const docStateAfter = await getDocumentText();
+
+    if (docStateAfter) {
+      let startIndex = -1;
+
+      // Diff Engine vs. Race Condition Fallback
+      if (docStateBefore && docStateBefore.length !== docStateAfter.length) {
+        startIndex = findFirstDifference(docStateBefore, docStateAfter);
+      } else {
+        console.warn("[Colophon Content] Baseline sync missed. Falling back to index search.");
+        startIndex = docStateAfter.lastIndexOf(text);
       }
-      send('LOG_EVENT', event)
-    }, 200)
-  } else {
-    send('LOG_EVENT', event)
-  }
+
+      // Context Extraction
+      if (startIndex >= 0) {
+        event.meta.content_before = docStateAfter.slice(Math.max(0, startIndex - 300), startIndex).trim();
+        const endIndex = startIndex + charCount;
+        event.meta.content_after = docStateAfter.slice(endIndex, endIndex + 300).trim();
+        event.meta.position_start = startIndex;
+        event.meta.position_end = endIndex;
+      }
+    }
+
+    console.log("[Colophon Content] Final Event Ready:", event);
+    send('LOG_EVENT', event);
+
+    _rollingBaselineState = docStateAfter;
+
+  }, 1000); 
 }
+
+// function emitPaste(text, fallbackCharCount = null) {
+//   const charCount = fallbackCharCount ?? text.length
+//   if (_pendingPaste) _pendingPaste.logged = true
+//   console.log('[Colophon Content] paste emit', {
+//     charCount,
+//     hasPreview: text.length > 0,
+//     fallback: fallbackCharCount !== null,
+//   })
+
+//   const event = {
+//     timestamp: new Date().toISOString(),
+//     type: 'paste',
+//     meta: {
+//       char_count:     charCount,
+//       source:         'external',
+//       position_start: 0,
+//       position_end:   charCount,
+//       output_preview: formatPreview(text),
+//     },
+//   }
+
+//   if (text.length > 0) {
+//     // Wait for the DOM to reflect the paste, then capture surrounding context
+//     setTimeout(() => {
+//       const doc = _getDocText()
+//       const idx = doc.indexOf(text.slice(0, 50))
+//       if (idx >= 0) {
+//         event.meta.content_before = doc.slice(Math.max(0, idx - 300), idx)
+//         event.meta.content_after  = doc.slice(idx + text.length, idx + text.length + 300)
+//       }
+//       send('LOG_EVENT', event)
+//     }, 200)
+//   } else {
+//     send('LOG_EVENT', event)
+//   }
+// }
 
 // ── Focus tracking ────────────────────────────────────────────────────────────
 
@@ -829,3 +901,68 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 } else {
   window.addEventListener('load', initColophonUI);
 }
+
+/**
+ * ── EXPORT GRABBER ──
+ * Silently downloads the current document state into RAM as a .txt file.
+ */
+async function getDocumentText() {
+  const match = window.location.pathname.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) return "";
+  const docId = match[1];
+
+  try {
+    const response = await fetch(`https://docs.google.com/document/d/${docId}/export?format=txt`);
+    if (!response.ok) throw new Error(`Status: ${response.status}`);
+    
+    let text = await response.text();
+    return text.replace(/^\uFEFF/, '');
+  } catch (err) {
+    console.error("[Colophon Content] Failed to download document state:", err);
+    return "";
+  }
+}
+
+/**
+ * Compares two document states character-by-character.
+ * Returns the exact index where the new text was inserted.
+ */
+function findFirstDifference(oldText, newText) {
+  if (!oldText || !newText) return -1;
+  
+  let i = 0;
+
+  while (i < oldText.length && i < newText.length && oldText[i] === newText[i]) {
+    i++;
+  }
+  return i; 
+}
+
+async function updateRollingBaseline() {
+  if (_isFetchingBaseline) return; // Mutex Lock: Abort if already downloading
+  
+  _isFetchingBaseline = true; 
+  try {
+    const text = await getDocumentText();
+    if (text) _rollingBaselineState = text;
+  } catch (err) {
+    console.error("[Colophon Content] Baseline fetch failed:", err);
+  } finally {
+    _isFetchingBaseline = false; // Unlock
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
+
+  clearTimeout(_baselineTimer);
+  
+  let delayMs = 1500; 
+  const docSizeKb = _rollingBaselineState.length / 1024;
+  
+  if (docSizeKb >= 50 && docSizeKb < 300) delayMs = 3000;
+  else if (docSizeKb >= 300) delayMs = 5000;
+
+  _baselineTimer = setTimeout(updateRollingBaseline, delayMs); 
+});

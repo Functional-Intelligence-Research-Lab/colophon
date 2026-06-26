@@ -19,6 +19,7 @@ import {
   getSessionByDocId,
   saveSessionByDocId,
   ensureUserId,
+  clearSession,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
 import { HOST_PY_B64 } from "../generated/host-py-b64.js";
