@@ -312,81 +312,156 @@ function hideError() {
 
 // ── Annotated PDF ─────────────────────────────────────────────────────────────
 
-// Fuzzy prefix match: try progressively shorter prefixes to survive minor drift.
-function _fuzzyFind(haystack, needle) {
-  const normH = haystack.replace(/\s+/g, ' ');
+// Fuzzy prefix match
+function _fuzzyFind(haystack, needle, expectedLength, consumedRanges, ctxBefore = '', ctxAfter = '') {
   const normN = needle.replace(/\s+/g, ' ').trim();
+  const normB = ctxBefore.replace(/\s+/g, ' ').trim();
+  const normA = ctxAfter.replace(/\s+/g, ' ').trim();
+  
+  const beforeCharCount = ctxBefore.replace(/\s+/g, '').length;
+
+  const escapeRe = (str) => str.split(/\s+/).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+  
   for (const len of [80, 60, 40, 25, 15]) {
     const prefix = normN.slice(0, len);
     if (prefix.length < 10) break;
-    const pos = normH.indexOf(prefix);
-    if (pos >= 0) return pos;
+
+    // Build the regex for the start boundary
+    let startRegexParts = [];
+    if (normB) startRegexParts.push(escapeRe(normB));
+    startRegexParts.push(escapeRe(prefix));
+    const startRegexStr = startRegexParts.join('\\s*');
+
+    try {
+      const regex = new RegExp(startRegexStr, 'gi');
+      let match;
+
+      while ((match = regex.exec(haystack)) !== null) {
+        let currentPos = match.index;
+        
+        // Advance past the contextBefore characters
+        let charsSeen = 0;
+        while (currentPos < haystack.length && charsSeen < beforeCharCount) {
+          if (!/\s/.test(haystack[currentPos])) charsSeen++;
+          currentPos++;
+        }
+        // Advance past any immediate spaces to hit the exact first char of the text
+        while (currentPos < haystack.length && /\s/.test(haystack[currentPos])) {
+          currentPos++;
+        }
+
+        const startPos = currentPos;
+        let endPos = -1;
+
+        if (normA) {
+          const afterPrefix = normA.slice(0, 30);
+          const endRegex = new RegExp(escapeRe(afterPrefix), 'gi');
+          endRegex.lastIndex = startPos; // Start looking forward from the paste start
+          const endMatch = endRegex.exec(haystack);
+
+          if (endMatch && endMatch.index <= startPos + (expectedLength * 2) + 1000) {
+            endPos = endMatch.index;
+          }
+        }
+
+        // Fallback: If context_after is empty or deleted, use expectedLength
+        if (endPos === -1) {
+          const targetLength = expectedLength || needle.length;
+          endPos = startPos + targetLength;
+          endPos = Math.min(endPos, haystack.length);
+        }
+
+        // Trim trailing whitespace from the highlight bounds
+        while (endPos > startPos && /\s/.test(haystack[endPos - 1])) {
+          endPos--;
+        }
+
+        const finalLength = endPos - startPos;
+
+        // Memory check
+        const isConsumed = consumedRanges.some(range => 
+          startPos < range.end && endPos > range.start
+        );
+
+        if (!isConsumed && finalLength > 0) {
+          return { pos: startPos, length: finalLength };
+        }
+      }
+    } catch (e) {
+      continue;
+    }
   }
-  return -1;
+  return null;
 }
 
 // Walk all text nodes under root and wrap the first match in a <mark>.
 // Returns true if a match was found and wrapped.
-function _wrapFirstMatch(docDom, root, needle, annType, label) {
-  const normNeedle = needle.replace(/\s+/g, ' ').trim();
+function _wrapFirstMatch(docDom, root, needle, annType, label, expectedLength, consumedRanges, ctxBefore, ctxAfter) {
   const walker = docDom.createTreeWalker(root, 0x4 /* NodeFilter.SHOW_TEXT */);
   const nodes = [];
   let node;
   while ((node = walker.nextNode())) nodes.push(node);
 
-  // Build concatenated text, preserving node boundaries
   let concat = '';
-  const offsets = []; // offsets[i] = start index of nodes[i] in concat
+  const offsets = []; 
   for (const n of nodes) {
     offsets.push(concat.length);
     concat += n.textContent;
   }
 
-  const pos = _fuzzyFind(concat, normNeedle);
-  if (pos < 0) return false;
+  // Pass context to the scout
+  const matchData = _fuzzyFind(concat, needle, expectedLength, consumedRanges, ctxBefore, ctxAfter);
+  if (!matchData) return false;
 
-  const matchEnd = pos + normNeedle.slice(0, 80).length;
+  const startPos = matchData.pos;
+  const endPos = matchData.pos + matchData.length;
+  let wrapped = false;
 
-  // Find the single text node that contains pos (most common case)
   for (let i = 0; i < nodes.length; i++) {
-    const start = offsets[i];
-    const end   = start + nodes[i].textContent.length;
-    if (start <= pos && pos < end) {
-      const n = nodes[i];
-      const localStart = pos - start;
-      const localEnd   = Math.min(matchEnd - start, n.textContent.length);
+    const n = nodes[i];
+    const nodeStart = offsets[i];
+    const nodeEnd = nodeStart + n.textContent.length;
+
+    if (nodeEnd > startPos && nodeStart < endPos) {
+      const localStart = Math.max(0, startPos - nodeStart);
+      const localEnd = Math.min(n.textContent.length, endPos - nodeStart);
+
       const before = n.textContent.slice(0, localStart);
-      const match  = n.textContent.slice(localStart, localEnd);
-      const after  = n.textContent.slice(localEnd);
-      if (!match) return false;
+      const matchText = n.textContent.slice(localStart, localEnd);
+      const after = n.textContent.slice(localEnd);
 
-      const mark = docDom.createElement('mark');
-      mark.className = `ann-${annType}`;
-      mark.title = label;
-      mark.textContent = match;
-
-      const parent = n.parentNode;
-      if (before) parent.insertBefore(docDom.createTextNode(before), n);
-      parent.insertBefore(mark, n);
-      if (after) parent.insertBefore(docDom.createTextNode(after), n);
-      parent.removeChild(n);
-      return true;
+      if (matchText) {
+        const parent = n.parentNode;
+        if (before) parent.insertBefore(docDom.createTextNode(before), n);
+        
+        const mark = docDom.createElement('mark');
+        mark.className = `ann-${annType}`;
+        mark.title = label;
+        mark.textContent = matchText;
+        parent.insertBefore(mark, n);
+        
+        if (after) parent.insertBefore(docDom.createTextNode(after), n);
+        parent.removeChild(n);
+        wrapped = true;
+      }
     }
   }
-  return false;
+  
+  // Save spatial coordinates to memory
+  if (wrapped) consumedRanges.push({ start: startPos, end: endPos });
+  return wrapped;
 }
 
 function openAnnotatedView(log, meta, xhtmlStr) {
   const events   = log.events ?? [];
   const docTitle = meta.title || log.title || 'Untitled document';
 
-  // Parse the stored XHTML — preserve structure and original styles
   let docDom = null;
   let xhtmlStyles = '';
   if (xhtmlStr) {
     try {
       docDom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
-      // Extract <style> blocks from XHTML head to preserve Google Docs formatting
+       // Extract <style> blocks from XHTML head to preserve Google Docs formatting
       const styleTags = docDom.querySelectorAll('style');
       xhtmlStyles = Array.from(styleTags).map(s => s.textContent).join('\n');
     } catch { docDom = null; }
@@ -395,32 +470,49 @@ function openAnnotatedView(log, meta, xhtmlStr) {
   // Collect annotations from events
   const annotations = [];
   for (const evt of events) {
-    let annType = null, label = null, searchText = null;
+    let annType = null, label = null, searchText = null, expectedLength = 0;
+    
+    // Extract context fields, defaulting to empty strings for backward compatibility
+    const ctxBefore = evt.meta?.context_before || '';
+    const ctxAfter = evt.meta?.context_after || '';
+
     if (evt.type === 'ai_interaction') {
       const acc = evt.meta?.acceptance;
       if (acc === 'fully_accepted')          { annType = 'ai-accepted'; label = 'AI accepted'; }
       else if (acc === 'partially_modified') { annType = 'ai-partial';  label = 'AI (partial)'; }
       else continue;
       searchText = evt.meta?.output_preview;
+      expectedLength = evt.meta?.ai_chars ?? (searchText ? searchText.length : 0);
     } else if (evt.type === 'paste' && evt.meta?.output_preview) {
-      annType = 'paste'; label = 'Pasted'; searchText = evt.meta.output_preview;
+      annType = 'paste'; label = 'Pasted'; 
+      searchText = evt.meta.output_preview;
+      expectedLength = evt.meta?.char_count ?? searchText.length;
     } else { continue; }
+    
     if (!searchText || searchText.length < 10) continue;
-    annotations.push({ type: annType, label, text: searchText });
+
+    // Strip trailing ellipses from truncated previews
+    searchText = searchText.replace(/\.{3}$|…$/, '').trim();
+    annotations.push({ type: annType, label, text: searchText, expectedLength, ctxBefore, ctxAfter });
   }
 
-  // Inject marks into the parsed DOM; collect those that couldn't be found
+  // Inject marks into the parsed DOM
   const unlocated = [];
+  const consumedRanges = []; // Initialize the memory array
+  
   if (docDom) {
     for (const ann of annotations) {
-      const found = _wrapFirstMatch(docDom, docDom.body, ann.text, ann.type, ann.label);
+      // Pass the context and memory down to the wrapper
+      const found = _wrapFirstMatch(
+        docDom, docDom.body, ann.text, ann.type, ann.label, 
+        ann.expectedLength, consumedRanges, ann.ctxBefore, ann.ctxAfter
+      );
       if (!found) unlocated.push(ann);
     }
   } else {
     unlocated.push(...annotations);
   }
 
-  // Serialize the annotated body HTML
   const annotatedBodyHTML = docDom
     ? docDom.body.innerHTML
     : '<p style="color:#888">No document content found in this TWFF file.</p>';
@@ -440,8 +532,7 @@ function openAnnotatedView(log, meta, xhtmlStr) {
 
   const html = _buildAnnotatedPageHTML({
     docTitle, annotatedBodyHTML, xhtmlStyles, unlocated,
-    log,
-    editCount, aiAccepted, aiPartial, aiDismissed, pasteCount, checkpointCount,
+    log, editCount, aiAccepted, aiPartial, aiDismissed, pasteCount, checkpointCount,
     startTs, durationMs,
   });
 
@@ -469,11 +560,13 @@ function _buildAnnotatedPageHTML({
     : '';
 
   const unlocatedSection = unlocated.length === 0 ? '' : `
-    <div class="unlocated page-break">
-      <h2 class="unlocated-title">Unlocated annotations (${unlocated.length})</h2>
-      <p class="unlocated-note">These could not be matched to the stored document text. This indicates the text was edited after the event was recorded (positional drift).</p>
+    <div class="page unlocated-page">
+      <div class="unlocated-banner">
+        <h2 class="unlocated-title">Unlocated annotations (${unlocated.length})</h2>
+        <p class="unlocated-note">These could not be matched to the stored document text. This indicates the text was edited after the event was recorded (positional drift).</p>
+      </div>
       <ul>
-        ${unlocated.map(a => `<li><span class="pill ${esc(a.type)}">${esc(a.label)}</span> ${esc(a.text.slice(0, 140))}${a.text.length > 140 ? '…' : ''}</li>`).join('')}
+        ${unlocated.map(a => `<li><span class="pill ${esc(a.type)}">${esc(a.label)}</span> <span class="unlocated-text">${esc(a.text.slice(0, 140))}${a.text.length > 140 ? '…' : ''}</span></li>`).join('')}
       </ul>
     </div>`;
 
@@ -485,96 +578,211 @@ function _buildAnnotatedPageHTML({
 <style>
 /* ── Original Google Docs styles (preserved from XHTML export) ── */
 ${xhtmlStyles}
-/* ── Annotation overlay styles ── */
-* { box-sizing: border-box; }
-body { background: #fff; }
-.toolbar { position: sticky; top: 0; z-index: 100; background: #f1f5f9; border-bottom: 1px solid #cbd5e1; padding: 10px 24px; display: flex; align-items: center; gap: 16px; font-family: sans-serif; }
-.toolbar button { padding: 6px 16px; background: #4f46e5; color: #fff; border: none; border-radius: 6px; font-size: 10pt; cursor: pointer; }
-.toolbar .tip { font-size: 9pt; color: #64748b; }
-.legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 8px 24px 6px; border-bottom: 1px solid #e2e8f0; background: #fff; font-family: sans-serif; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 9pt; color: #374151; }
+
+/* ── App UI & Base Setup ── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { 
+  background: #f8f9fa; /* Google Docs gray workspace */
+  font-family: Arial, sans-serif; 
+  color: #202124;
+}
+
+/* ── Sticky Toolbar ── */
+.app-header {
+  position: sticky; 
+  top: 0; 
+  z-index: 100; 
+  background: #fff; 
+  border-bottom: 1px solid #dadce0;
+}
+.toolbar { 
+  padding: 12px 24px; 
+  display: flex; 
+  align-items: center; 
+  gap: 16px; 
+}
+.toolbar button { 
+  padding: 8px 24px; 
+  background: #1a73e8; /* Google Material Blue */
+  color: #fff; 
+  border: none; 
+  border-radius: 4px; 
+  font-size: 10pt; 
+  font-weight: 500;
+  cursor: pointer; 
+  transition: background 0.2s;
+}
+.toolbar button:hover { background: #1557b0; }
+.toolbar .tip { font-size: 9.5pt; color: #5f6368; }
+
+/* ── Legend ── */
+.legend { 
+  display: flex; 
+  gap: 20px; 
+  flex-wrap: wrap; 
+  padding: 0 24px 12px; 
+}
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 9.5pt; color: #3c4043; }
 .legend-item .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
 .swatch.ai-accepted { background: #ede9ff; border: 1.5px solid #7c3aed; }
 .swatch.ai-partial  { background: #ccfbf1; border: 1.5px solid #0d9488; }
 .swatch.paste       { background: #fef9c3; border: 1.5px solid #ca8a04; }
-.doc-title-banner { font-family: sans-serif; font-size: 11pt; font-weight: 700; color: #0f172a; padding: 16px 32px 0; max-width: 900px; margin: 0 auto; }
-.drift-note { font-family: sans-serif; font-size: 9pt; color: #92400e; padding: 4px 32px 0; max-width: 900px; margin: 0 auto; }
+
+/* ── Document "Paper" Layout ── */
+.workspace {
+  padding: 32px 0 64px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+.page {
+  background: #fff;
+  width: 816px; /* 8.5 inches at 96dpi */
+  min-height: 1056px; /* 11 inches at 96dpi */
+  padding: 96px; /* 1-inch margins */
+  box-shadow: 0 1px 3px 1px rgba(60,64,67,0.15); /* Classic Docs drop shadow */
+  font-family: Arial, sans-serif;
+  line-height: 1.6;
+}
+.doc-title-banner { 
+  font-size: 18pt; 
+  font-weight: 400; 
+  color: #000; 
+  margin-bottom: 4px;
+  border-bottom: 1px solid #dadce0;
+  padding-bottom: 12px;
+}
+.drift-note { 
+  font-size: 10pt; 
+  color: #b31412; 
+  margin-bottom: 24px;
+  font-style: italic;
+}
+
+/* ── Document Content Formatting ── */
+.document-content {
+  font-size: 11pt;
+  color: #000;
+  overflow-wrap: break-word;
+}
+.document-content img { max-width: 100%; height: auto; }
+
+/* ── Highlighting ── */
 mark.ann-ai-accepted { background: #ede9ff; border-bottom: 2px solid #7c3aed; border-radius: 2px; padding: 0 1px; }
 mark.ann-ai-partial  { background: #ccfbf1; border-bottom: 2px solid #0d9488; border-radius: 2px; padding: 0 1px; }
 mark.ann-paste       { background: #fef9c3; border-bottom: 2px solid #ca8a04; border-radius: 2px; padding: 0 1px; }
-.unlocated { max-width: 900px; margin: 24px auto; padding: 16px 32px; background: #fefce8; border: 1px solid #fde047; border-radius: 8px; font-family: sans-serif; }
-.unlocated-title { font-size: 11pt; font-weight: 600; color: #854d0e; margin-bottom: 6px; }
-.unlocated-note { font-size: 8.5pt; color: #78350f; margin-bottom: 8px; }
-.unlocated ul { padding-left: 18px; font-size: 9.5pt; }
-.unlocated li { margin-bottom: 5px; }
-.pill { font-size: 8pt; font-family: sans-serif; padding: 1px 6px; border-radius: 10px; font-weight: 600; vertical-align: middle; }
+
+/* ── Unlocated Page ── */
+.unlocated-banner { background: #fefce8; border-left: 4px solid #fde047; padding: 16px 24px; margin-bottom: 24px; }
+.unlocated-title { font-size: 12pt; font-weight: 600; color: #854d0e; margin-bottom: 6px; }
+.unlocated-note { font-size: 10pt; color: #78350f; }
+.unlocated-page ul { padding-left: 24px; }
+.unlocated-page li { margin-bottom: 12px; font-size: 10.5pt; color: #202124; }
+.unlocated-text { font-family: 'Courier New', monospace; font-size: 9.5pt; background: #f1f3f4; padding: 2px 4px; border-radius: 4px; }
+.pill { font-size: 8.5pt; font-family: sans-serif; padding: 2px 8px; border-radius: 12px; font-weight: 600; display: inline-block; margin-bottom: 4px; }
 .pill.ai-accepted { background: #ede9ff; color: #6d28d9; }
 .pill.ai-partial  { background: #ccfbf1; color: #0f766e; }
 .pill.paste       { background: #fef9c3; color: #92400e; }
-.page-break { break-before: page; }
-.seal { max-width: 900px; margin: 0 auto; padding: 48px 32px; font-family: 'Courier New', monospace; font-size: 10pt; }
-.seal h2 { font-size: 13pt; letter-spacing: 0.1em; margin-bottom: 4px; }
-.seal hr { border: none; border-top: 1px solid #94a3b8; margin: 12px 0; }
-.seal table { border-collapse: collapse; width: 100%; }
-.seal td { padding: 2px 0; vertical-align: top; }
-.seal td:first-child { width: 180px; color: #64748b; }
-.seal .section-head { font-weight: 700; margin-top: 16px; margin-bottom: 4px; font-size: 10pt; letter-spacing: 0.05em; }
+
+/* ── Colophon Seal Page ── */
+.seal-page { font-family: 'Courier New', monospace; font-size: 10.5pt; color: #202124; }
+.seal-page h2 { font-size: 14pt; letter-spacing: 0.1em; margin-bottom: 8px; color: #000; }
+.seal-page hr { border: none; border-top: 1px dashed #dadce0; margin: 16px 0; }
+.seal-page table { border-collapse: collapse; width: 100%; }
+.seal-page td { padding: 6px 0; vertical-align: top; }
+.seal-page td:first-child { width: 220px; color: #5f6368; font-weight: 600; }
+.section-head { font-weight: 700; margin-top: 32px; margin-bottom: 8px; font-size: 11pt; letter-spacing: 0.05em; background: #f1f3f4; padding: 6px 12px; border-radius: 4px; }
+
+/* ── Print / PDF Styles ── */
 @media print {
-  .toolbar, .legend, .doc-title-banner, .drift-note { display: none !important; }
-  body { font-size: 10pt; }
+  body { background: #fff; }
+  .app-header { display: none !important; }
+  .workspace { padding: 0; gap: 0; display: block; }
+  .page { 
+    width: auto; 
+    min-height: auto; 
+    padding: 0; 
+    margin: 0; 
+    box-shadow: none; 
+    page-break-after: always; 
+  }
+  .page:last-child { page-break-after: auto; }
 }
 </style>
 </head>
 <body>
 
-<div class="toolbar">
-  <button onclick="window.print()">Print / Save as PDF</button>
-  <span class="tip">Choose "Save as PDF" in the print dialog.</span>
+<div class="app-header">
+  <div class="toolbar">
+    <button onclick="window.print()">Print / Save as PDF</button>
+    <span class="tip">Choose "Save as PDF" in the print dialog.</span>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="swatch ai-accepted"></span> AI accepted</div>
+    <div class="legend-item"><span class="swatch ai-partial"></span> AI partial</div>
+    <div class="legend-item"><span class="swatch paste"></span> Pasted from external source</div>
+  </div>
 </div>
 
-<div class="legend">
-  <div class="legend-item"><span class="swatch ai-accepted"></span> AI accepted</div>
-  <div class="legend-item"><span class="swatch ai-partial"></span> AI partial</div>
-  <div class="legend-item"><span class="swatch paste"></span> Pasted from external source</div>
-</div>
+<div class="workspace">
+  <div class="page">
+    <div class="doc-title-banner">${esc(docTitle)}</div>
+    ${driftNote ? `<div class="drift-note">${esc(driftNote)}</div>` : ''}
+    
+    <div class="document-content">
+      ${annotatedBodyHTML}
+    </div>
+  </div>
 
-<div class="doc-title-banner">${esc(docTitle)}</div>
-${driftNote ? `<div class="drift-note">${esc(driftNote)}</div>` : ''}
+  ${unlocatedSection}
 
-${annotatedBodyHTML}
-
-${unlocatedSection}
-
-<div class="seal page-break">
-  <h2>COLOPHON PROCESS LOG SEAL</h2>
-  <hr>
-  <table>
-    <tr><td>Document</td><td>${esc(docTitle)}</td></tr>
-    <tr><td>Session ID</td><td>${esc(sessionId)}</td></tr>
-    <tr><td>Started</td><td>${esc(startedAt)}</td></tr>
-    <tr><td>Duration</td><td>${esc(duration)}</td></tr>
-    <tr><td>Exported</td><td>${esc(exportedAt)}</td></tr>
-    <tr><td>Version</td><td>TWFF v0.2.0</td></tr>
-  </table>
-  <hr>
-  <div class="section-head">EVENT SUMMARY</div>
-  <table>
-    <tr><td>Edits</td><td>${editCount}</td></tr>
-    <tr><td>AI accepted</td><td>${aiAccepted}</td></tr>
-    <tr><td>AI partial</td><td>${aiPartial}</td></tr>
-    <tr><td>AI dismissed</td><td>${aiDismissed}</td></tr>
-    <tr><td>External pastes</td><td>${pasteCount}</td></tr>
-    <tr><td>Checkpoints</td><td>${checkpointCount}</td></tr>
-  </table>
-  <hr>
-  <div class="section-head">ANNOTATION KEY</div>
-  <table>
-    <tr><td>Purple highlight</td><td>AI-accepted text</td></tr>
-    <tr><td>Teal highlight</td><td>AI partially-modified text</td></tr>
-    <tr><td>Amber highlight</td><td>Pasted from external source</td></tr>
-    <tr><td>Not highlighted</td><td>User-written text</td></tr>
-    ${unlocated.length ? `<tr><td>Unlocated (${unlocated.length})</td><td>Text edited after recording — see appendix</td></tr>` : ''}
-  </table>
+  <div class="page seal-page">
+    <h2>COLOPHON PROCESS LOG SEAL</h2>
+    <hr>
+    <table>
+      <tr><td>Document</td><td>${esc(docTitle)}</td></tr>
+      <tr><td>Session ID</td><td>${esc(sessionId)}</td></tr>
+      <tr><td>Started</td><td>${esc(startedAt)}</td></tr>
+      <tr><td>Duration</td><td>${esc(duration)}</td></tr>
+      <tr><td>Exported</td><td>${esc(exportedAt)}</td></tr>
+      <tr><td>Version</td><td>TWFF v0.2.0</td></tr>
+    </table>
+    
+    <div class="section-head">EVENT SUMMARY</div>
+    <table>
+      <tr><td>Edits</td><td>${editCount}</td></tr>
+      <tr><td>AI accepted</td><td>${aiAccepted}</td></tr>
+      <tr><td>AI partial</td><td>${aiPartial}</td></tr>
+      <tr><td>AI dismissed</td><td>${aiDismissed}</td></tr>
+      <tr><td>External pastes</td><td>${pasteCount}</td></tr>
+      <tr><td>Checkpoints</td><td>${checkpointCount}</td></tr>
+    </table>
+    
+    <div class="section-head">ANNOTATION KEY</div>
+    <table>
+      <tr>
+        <td><mark class="ann-ai-accepted">Purple highlight</mark></td>
+        <td>AI-accepted text</td>
+      </tr>
+      <tr>
+        <td><mark class="ann-ai-partial">Teal highlight</mark></td>
+        <td>AI partially-modified text</td>
+      </tr>
+      <tr>
+        <td><mark class="ann-paste">Amber highlight</mark></td>
+        <td>Pasted from external source</td>
+      </tr>
+      <tr>
+        <td style="padding-left: 2px;">Not highlighted</td>
+        <td>User-written text</td>
+      </tr>
+      ${unlocated.length ? `<tr>
+        <td><span class="unlocated-text">Unlocated (${unlocated.length})</span></td>
+        <td>Text edited after recording — see appendix</td>
+      </tr>` : ''}
+    </table>
+  </div>
 </div>
 
 </body>
