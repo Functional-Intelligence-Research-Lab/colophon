@@ -179,6 +179,9 @@ async function handleMessage(msg, _sender) {
     case 'UPDATE_EVENT_ACCEPTANCE':
       return updateEventAcceptance(msg.payload);
 
+    case 'UPDATE_EVENT_METADATA':
+      return updateEventMetadata(msg.payload);
+
     case 'SELECTION_CHANGED':
       _lastSelection = msg.payload ?? { text: '' };
       chrome.runtime.sendMessage({ action: 'SELECTION_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
@@ -433,6 +436,17 @@ async function updateEventAcceptance({ eventTimestamp, acceptance, content_befor
       action: 'SYNC_TIMELINE',
       events: session.events,
     }).catch(() => {});
+  }
+  return { status: 'success' };
+}
+
+async function updateEventMetadata({ eventTimestamp, key, value }) {
+  const session = await getSession();
+  if (!session) return { status: 'error' };
+  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  if (event?.meta && key) {
+    event.meta[key] = value;
+    await saveSession(session);
   }
   return { status: 'success' };
 }

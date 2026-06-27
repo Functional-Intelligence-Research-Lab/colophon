@@ -28,9 +28,18 @@
     }
   ],
 
+  "icons": {
+    "32": "icons/original@2x.png",
+    "48": "icons/original@3x.png"
+  },
+
   "action": {
     "default_popup": "popup/popup.html",
-    "default_title": "Colophon"
+    "default_title": "Colophon",
+    "default_icon": {
+      "32": "icons/original@2x.png",
+      "48": "icons/original@3x.png"
+    }
   },
 
   "side_panel": {

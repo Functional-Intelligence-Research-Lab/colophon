@@ -46,6 +46,7 @@ let _blurredAt  = null
 let _lastPasteAt = 0
 let _pendingPaste = null
 let _listenerTargets = []
+let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
 let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
@@ -223,8 +224,7 @@ function attachInputListeners(target, label) {
   if (!target || _listenerTargets.some(item => item.target === target)) return
   target.addEventListener('keydown', onKeydown, true)
   target.addEventListener('paste', onPaste, true)
-  //target.addEventListener('beforeinput', onBeforeInput, true)
-  //target.addEventListener('input', onInput, true)
+  target.addEventListener('copy', onCopy, true)
   _listenerTargets.push({ target, label })
   console.log('[Colophon Content] input listeners attached', { label })
 }
@@ -233,8 +233,7 @@ function detachInputListeners() {
   for (const { target, label } of _listenerTargets) {
     target.removeEventListener('keydown', onKeydown, true)
     target.removeEventListener('paste', onPaste, true)
-    //target.removeEventListener('beforeinput', onBeforeInput, true)
-    //target.removeEventListener('input', onInput, true)
+    target.removeEventListener('copy', onCopy, true)
     console.log('[Colophon Content] input listeners detached', { label })
   }
   _listenerTargets = []
@@ -388,21 +387,36 @@ function flushEdit() {
 
 // ── Paste capture ─────────────────────────────────────────────────────────────
 
+const INTERNAL_COPY_TTL = 5 * 60 * 1000; // 5 minutes
+
+function onCopy() {
+  const sel = window.getSelection()?.toString() ?? '';
+  if (sel) _lastInternalCopy = { text: sel, at: Date.now() };
+}
+
 function onPaste(e) {
   if (!_active) return;
-  
+
   const now = Date.now();
   if (now - _lastPasteAt < 100) {
     console.warn('[Colophon Content] Ghost paste detected and destroyed.');
-    return; 
+    return;
   }
-  
+
   _lastPasteAt = now;
 
   if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') return;
-  
+
   const text = e.clipboardData?.getData('text/plain') ?? '';
   if (!text) return;
+
+  // If the pasted text matches something the user copied from within this doc, skip logging
+  if (_lastInternalCopy &&
+      now - _lastInternalCopy.at < INTERNAL_COPY_TTL &&
+      text === _lastInternalCopy.text) {
+    console.log('[Colophon Content] Internal paste (text move within doc), skipping log.');
+    return;
+  }
 
   console.log('[TWFF] Paste intercepted. Running Async Emitter...');
   emitPaste(text);
@@ -846,7 +860,20 @@ async function checkAndInjectStartToast() {
     transition: background 0.2s;
   `;
 
-  toast.append(infoWrapper, startBtn);
+  const dismissBtn = document.createElement('button');
+  dismissBtn.setAttribute('aria-label', 'Dismiss');
+  dismissBtn.textContent = '✕';
+  dismissBtn.style.cssText = `
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.6);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  `;
+
+  toast.append(infoWrapper, startBtn, dismissBtn);
   document.body.appendChild(toast);
 
   setTimeout(() => {
@@ -863,6 +890,10 @@ async function checkAndInjectStartToast() {
   };
 
   const timeoutId = setTimeout(removeToast, 30000);
+
+  dismissBtn.addEventListener('click', () => { clearTimeout(timeoutId); removeToast(); });
+  dismissBtn.addEventListener('mouseenter', () => dismissBtn.style.color = 'white');
+  dismissBtn.addEventListener('mouseleave', () => dismissBtn.style.color = 'rgba(255,255,255,0.6)');
 
   startBtn.addEventListener('mouseenter', () => startBtn.style.background = '#0277bd');
   startBtn.addEventListener('mouseleave', () => startBtn.style.background = '#0288d1');
