@@ -16,6 +16,7 @@ let _docContext = null;
 function _isMetaCommentary(text) {
   if (!text || text.length < 15) return true;
   const lower = text.toLowerCase().trim();
+  if (lower.startsWith('{') || lower.startsWith('[')) return true;
   return [
     'the selected text is not provided',
     'please provide the text',
@@ -28,7 +29,44 @@ function _isMetaCommentary(text) {
     'i cannot',
     'i need more context',
     'could you please provide',
+    "the user's writing is",
+    'the user\'s text is',
   ].some(p => lower.includes(p));
+}
+
+function _cleanAIResponse(text) {
+  if (!text) return text;
+  let t = text.trim();
+
+  // Unwrap JSON-formatted responses (small models sometimes output {"key": "value"})
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(t);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const strVal = Object.values(parsed).find(v => typeof v === 'string' && v.length > 5);
+        if (strVal) t = strVal.trim();
+      }
+    } catch { /* not valid JSON */ }
+  }
+
+  // Strip meta-commentary prefixes that small models prepend
+  const prefixes = [
+    /^the user(?:'s)? (?:writing|text) is:\s*/i,
+    /^the completed sentence is:\s*/i,
+    /^here is (?:the )?(?:paraphras\w*|revis\w*|rewritten) (?:text|version|sentence)?:?\s*/i,
+    /^paraphras\w* version:?\s*/i,
+    /^revis\w* version:?\s*/i,
+    /^here'?s? (?:a |the )?(?:suggestion|revision|paraphrase):?\s*/i,
+    /^(?:rewritten|revised|paraphrased):\s*/i,
+  ];
+  for (const re of prefixes) t = t.replace(re, '');
+
+  // Strip surrounding quotation marks added by the model
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1).trim();
+  }
+
+  return t;
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -199,9 +237,17 @@ const TimelineRenderer = {
     
     else if (evt.type === 'paste') {
       authorLabel = 'You • Pasted';
-      contentHTML = `<div class="text-only">${evt.meta.char_count || 0} chars from external</div>`;
+      const sourceLabel = evt.meta.source === 'internal' ? 'within doc' : 'external';
+      contentHTML = `<div class="text-only">${evt.meta.char_count || 0} chars from ${sourceLabel}</div>`;
       if (evt.meta.output_preview) {
-         contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${evt.meta.output_preview}"</div>`;
+        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${evt.meta.output_preview}"</div>`;
+      }
+      if (evt.meta.source !== 'internal') {
+        if (evt.meta.source_url) {
+          contentHTML += `<div class="paste-source-row"><span class="paste-source-display">Source: <a href="${evt.meta.source_url}" target="_blank" rel="noopener" style="color:var(--ai-color)">${evt.meta.source_url}</a></span></div>`;
+        } else {
+          contentHTML += `<div class="paste-source-row"><button class="btn-add-source" style="background:none;border:1px dashed var(--text-secondary);color:var(--text-secondary);padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;margin-top:4px;">+ Add source</button></div>`;
+        }
       }
     }
     
@@ -321,6 +367,43 @@ const TimelineRenderer = {
   attachClickHandlers() {
     this.container.addEventListener('click', async (e) => {
       
+      // ── ADD SOURCE (paste attribution) ──
+      if (e.target.classList.contains('btn-add-source')) {
+        const btn = e.target;
+        const row = btn.parentElement;
+        const eventCard = btn.closest('.timeline-event');
+        const cardTimestamp = eventCard?.dataset.timestamp;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'URL or source label…';
+        input.style.cssText = 'font-size:0.8rem;padding:2px 6px;border:1px solid var(--ai-color);border-radius:4px;outline:none;width:160px;';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save';
+        saveBtn.style.cssText = 'font-size:0.75rem;padding:2px 8px;margin-left:4px;background:var(--ai-color);color:white;border:none;border-radius:4px;cursor:pointer;';
+
+        row.replaceChildren(input, saveBtn);
+        input.focus();
+
+        const save = () => {
+          const val = input.value.trim();
+          if (!val) { row.replaceChildren(btn); return; }
+          const displayHref = val.startsWith('http') ? `<a href="${val}" target="_blank" rel="noopener" style="color:var(--ai-color)">${val}</a>` : val;
+          row.innerHTML = `<span class="paste-source-display" style="font-size:0.8rem;color:var(--text-secondary);">Source: ${displayHref}</span>`;
+          if (cardTimestamp) {
+            chrome.runtime.sendMessage({
+              action: 'UPDATE_EVENT_METADATA',
+              payload: { eventTimestamp: cardTimestamp, key: 'source_url', value: val },
+            }).catch(() => {});
+          }
+        };
+
+        saveBtn.addEventListener('click', save);
+        input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') row.replaceChildren(btn); });
+        return;
+      }
+
       // View Diff Toggle
       if (e.target.classList.contains('toggle-diff-btn')) {
         e.preventDefault();
@@ -467,19 +550,19 @@ async function _buildSystemPrompt() {
 
   if (_assignmentPrompt) parts.push(`Assignment context: ${_assignmentPrompt}`);
 
-  // Prefer proactively-pushed context (captured while doc was focused); fall back to live fetch
-  let ctx = _docContext;
-  if (!ctx) {
-    try {
-      if (activeTabId) {
-        const tab = await chrome.tabs.get(activeTabId);
-        if (tab.url?.startsWith('https://docs.google.com/document/')) {
-          const res = await chrome.tabs.sendMessage(activeTabId, { action: 'GET_EDITOR_TEXT' });
-          if (res?.text?.trim().length > 20) ctx = res;
-        }
+  // Always fetch fresh context so AI sees current document state even when sidepanel has focus.
+  // Fall back to the last proactively-pushed _docContext only if the live fetch fails.
+  let ctx = null;
+  try {
+    if (activeTabId) {
+      const tab = await chrome.tabs.get(activeTabId);
+      if (tab.url?.startsWith('https://docs.google.com/document/')) {
+        const res = await chrome.tabs.sendMessage(activeTabId, { action: 'GET_EDITOR_TEXT' });
+        if (res?.text?.trim().length > 20) ctx = res;
       }
-    } catch { /* content script not ready or not on a Docs page */ }
-  }
+    }
+  } catch { /* content script not ready or not on a Docs page */ }
+  if (!ctx) ctx = _docContext;
 
   if (ctx?.text?.trim().length > 20) {
     const idx = typeof ctx.cursorIndex === 'number' ? ctx.cursorIndex : ctx.text.length;
@@ -582,7 +665,8 @@ const ChatInput = {
 
     try {
       const systemPrompt = await _buildSystemPrompt();
-      const { text: reply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
+      const { text: rawReply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
+      const reply = _cleanAIResponse(rawReply);
 
       // Replace the placeholder card with the real suggestion
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
@@ -879,10 +963,11 @@ const SelectionContext = {
     if (askBtn) { askBtn.disabled = true; askBtn.textContent = '…'; }
 
     try {
-      const { text: reply, model } = await complete(userMessage, {
+      const { text: rawReply, model } = await complete(userMessage, {
         endpoint: ChatInput._endpoint,
         systemPrompt,
       });
+      const reply = _cleanAIResponse(rawReply);
 
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
       if (existing) existing.remove();
