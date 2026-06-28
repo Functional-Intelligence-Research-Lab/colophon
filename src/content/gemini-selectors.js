@@ -111,10 +111,13 @@ export const GEMINI_PRESENCE_SELECTORS = [
  */
 export function classifyAction(el) {
   if (!el) return null
+  const actionType = el.getAttribute?.('data-action-type')
+  if (actionType === '44' || el.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonPrimary')) return 'accept'
+  if (actionType === '45' || el.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonSecondary')) return 'reject'
   const name = accessibleName(el)
   if (!name) return null
-  if (matchesAny(name, ACCEPT_LABELS)) return 'accept'
-  if (matchesAny(name, REJECT_LABELS)) return 'reject'
+  if (matchesAny(name, ACCEPT_LABELS) || name.includes('accept')) return 'accept'
+  if (matchesAny(name, REJECT_LABELS) || name.includes('reject')) return 'reject'
   return null
 }
 
@@ -159,14 +162,14 @@ export function findSuggestionContainer(root = document) {
  */
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
+  if (container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
+      container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ||
+      container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ||
+      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) {
+    return true
+  }
   const name = accessibleName(container)
-  // "help me write" is specific to this feature. "gemini" alone is intentionally
-  // excluded — it matches the Ask Gemini button, menu items, and other permanent
-  // UI elements that are not suggestion containers.
   if (name.includes('help me write')) return true
-  // Barkick response area: identified by the Gemini spark icon inside it.
-  // The spark icon is only rendered once a response exists (not on the empty bar).
-  if (container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) return true
   const buttons = container.querySelectorAll?.('button, [role="button"]') ?? []
   for (const b of buttons) {
     const bn = accessibleName(b)
