@@ -199,26 +199,17 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       source: 'ai',
       model: GEMINI_MODEL_ID,
       output_preview: preview(_current.text),
-      // For accepted suggestions we know the inserted text; show it as the
-      // "after" side of the diff card. content_before is unknown without canvas
-      // access, so leave it empty (renderer handles the placeholder).
       content_before: '',
       content_after: accepted ? _current.text : '',
-      position_start: 0, // Sprint: real cursor position (needs canvas)
+      position_start: 0,
       position_end: 0,
       acceptance,
-      // ai_chars: characters from the AI output retained. Without canvas-level
-      // diffing we record the full length on accept, 0 on reject. Similarity /
-      // "humanised" scoring is a later task that will refine this.
       ai_chars: accepted ? _current.text.length : 0,
       ...(reason ? { reason } : {}),
     }))
     log('[Colophon Gemini] suggestion resolved', { acceptance, reason: reason ?? null })
 
-    // Tell the host (content.js) so it can suppress the edit/paste capture that
-    // Docs fires when the accepted text is inserted — otherwise AI-authored text
-    // would also be logged as a human edit (double counting / misattribution).
-    onResolve({ acceptance, accepted, chars: _current.text.length })
+    onResolve({ acceptance, accepted, chars: _current.text.length, suggestionText: _current.text, reason })
   }
 
   // ── Health check ────────────────────────────────────────────────────────────

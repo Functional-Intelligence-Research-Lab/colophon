@@ -188,3 +188,39 @@ export function geminiAvailable(root = document) {
 
 /** Stable provider identifier for emitted TWFF events. */
 export const GEMINI_MODEL_ID = 'google/gemini'
+
+export function isMetaCommentary(text) {
+  if (!text || text.length < 15) return true;
+  const lower = text.toLowerCase().trim();
+  if (lower.startsWith('{') || lower.startsWith('[')) return true;
+  return [
+    "i've updated",
+    "i updated",
+    "i've rewritten",
+    "i rewritten",
+    "i've revised",
+    "i revised",
+    "i've expanded",
+    "i expanded",
+    "i've added",
+    "i added",
+    "i've modified",
+    "i modified",
+    'the selected text is not provided',
+    'please provide the text',
+    "i don't have",
+    "i'm unable",
+    "i'm sorry",
+    'as an ai',
+    'as a language model',
+    'as an assistant',
+    'i cannot',
+    'i need more context',
+    'could you please provide',
+    "the user's writing is",
+    "the user's text is",
+    'the user wants me to',
+    'treat everything before',
+    '[cursor]',
+  ].some(p => lower.includes(p));
+}

@@ -60,6 +60,18 @@ function _isMetaCommentary(text) {
   const lower = text.toLowerCase().trim();
   if (lower.startsWith('{') || lower.startsWith('[')) return true;
   return [
+    "i've updated",
+    "i updated",
+    "i've rewritten",
+    "i rewritten",
+    "i've revised",
+    "i revised",
+    "i've expanded",
+    "i expanded",
+    "i've added",
+    "i added",
+    "i've modified",
+    "i modified",
     'the selected text is not provided',
     'please provide the text',
     "i don't have",

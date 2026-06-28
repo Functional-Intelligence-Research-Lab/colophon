@@ -108,8 +108,7 @@ describe('createGeminiDetector emission', () => {
     expect(interaction.meta.acceptance).toBe('fully_accepted')
     expect(interaction.meta.content_after).toBe('Accept me')
     expect(interaction.meta.ai_chars).toBe('Accept me'.length)
-    // host notified so it can suppress the insertion edit
-    expect(resolves).toEqual([{ acceptance: 'fully_accepted', accepted: true, chars: 9 }])
+    expect(resolves).toEqual([{ acceptance: 'fully_accepted', accepted: true, chars: 9, suggestionText: 'Accept me', reason: null }])
   })
 
   it('emits ai_interaction rejected on Close click with ai_chars 0', () => {
