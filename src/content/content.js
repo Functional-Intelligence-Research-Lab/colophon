@@ -1,4 +1,5 @@
 import { mountColophonPanel } from '../panel/app.js'
+import { analyzeText } from '../lib/heuristics.js'
 
 /**
  * content.js — Colophon content script
@@ -47,6 +48,7 @@ let _lastPasteAt = 0
 let _pendingPaste = null
 let _listenerTargets = []
 let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
+let _heuristicDebounce = null
 let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
@@ -190,7 +192,7 @@ function activate() {
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
   waitForEditor(attachObserver)
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // Periodic checkpoints every 5 minutes
+  // Periodic checkpoints every 5 minutes + heuristic pass
   _checkpointTimer = setInterval(() => {
     const text = _getDocText()
     const words = text.trim().split(/\s+/).filter(Boolean).length
@@ -202,11 +204,43 @@ function activate() {
         meta: { char_count_total: text.length, word_count_total: words },
       },
     }).catch(() => {})
+    runHeuristics()
   }, 5 * 60 * 1000)
   console.log('[Colophon Content] recording activated', {
     activeElement: describeElement(document.activeElement),
     hasEditor: !!document.querySelector(EDITOR_SELECTOR),
   })
+
+  // Capture the document's current state as a pre-session baseline (no Drive API needed)
+  getDocumentText().then(preText => {
+    if (preText) {
+      chrome.runtime.sendMessage({
+        action: 'SET_PRE_SESSION_TEXT',
+        payload: { text: preText.slice(0, 20000) },
+      }).catch(() => {})
+    }
+  }).catch(() => {})
+}
+
+function runHeuristics() {
+  const text = _getDocText()
+  if (!text || text.trim().length < 30) return
+  const tips = analyzeText(text)
+  for (const tip of tips) {
+    chrome.runtime.sendMessage({
+      action: 'LOG_EVENT',
+      payload: {
+        type: 'heuristic_suggestion',
+        timestamp: new Date().toISOString(),
+        meta: { text: tip.text, excerpt: tip.excerpt },
+      },
+    }).catch(() => {})
+  }
+}
+
+function scheduleHeuristics() {
+  clearTimeout(_heuristicDebounce)
+  _heuristicDebounce = setTimeout(runHeuristics, 30_000)
 }
 
 function describeElement(el) {
@@ -298,9 +332,18 @@ function deactivate() {
   console.log('[Colophon Content] recording deactivated')
 }
 
+// ── Extension context guard ───────────────────────────────────────────────────
+// After a reload, kix_core may still call into our DOM listeners. Detect the
+// invalidated context early and self-remove all listeners to stop the cascade.
+
+function isContextValid() {
+  try { return !!chrome.runtime?.id; } catch { return false; }
+}
+
 // ── Edit capture: keydown (primary) ──────────────────────────────────────────
 
 function onKeydown(e) {
+  if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return
   if (SKIP_KEYS.has(e.key)) {
     console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
@@ -315,6 +358,7 @@ function onKeydown(e) {
   const delta = (e.key === 'Backspace' || e.key === 'Delete') ? -1 : 1
   console.log('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
   bufferEdit(delta)
+  scheduleHeuristics()
 }
 
 // ── Edit capture: MutationObserver (secondary) ────────────────────────────────
@@ -390,11 +434,13 @@ function flushEdit() {
 const INTERNAL_COPY_TTL = 5 * 60 * 1000; // 5 minutes
 
 function onCopy() {
+  if (!isContextValid()) { detachInputListeners(); return; }
   const sel = window.getSelection()?.toString() ?? '';
   if (sel) _lastInternalCopy = { text: sel, at: Date.now() };
 }
 
 function onPaste(e) {
+  if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return;
 
   const now = Date.now();
@@ -783,7 +829,13 @@ async function insertTextIntoDocs(textToInsert) {
 async function checkAndInjectStartToast() {
   console.log("[Colophon] Checking if start toast is needed...");
 
-  const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
+  let state;
+  try {
+    state = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
+  } catch {
+    console.warn("[Colophon] Service worker unavailable, skipping toast.");
+    return;
+  }
   const isRecording = state?.session?.isRecording;
   
   if (isRecording) {
@@ -907,18 +959,22 @@ async function checkAndInjectStartToast() {
 
     const currentUrl = window.location.href;
 
-    await chrome.runtime.sendMessage({ type: 'SESSION_START', docUrl: currentUrl }, () => {
+    try {
+      await chrome.runtime.sendMessage({ type: 'SESSION_START', docUrl: currentUrl });
+    } catch {
+      removeToast();
+      return;
+    }
 
-      toast.replaceChildren();
-      
-      const successSpan = document.createElement('span');
-      successSpan.style.color = '#28a745';
-      successSpan.style.fontWeight = 'bold';
-      successSpan.textContent = 'Session Started!';
-      
-      toast.appendChild(successSpan);
-      setTimeout(removeToast, 2000);
-    });
+    toast.replaceChildren();
+
+    const successSpan = document.createElement('span');
+    successSpan.style.color = '#28a745';
+    successSpan.style.fontWeight = 'bold';
+    successSpan.textContent = 'Session Started!';
+
+    toast.appendChild(successSpan);
+    setTimeout(removeToast, 2000);
   });
 }
 
@@ -971,11 +1027,26 @@ function findFirstDifference(oldText, newText) {
 
 async function updateRollingBaseline() {
   if (_isFetchingBaseline) return; // Mutex Lock: Abort if already downloading
-  
-  _isFetchingBaseline = true; 
+
+  _isFetchingBaseline = true;
   try {
     const text = await getDocumentText();
-    if (text) _rollingBaselineState = text;
+    if (text) {
+      _rollingBaselineState = text;
+
+      // Push clean export-API text so the AI always has fresh document context,
+      // even when DOM scraping (GET_EDITOR_TEXT) fails due to extension reloads.
+      chrome.runtime.sendMessage({
+        action: 'UPDATE_DOC_CONTEXT',
+        payload: { text, cursorIndex: text.length, selectedText: '' },
+      }).catch(() => {});
+
+      // Keep pre_session_snapshot current (not frozen at recording start)
+      chrome.runtime.sendMessage({
+        action: 'SET_PRE_SESSION_TEXT',
+        payload: { text: text.slice(0, 20000) },
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error("[Colophon Content] Baseline fetch failed:", err);
   } finally {
@@ -984,6 +1055,7 @@ async function updateRollingBaseline() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (!isContextValid()) return;
   // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
 
