@@ -232,15 +232,17 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     if (!container || !looksLikeGeminiSuggestion(container)) return ''
     // For the Barkick bar the response prose lives in a specific sub-container.
     // Scoping to it avoids picking up the user's own prompt text (which lives in
-    // a sibling input area in the same outer wrapper).
-    const responseArea = container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseContainerOneSystem') ?? container
+    const responseArea = container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ??
+                         container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ??
+                         container.querySelector?.('.appsElementsGenerativeaiAstAnimated') ??
+                         container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseContainerOneSystem') ?? container
     const clone = responseArea.cloneNode(true)
     // Strip interactive controls and the icon/controls top-row so only prose remains.
     clone.querySelectorAll(
-      'button, [role="button"], textarea, input, .appsElementsSidekickBarkickTopBoxResponseTopRow'
+      'button, [role="button"], textarea, input, .appsElementsSidekickBarkickTopBoxResponseTopRow, .appsElementsSidekickBarkickTopBoxResponseControlsContainer, .appsElementsSidekickBarkickTopBoxResponseControlsEndContainer'
     ).forEach(n => n.remove())
     const text = (clone.textContent ?? '').trim().replace(/\s+/g, ' ')
-    return text
+    return text || 'Gemini proposed changes'
   }
 
   function preview(text) {
