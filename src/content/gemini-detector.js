@@ -36,6 +36,8 @@ import {
   findSuggestionContainer,
   looksLikeGeminiSuggestion,
   geminiAvailable,
+  extractGeminiProposedDiff,
+  isMetaCommentary,
 } from './gemini-selectors.js'
 import { aiSuggestionEvent, aiInteractionEvent } from '../lib/events.js'
 
@@ -130,9 +132,18 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       resolveCurrent('rejected', 'superseded by a new suggestion')
     }
 
+    const domDiff = typeof document !== 'undefined' ? extractGeminiProposedDiff(document) : { insertedText: '' }
+    let displayText = text
+    if (domDiff.insertedText) {
+      displayText = domDiff.insertedText
+    } else if (isMetaCommentary(text)) {
+      displayText = 'Gemini proposed changes to document'
+    }
+
     _current = {
       id: nextId(),
-      text,
+      text: displayText,
+      rawCommentary: text,
       appearedAt: new Date().toISOString(),
       resolved: false,
     }
@@ -141,15 +152,15 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     emit(aiSuggestionEvent({
       source: 'ai',
       model: GEMINI_MODEL_ID,
-      output_preview: preview(text),
+      output_preview: preview(displayText),
       // Side-panel renderer reads meta.text for the suggestion card:
-      text,
+      text: displayText,
       context_window: '', // Sprint: capture surrounding doc context (needs canvas)
       position_start: 0,  // Sprint: real cursor position (needs canvas)
       position_end: 0,
       acceptance: 'pending',
     }))
-    log('[Colophon Gemini] suggestion detected', { chars: text.length })
+    log('[Colophon Gemini] suggestion detected', { chars: displayText.length })
 
     clearTimeout(_abandonTimer)
     _abandonTimer = setTimeout(() => {

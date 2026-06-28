@@ -4,7 +4,7 @@ import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
 import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
 import { aiInteractionEvent } from '../lib/events.js'
-import { isMetaCommentary, GEMINI_MODEL_ID } from './gemini-selectors.js'
+import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 
 /**
  * content.js — Colophon content script
@@ -141,12 +141,13 @@ const _geminiDetector = createGeminiDetector({
       _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
 
       const docBefore = _rollingBaselineState || _getDocText();
+      const domDiff = extractGeminiProposedDiff();
 
       setTimeout(async () => {
         let docAfter = _getDocText();
         let diff = computeDocumentDiff(docBefore, docAfter);
 
-        if (!diff.addedText) {
+        if (!diff.addedText && !diff.removedText) {
           try {
             const freshText = await getDocumentText();
             if (freshText && freshText !== docBefore) {
@@ -157,8 +158,8 @@ const _geminiDetector = createGeminiDetector({
         }
 
         const commentary = isMetaCommentary(suggestionText);
-        const finalAdded = diff.addedText || (!commentary ? suggestionText : '');
-        const finalRemoved = diff.removedText || '';
+        const finalAdded = diff.addedText || domDiff.insertedText || (!commentary ? suggestionText : '');
+        const finalRemoved = diff.removedText || domDiff.deletedText || '';
 
         send('LOG_EVENT', aiInteractionEvent({
           source: 'ai',
