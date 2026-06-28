@@ -638,18 +638,21 @@ const TimelineRenderer = {
 
     else if (evt.type === 'ai_suggestion') {
       typeClass = 'ai';
-      authorLabel = 'AI • Suggestion';
-      const fullText = evt.meta.text || "No preview available.";
+      // Distinguish native Gemini (drives the real Insert button) from local AI
+      // (pastes text via the clipboard path).
+      const isGemini = evt.meta.model === 'google/gemini';
+      authorLabel = isGemini ? '✦ Gemini • Suggestion' : 'AI • Suggestion';
+      const fullText = evt.meta.text || 'No preview available.';
       const isLong = fullText.length > 100;
-      const preview = isLong ? `${fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>` : fullText;
-      const isWarning = _isMetaCommentary(fullText);
+      const preview = isLong
+        ? `${fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>`
+        : fullText;
 
       contentHTML = `
-        <div class="card suggestion-card">
+        <div class="card suggestion-card" data-gemini="${isGemini}">
           <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
-          ${isWarning ? '<p class="suggestion-warning">⚠ This looks like a model comment, not insertable text.</p>' : ''}
           <div class="actions">
-            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> ${isWarning ? 'Insert anyway' : 'Use'}</button>
+            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> ${isGemini ? 'Accept' : 'Use'}</button>
             <button class="btn-dismiss">Dismiss</button>
           </div>
         </div>
@@ -840,46 +843,58 @@ const TimelineRenderer = {
       const dismissBtn = e.target.closest('.btn-dismiss');
       if (dismissBtn) {
         const eventCard = dismissBtn.closest('.timeline-event');
-        const cardTimestamp = eventCard.dataset.timestamp; 
+        const cardTimestamp = eventCard.dataset.timestamp;
         const p = eventCard.querySelector('p');
         const textPreview = p.dataset.fullText ? p.dataset.fullText : p.textContent;
-        
+        const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
+
         TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'dismissed' } });
         chrome.runtime.sendMessage({
           action: 'UPDATE_EVENT_STATE',
           payload: { eventTimestamp: cardTimestamp, status: 'dismissed' }
         }).catch(() => {});
 
-        chrome.runtime.sendMessage({
-          action: 'LOG_EVENT',
-          payload: {
-            type: 'ai_interaction',
-            timestamp: new Date().toISOString(),
-            meta: {
-              model: "local/unknown",
-              output_preview: textPreview.substring(0, 100),
-              position_start: 0,
-              position_end: 0,
-              acceptance: 'rejected',
-              ai_chars: 0,
-              reason: 'User dismissed suggestion.'
-            }
+        if (isGemini) {
+          // Click the real Close button — the detector's onResolve will fire and
+          // log the rejected ai_interaction event. No second LOG_EVENT here.
+          if (activeTabId) {
+            chrome.tabs.sendMessage(activeTabId, { action: 'GEMINI_REJECT' }).catch(() => {});
           }
-        }).catch(() => {});
-        return; 
+        } else {
+          // Local AI suggestions have no detector, so log the rejection here.
+          chrome.runtime.sendMessage({
+            action: 'LOG_EVENT',
+            payload: {
+              type: 'ai_interaction',
+              timestamp: new Date().toISOString(),
+              meta: {
+                model: 'local/unknown',
+                output_preview: textPreview.substring(0, 100),
+                position_start: 0,
+                position_end: 0,
+                acceptance: 'rejected',
+                ai_chars: 0,
+                reason: 'User dismissed suggestion.'
+              }
+            }
+          }).catch(() => {});
+        }
+        return;
       }
+
 
       // ── USE BUTTON LOGIC ──
       const useBtn = e.target.closest('.btn-use');
       if (useBtn) {
         const eventCard = useBtn.closest('.timeline-event');
-        const cardTimestamp = eventCard.dataset.timestamp; 
+        const cardTimestamp = eventCard.dataset.timestamp;
         const p = eventCard.querySelector('p');
-        
-        let textToInsert = p.dataset.fullText || p.textContent;
-        textToInsert = textToInsert.replace(/Show$|Hide$/, '').replace(/\.\.\.$/, '').trim();
+        const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
 
-        useBtn.innerHTML = "Executing...";
+        let textToInsert = p.dataset.fullText || p.textContent;
+        textToInsert = textToInsert.replace(/Show$|Hide$/, '').replace(/\.\.\.$/,'').trim();
+
+        useBtn.innerHTML = 'Executing...';
         useBtn.disabled = true;
 
         const logAcceptance = () => {
@@ -896,45 +911,65 @@ const TimelineRenderer = {
               type: 'ai_interaction',
               timestamp: interactionTimestamp,
               meta: {
-                model: "local/llama-3.2-1b",
+                model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
                 output_preview: textToInsert.substring(0, 100),
                 position_start: 0,
                 position_end: textToInsert.length,
                 acceptance: 'fully_accepted',
-                content_before: "[snapshot unavailable]",
+                content_before: '[snapshot unavailable]',
                 content_after: textToInsert,
                 ai_chars: textToInsert.length
               }
             }
           }).catch(() => {});
 
-          // Refine acceptance after the document has a moment to update
-          if (activeTabId) {
+          if (!isGemini && activeTabId) {
             setTimeout(() => scoreAcceptance(interactionTimestamp, textToInsert, activeTabId), 1500);
           }
         };
 
+        // ── Gemini-native: click the real Insert button in the doc ──
+        // NOTE: do NOT call logAcceptance() here. Clicking the real button
+        // triggers the Gemini detector's onClickCapture → onResolve → which
+        // logs the ai_interaction event with the actual diff from the export
+        // API. Calling logAcceptance() here too would create a duplicate card.
+        if (isGemini) {
+          try {
+            const response = await chrome.tabs.sendMessage(activeTabId, { action: 'GEMINI_ACCEPT' });
+            if (response?.status === 'ok' || response?.status === 'error') {
+              // Just update the card visual — detector handles the event log.
+              TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'used' } });
+              chrome.runtime.sendMessage({
+                action: 'UPDATE_EVENT_STATE',
+                payload: { eventTimestamp: cardTimestamp, status: 'used' },
+              }).catch(() => {});
+            }
+          } catch (err) {
+            console.warn('[Colophon] GEMINI_ACCEPT failed:', err);
+            useBtn.innerHTML = 'Failed';
+            useBtn.style.borderColor = 'var(--diff-red)';
+          }
+          return;
+        }
+
+        // ── Local AI: paste via clipboard ──
         try {
           await navigator.clipboard.writeText(textToInsert);
 
           try {
             const response = await chrome.tabs.sendMessage(activeTabId, { action: 'APPLY_SUGGESTION', text: textToInsert });
-            if (response?.status === "error") throw new Error("Content script reported an error.");
-            
+            if (response?.status === 'error') throw new Error('Content script reported an error.');
             logAcceptance();
-
           } catch (msgErr) {
-            // Auto-paste failed! Fall back, but STILL log the interaction
-            console.warn("Auto-paste failed or blocked. Falling back to manual paste.", msgErr);
-            useBtn.innerHTML = "Copied! Press Ctrl+V";
-            useBtn.style.backgroundColor = "var(--text-secondary)";
-            useBtn.style.color = "white";
-            
-            logAcceptance(); 
+            console.warn('Auto-paste failed or blocked. Falling back to manual paste.', msgErr);
+            useBtn.innerHTML = 'Copied! Press Ctrl+V';
+            useBtn.style.backgroundColor = 'var(--text-secondary)';
+            useBtn.style.color = 'white';
+            logAcceptance();
           }
         } catch (err) {
-          useBtn.innerHTML = "Failed";
-          useBtn.style.borderColor = "var(--diff-red)";
+          useBtn.innerHTML = 'Failed';
+          useBtn.style.borderColor = 'var(--diff-red)';
         }
       }
     });

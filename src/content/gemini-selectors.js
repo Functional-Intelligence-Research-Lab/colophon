@@ -235,44 +235,110 @@ export function isMetaCommentary(text) {
   ].some(p => lower.includes(p));
 }
 
+/**
+ * Strips leading sentences/lines that are Gemini commentary about what it did
+ * ("I've updated the document to be more concise. Here is the revised text:"),
+ * leaving only the actual generated content that follows.
+ *
+ * If the entire text is commentary, or if no content lines are found, the
+ * original text is returned unchanged so the caller can still show something.
+ */
+export function stripMetaLines(text) {
+  if (!text) return text;
+
+  // Pattern: a line that starts with a first-person meta-statement.
+  const META_LINE = /^(i('ve| have|'m)\s|here\s(is|are|'s)\s(the\s)?(revised|updated|rewritten|new|full|corrected)|this\s(is|version)|below\s(is|you|are)|the\s(following|text|document|passage)|sure[,!]?\s|certainly[,!]?\s|of course[,!]?\s)/i;
+
+  const lines = text.split('\n');
+  // Find the first line that does NOT look like meta-commentary.
+  const firstContentIdx = lines.findIndex(l => {
+    const t = l.trim();
+    return t.length > 0 && !META_LINE.test(t) && !isMetaCommentary(t);
+  });
+
+  if (firstContentIdx <= 0) return text; // nothing to strip, or all content
+  const stripped = lines.slice(firstContentIdx).join('\n').trim();
+  return stripped.length > 20 ? stripped : text; // safety: keep original if result is suspiciously short
+}
+
 export function extractGeminiProposedDiff(root = document) {
   let insertedText = '';
   let deletedText = '';
 
+  console.log('[Colophon Canvas Inspection] Starting suggestion diff extraction...');
+
+  // ── Strategy 1: explicit tracked-change / suggestion DOM elements ────────────
+  // These exist when Docs renders suggestions in "Suggesting" mode.
   const insertEls = Array.from(root.querySelectorAll(
-    '.kix-tracked-change-insert, .kix-suggestion-overlay-insert, .docos-suggestion-insert, [data-suggestion-type="insert"]'
+    '.kix-tracked-change-insert, .kix-suggestion-overlay-insert, .docos-suggestion-insert, [data-suggestion-type="insert"], .docos-suggestion-view-insert'
   ));
   const deleteEls = Array.from(root.querySelectorAll(
-    '.kix-tracked-change-delete, .kix-suggestion-overlay-delete, .docos-suggestion-delete, [data-suggestion-type="delete"]'
+    '.kix-tracked-change-delete, .kix-suggestion-overlay-delete, .docos-suggestion-delete, [data-suggestion-type="delete"], .docos-suggestion-view-delete'
   ));
 
   if (insertEls.length > 0) {
-    insertedText = insertEls.map(el => el.textContent).join(' ').trim();
+    console.log('[Colophon Canvas Inspection] Explicit insert elements:', insertEls.map(e => e.textContent));
+    insertedText = insertEls.map(e => e.textContent).join(' ').trim();
   }
   if (deleteEls.length > 0) {
-    deletedText = deleteEls.map(el => el.textContent).join(' ').trim();
+    console.log('[Colophon Canvas Inspection] Explicit delete elements:', deleteEls.map(e => e.textContent));
+    deletedText = deleteEls.map(e => e.textContent).join(' ').trim();
   }
 
-  if (!insertedText && !deletedText) {
-    const allSpans = Array.from(root.querySelectorAll('.kix-lineview span, .kix-paragraphrenderer span, .kix-wordhtmlgenerator-word-node'));
-    const insParts = [];
-    const delParts = [];
-
-    for (const span of allSpans) {
-      const style = window.getComputedStyle?.(span);
-      if (!style) continue;
-      const dec = style.textDecorationLine || style.textDecoration || '';
-      const color = style.color || '';
-
-      if (dec.includes('line-through') || span.classList?.contains('line-through')) {
-        delParts.push(span.textContent);
-      } else if (color.includes('42, 133') || color.includes('1a73e8') || color.includes('blue') || span.classList?.contains('suggested')) {
-        insParts.push(span.textContent);
+  // ── Strategy 2: docos-anchoreddocoview inline diff cards ────────────────────
+  // When Gemini proposes changes in "Help me write" mode, it inserts inline
+  // diff cards next to the changed text containing the proposed text.
+  // These cards are NOT inside canvas — they are real HTML overlays.
+  if (!insertedText) {
+    const diffCards = Array.from(root.querySelectorAll(
+      '.docos-anchoreddocoview .docosAiPreviewDiffVisibleSuggestionViewContent, .docos-docoview-tesla-conflict .docosAiPreviewDiffVisibleSuggestionViewContent'
+    ));
+    if (diffCards.length > 0) {
+      // Clone to avoid grabbing the accept/reject button text
+      const cardTexts = diffCards.map(card => {
+        const clone = card.cloneNode(true);
+        // Remove action buttons from the clone
+        clone.querySelectorAll('button, [role="button"], .docosAiPreviewDiffVisibleSuggestionViewAcceptButton, .docosAiPreviewDiffVisibleSuggestionViewRejectButton').forEach(b => b.remove());
+        return clone.textContent.trim();
+      }).filter(t => t.length > 2);
+      if (cardTexts.length > 0) {
+        insertedText = cardTexts.join(' ');
+        console.log('[Colophon Canvas Inspection] Diff card text extracted:', insertedText);
       }
     }
-    if (insParts.length > 0) insertedText = insParts.join('').trim();
-    if (delParts.length > 0) deletedText = delParts.join('').trim();
   }
 
+  // ── Strategy 3: Barkick sidebar response text ────────────────────────────────
+  // The Gemini sidebar shows what it generated as readable DOM text. We try all
+  // known container selectors (they drift over time) and strip any leading
+  // meta-commentary lines ("I've updated the document...") so only the actual
+  // generated content is captured.
+  if (!insertedText) {
+    const SIDEBAR_SELECTORS = [
+      '.appsElementsSidekickBarkickTopBoxResponseOneSystem',
+      '.appsElementsSidekickBarkickTopBoxResponseTextOneSystem',
+      '.appsElementsSidekickBarkickTopBoxResponseContainerOneSystem',
+      '.appsElementsGenerativeaiAstAnimated',
+    ];
+    for (const sel of SIDEBAR_SELECTORS) {
+      const el = root.querySelector(sel);
+      if (!el) continue;
+
+      // Clone and strip interactive controls so we only capture prose.
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('button, [role="button"], textarea, input').forEach(n => n.remove());
+      const raw = clone.textContent?.trim() ?? '';
+
+      if (raw.length > 10) {
+        // Strip leading meta-commentary lines before the actual generated text.
+        const cleaned = stripMetaLines(raw);
+        console.log('[Colophon Canvas Inspection] Sidebar response text (cleaned):', cleaned.slice(0, 80));
+        insertedText = cleaned;
+        break;
+      }
+    }
+  }
+
+  console.log('[Colophon Canvas Inspection] Final result:', { insertedText: insertedText.slice(0, 80), deletedText: deletedText.slice(0, 80) });
   return { insertedText, deletedText };
 }

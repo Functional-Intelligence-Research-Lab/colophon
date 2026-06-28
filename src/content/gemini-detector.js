@@ -38,6 +38,7 @@ import {
   geminiAvailable,
   extractGeminiProposedDiff,
   isMetaCommentary,
+  stripMetaLines,
 } from './gemini-selectors.js'
 import { aiSuggestionEvent, aiInteractionEvent } from '../lib/events.js'
 
@@ -48,7 +49,7 @@ const CONTEXT_LIMIT = 300
 // rejected so the timeline reflects that nothing was inserted.
 const ABANDON_MS = 5 * 60 * 1000
 
-export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, onResolve = () => {}, emitInteractions = true }) {
+export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, onResolve = () => {}, emitInteractions = true, onSuggestionWillAppear = () => {} }) {
   let _observer = null
   let _active = false
   let _clickHandler = null
@@ -115,7 +116,7 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       log('[Colophon Gemini] extracted text', { len: text.length, preview: text.slice(0, 60) })
       // New suggestion, or the text changed (Refine/regenerate produced a new
       // draft) — treat as a fresh suggestion.
-      if (text && (!_current || _current.text !== text)) {
+      if (text && (!_current || _current.rawText !== text)) {
         onSuggestionAppeared(text)
       }
     } else if (_current && !_current.resolved) {
@@ -132,17 +133,29 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       resolveCurrent('rejected', 'superseded by a new suggestion')
     }
 
+    // Notify the host (content.js) that a suggestion is about to be shown so
+    // it can capture a fresh, cache-busted pre-change document snapshot. This
+    // gives us a reliable baseline for computing the diff on acceptance.
+    onSuggestionWillAppear()
+
     const domDiff = typeof document !== 'undefined' ? extractGeminiProposedDiff(document) : { insertedText: '' }
     let displayText = text
     if (domDiff.insertedText) {
+      // DOM diff cards / sidebar gave us real content — use it directly.
       displayText = domDiff.insertedText
     } else if (isMetaCommentary(text)) {
+      // The raw text is entirely Gemini self-description. Show a placeholder;
+      // the real diff will arrive via the export-API poll after acceptance.
       displayText = 'Gemini proposed changes to document'
+    } else {
+      // The raw text looks like actual content — strip any leading meta lines.
+      displayText = stripMetaLines(text)
     }
 
     _current = {
       id: nextId(),
       text: displayText,
+      rawText: text,
       rawCommentary: text,
       appearedAt: new Date().toISOString(),
       resolved: false,
