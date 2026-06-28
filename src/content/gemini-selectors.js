@@ -200,7 +200,7 @@ export function geminiAvailable(root = document) {
 export const GEMINI_MODEL_ID = 'google/gemini'
 
 export function isMetaCommentary(text) {
-  if (!text || text.length < 15) return true;
+  if (!text) return true;
   const lower = text.toLowerCase().trim();
   if (lower.startsWith('{') || lower.startsWith('[')) return true;
   return [
@@ -233,4 +233,46 @@ export function isMetaCommentary(text) {
     'treat everything before',
     '[cursor]',
   ].some(p => lower.includes(p));
+}
+
+export function extractGeminiProposedDiff(root = document) {
+  let insertedText = '';
+  let deletedText = '';
+
+  const insertEls = Array.from(root.querySelectorAll(
+    '.kix-tracked-change-insert, .kix-suggestion-overlay-insert, .docos-suggestion-insert, [data-suggestion-type="insert"]'
+  ));
+  const deleteEls = Array.from(root.querySelectorAll(
+    '.kix-tracked-change-delete, .kix-suggestion-overlay-delete, .docos-suggestion-delete, [data-suggestion-type="delete"]'
+  ));
+
+  if (insertEls.length > 0) {
+    insertedText = insertEls.map(el => el.textContent).join(' ').trim();
+  }
+  if (deleteEls.length > 0) {
+    deletedText = deleteEls.map(el => el.textContent).join(' ').trim();
+  }
+
+  if (!insertedText && !deletedText) {
+    const allSpans = Array.from(root.querySelectorAll('.kix-lineview span, .kix-paragraphrenderer span, .kix-wordhtmlgenerator-word-node'));
+    const insParts = [];
+    const delParts = [];
+
+    for (const span of allSpans) {
+      const style = window.getComputedStyle?.(span);
+      if (!style) continue;
+      const dec = style.textDecorationLine || style.textDecoration || '';
+      const color = style.color || '';
+
+      if (dec.includes('line-through') || span.classList?.contains('line-through')) {
+        delParts.push(span.textContent);
+      } else if (color.includes('42, 133') || color.includes('1a73e8') || color.includes('blue') || span.classList?.contains('suggested')) {
+        insParts.push(span.textContent);
+      }
+    }
+    if (insParts.length > 0) insertedText = insParts.join('').trim();
+    if (delParts.length > 0) deletedText = delParts.join('').trim();
+  }
+
+  return { insertedText, deletedText };
 }
