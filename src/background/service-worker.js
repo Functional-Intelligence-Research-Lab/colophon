@@ -105,6 +105,34 @@ function broadcastModelStatus(extra = {}) {
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[Colophon] Installed.");
+  chrome.contextMenus.create({
+    id: 'colophon-paraphrase',
+    title: 'Paraphrase with Colophon',
+    contexts: ['selection'],
+    documentUrlPatterns: ['https://docs.google.com/document/*'],
+  });
+  chrome.contextMenus.create({
+    id: 'colophon-add-source',
+    title: 'Add source for this text',
+    contexts: ['selection'],
+    documentUrlPatterns: ['https://docs.google.com/document/*'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id) return;
+  const text = info.selectionText ?? '';
+  if (!text) return;
+
+  await chrome.sidePanel.open({ tabId: tab.id });
+
+  // Small delay so sidepanel has time to mount before receiving the message
+  setTimeout(() => {
+    chrome.runtime.sendMessage({
+      action: 'CONTEXT_MENU_ACTION',
+      payload: { menuId: info.menuItemId, text },
+    }).catch(() => {});
+  }, 400);
 });
 
 // ── Message routing ───────────────────────────────────────────────────────────
@@ -181,6 +209,9 @@ async function handleMessage(msg, _sender) {
 
     case 'UPDATE_EVENT_METADATA':
       return updateEventMetadata(msg.payload);
+
+    case 'SET_PRE_SESSION_TEXT':
+      return updateMetadata({ key: 'pre_session_snapshot', value: msg.payload?.text ?? '' });
 
     case 'SELECTION_CHANGED':
       _lastSelection = msg.payload ?? { text: '' };
