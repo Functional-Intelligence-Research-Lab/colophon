@@ -13,6 +13,19 @@ let activeTabId = null;
 let _assignmentPrompt = '';
 let _docContext = null;
 
+function _updateContextIndicator() {
+  const el = document.getElementById('doc-context-indicator');
+  if (!el) return;
+  const words = _docContext?.text?.trim().split(/\s+/).filter(Boolean).length ?? 0;
+  if (words > 0) {
+    el.textContent = `\u{1F4C4} ${words.toLocaleString()} words in context`;
+    el.style.color = 'var(--user-color, #5c3ce6)';
+  } else {
+    el.textContent = '\u{1F4C4} No document context yet';
+    el.style.color = 'var(--text-secondary, #999)';
+  }
+}
+
 function _isMetaCommentary(text) {
   if (!text || text.length < 15) return true;
   const lower = text.toLowerCase().trim();
@@ -30,7 +43,10 @@ function _isMetaCommentary(text) {
     'i need more context',
     'could you please provide',
     "the user's writing is",
-    'the user\'s text is',
+    "the user's text is",
+    'the user wants me to',
+    'treat everything before',
+    '[cursor]',
   ].some(p => lower.includes(p));
 }
 
@@ -49,8 +65,14 @@ function _cleanAIResponse(text) {
     } catch { /* not valid JSON */ }
   }
 
+  // Remove any stray [CURSOR] tokens the model may echo back
+  t = t.replace(/\[CURSOR\]/gi, '').trim();
+
   // Strip meta-commentary prefixes that small models prepend
   const prefixes = [
+    /^the user wants me to\b[\s\S]*?\.\s*/i,
+    /^i (?:will|should|need to) treat [\s\S]*?\.\s*/i,
+    /^\[cursor\]\s*/i,
     /^the user(?:'s)? (?:writing|text) is:\s*/i,
     /^the completed sentence is:\s*/i,
     /^here is (?:the )?(?:paraphras\w*|revis\w*|rewritten) (?:text|version|sentence)?:?\s*/i,
@@ -70,6 +92,15 @@ function _cleanAIResponse(text) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+
+  const logoEl = document.getElementById('colophon-logo');
+  if (logoEl) logoEl.src = chrome.runtime.getURL('icons/green_doc.svg');
+
+  const settingsIcon = document.getElementById('settings-icon');
+  if (settingsIcon) settingsIcon.src = chrome.runtime.getURL('icons/settings-icon.svg');
+
+  const settingsBtn = document.getElementById('settings-btn');
+  if (settingsBtn) settingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   const closeBtn = document.getElementById('close-panel-btn');
   if (closeBtn) {
@@ -142,7 +173,10 @@ const TimelineRenderer = {
   init() {
 
     chrome.runtime.sendMessage({ action: 'GET_STATE' }, (response) => {
-      if (response?.docContext) _docContext = response.docContext;
+      if (response?.docContext) {
+        _docContext = response.docContext;
+        _updateContextIndicator();
+      }
       if (response?.session?.events) {
         this.render(response.session.events);
 
@@ -178,6 +212,24 @@ const TimelineRenderer = {
       }
       if (msg.action === 'DOC_CONTEXT_UPDATE') {
         _docContext = { text: msg.text, cursorIndex: msg.cursorIndex, selectedText: msg.selectedText };
+        _updateContextIndicator();
+      }
+      if (msg.action === 'CONTEXT_MENU_ACTION') {
+        const { menuId, text } = msg.payload ?? {};
+        if (!text) return;
+        if (menuId === 'colophon-paraphrase') {
+          // Submit a paraphrase request directly via ChatInput, pre-seeding the selection state
+          SelectionContext._state = { text, context_before: '', context_after: '' };
+          ChatInput._submitText(`Paraphrase this: "${text.slice(0, 400)}"`);
+        } else if (menuId === 'colophon-add-source') {
+          SelectionContext._state = { text, context_before: '', context_after: '' };
+          // Show a source-attribution prompt in the chat input
+          const input = document.querySelector('.input-box input');
+          if (input) {
+            input.value = `Add source for: "${text.slice(0, 80)}"`;
+            input.focus();
+          }
+        }
       }
     });
 
@@ -251,6 +303,22 @@ const TimelineRenderer = {
       }
     }
     
+    else if (evt.type === 'heuristic_suggestion') {
+      typeClass = 'ai';
+      authorLabel = '✦ Writing tip';
+      const tipText = evt.meta.text || '';
+      const excerpt = evt.meta.excerpt ? `<div class="text-only" style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;font-style:italic;">"${evt.meta.excerpt}"</div>` : '';
+      contentHTML = `
+        <div class="card suggestion-card">
+          <p>${tipText}</p>
+          ${excerpt}
+          <div class="actions">
+            <button class="btn-dismiss">Dismiss</button>
+          </div>
+        </div>
+      `;
+    }
+
     else if (evt.type === 'ai_suggestion') {
       typeClass = 'ai';
       authorLabel = 'AI • Suggestion';
@@ -544,37 +612,43 @@ const TimelineRenderer = {
 
 // ── System prompt builder ─────────────────────────────────────────────────────
 
+function _extractLastSentence(text) {
+  const segs = text.split(/(?<=[.!?])\s+/);
+  return segs.filter(s => s.trim().length > 10).at(-1)?.trim() ?? '';
+}
+
 async function _buildSystemPrompt() {
-  const base = 'You are a concise writing assistant embedded in Google Docs. Help the user with their writing. Keep replies short and direct. [CURSOR] in the document text marks the user\'s current insertion point — treat everything before it as what the user has written so far.';
+  const base = 'You are a concise writing assistant embedded in Google Docs. Help the user with their writing. Reply only with the requested text — no explanations, no meta-commentary, no JSON wrappers.';
   const parts = [base];
 
   if (_assignmentPrompt) parts.push(`Assignment context: ${_assignmentPrompt}`);
 
-  // Always fetch fresh context so AI sees current document state even when sidepanel has focus.
-  // Fall back to the last proactively-pushed _docContext only if the live fetch fails.
+  // Always fetch the freshest snapshot from the service worker first.
+  // pre_session_snapshot is updated by updateRollingBaseline() on every keydown,
+  // so it reflects the current document state — not just what was present at session start.
+  // _docContext (in-memory) is used only as a fallback if the SW is unavailable.
   let ctx = null;
   try {
-    if (activeTabId) {
-      const tab = await chrome.tabs.get(activeTabId);
-      if (tab.url?.startsWith('https://docs.google.com/document/')) {
-        const res = await chrome.tabs.sendMessage(activeTabId, { action: 'GET_EDITOR_TEXT' });
-        if (res?.text?.trim().length > 20) ctx = res;
-      }
-    }
-  } catch { /* content script not ready or not on a Docs page */ }
+    const state = await chrome.runtime.sendMessage({ action: 'GET_STATE' });
+    const snap = state?.session?.metadata?.pre_session_snapshot;
+    if (snap?.trim().length > 20) ctx = { text: snap, cursorIndex: snap.length };
+  } catch { /* SW unavailable */ }
   if (!ctx) ctx = _docContext;
 
+  console.log('[Colophon SP] Context for AI:', ctx ? `${ctx.text?.length} chars` : 'none');
+  _updateContextIndicator();
+
+  let before = '';
   if (ctx?.text?.trim().length > 20) {
     const idx = typeof ctx.cursorIndex === 'number' ? ctx.cursorIndex : ctx.text.length;
-    const before = ctx.text.slice(Math.max(0, idx - 2000), idx);
-    const after  = ctx.text.slice(idx, idx + 500);
-    let docSection = `Document (user is writing here):\n---\n${before}`;
-    if (after) docSection += `[CURSOR]${after}`;
-    docSection += '\n---';
-    parts.push(docSection);
+    before = ctx.text.slice(Math.max(0, idx - 2000), idx).trim();
+    const after = ctx.text.slice(idx, idx + 500).trim();
+
+    if (before) parts.push(`Recent writing:\n---\n${before}\n---`);
+    if (after)  parts.push(`Upcoming text in document:\n---\n${after}\n---`);
   }
 
-  // Include any active text selection so regular chat is also selection-aware
+  // Include any active text selection so the AI has a specific target
   const sel = SelectionContext._state;
   if (sel?.text?.length >= 10) {
     parts.push(
@@ -582,6 +656,10 @@ async function _buildSystemPrompt() {
       (sel.context_before ? `\nContext before: "${sel.context_before.slice(-200)}"` : '') +
       (sel.context_after  ? `\nContext after: "${sel.context_after.slice(0, 200)}"` : '')
     );
+  } else if (before) {
+    // No selection — surface the last sentence so the model has a concrete target
+    const lastSentence = _extractLastSentence(before);
+    if (lastSentence) parts.push(`Last sentence at cursor:\n"${lastSentence}"`);
   }
 
   return parts.join('\n\n');
@@ -650,6 +728,15 @@ const ChatInput = {
         this._endpoint = `http://127.0.0.1:${msg.port}`;
       }
     });
+  },
+
+  // Programmatic submit (e.g. from context menu action)
+  _submitText(text) {
+    const input = document.querySelector('.input-box input');
+    const sendBtn = document.querySelector('.send-btn');
+    if (!input || !sendBtn) return;
+    input.value = text;
+    this._submit(input, sendBtn);
   },
 
   async _submit(input, sendBtn) {
