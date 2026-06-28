@@ -56,6 +56,10 @@ let _selectionDebounce = null
 let _rollingBaselineState = "";
 let _baselineTimer = null;
 let _isFetchingBaseline = false;
+let _lastSnapshotTime = 0;
+let _bufferStartTime = 0;
+let _geminiPanelActive = false;
+let _geminiObserver = null;
 
 function _getDocText() {
   return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
@@ -171,6 +175,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     sendResponse({ text, cursorIndex });
   }
+
+  if (msg.action === 'FORCE_SCAN') {
+    clearTimeout(_baselineTimer);
+    updateRollingBaseline(sendResponse);
+    return true; // async response
+  }
+
+  if (msg.action === 'GET_SNAPSHOT_AGE') {
+    sendResponse({ ok: true, ageMs: _lastSnapshotTime ? Date.now() - _lastSnapshotTime : Infinity });
+  }
 })
 
 syncRecordingState()
@@ -232,7 +246,7 @@ function runHeuristics() {
       payload: {
         type: 'heuristic_suggestion',
         timestamp: new Date().toISOString(),
-        meta: { text: tip.text, excerpt: tip.excerpt },
+        meta: { rule: tip.rule, text: tip.text, excerpt: tip.excerpt },
       },
     }).catch(() => {})
   }
@@ -405,6 +419,7 @@ function bufferEdit(delta) {
   }
   if (!_editBuffer) {
     _editBuffer = { timestamp: new Date().toISOString(), delta: 0 }
+    _bufferStartTime = Date.now();
     console.log('[Colophon Content] edit buffer started', { delta })
   }
   _editBuffer.delta += delta
@@ -415,15 +430,28 @@ function bufferEdit(delta) {
 
 function flushEdit() {
   if (!_editBuffer) return
-  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta })
+  const elapsed = Math.max((Date.now() - _bufferStartTime) / 1000, 0.1);
+  const absDelta = Math.abs(_editBuffer.delta);
+  const insertion_velocity = Math.round(absDelta / elapsed);
+  // Flag rapid large insertions as likely AI (programmatic injection is 1000s chars/sec)
+  const likely_ai = insertion_velocity > 150 && absDelta > 80;
+
+  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, insertion_velocity, likely_ai })
+
+  const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit';
+  if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
+
   send('LOG_EVENT', {
     timestamp: _editBuffer.timestamp,
-    type: 'edit',
+    type: eventType,
     meta: {
-      position_start: 0,                          // Sprint 2: real cursor position
+      position_start: 0,
       position_end:   Math.max(0, _editBuffer.delta),
       char_delta:     _editBuffer.delta,
-      source:         'human',
+      char_count:     absDelta,
+      source:         likely_ai ? 'ai' : 'human',
+      insertion_velocity,
+      likely_ai,
     },
   })
   _editBuffer = null
@@ -509,6 +537,15 @@ function onPaste(e) {
 //   }
 // }
 
+function _textSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const wordsA = new Set(a.toLowerCase().match(/\b\w+\b/g) || []);
+  const wordsB = new Set(b.toLowerCase().match(/\b\w+\b/g) || []);
+  const intersection = [...wordsA].filter(w => wordsB.has(w)).length;
+  const union = new Set([...wordsA, ...wordsB]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
 async function emitPaste(text) {
   const charCount = text.length;
   //if (typeof _pendingPaste !== 'undefined' && _pendingPaste) _pendingPaste.logged = true;
@@ -553,6 +590,22 @@ async function emitPaste(text) {
         event.meta.position_end = endIndex;
       }
     }
+
+    // Check if this paste matches a pending AI output (e.g. from Paraphrase quick action)
+    try {
+      const pendingRes = await chrome.runtime.sendMessage({ action: 'GET_PENDING_AI_OUTPUT' });
+      if (pendingRes?.text) {
+        const similarity = _textSimilarity(text, pendingRes.text);
+        if (similarity >= 0.8) {
+          event.type = 'ai_interaction';
+          event.meta.source = 'paraphrase';
+          event.meta.acceptance = 'fully_accepted';
+          event.meta.ai_chars = text.length;
+          chrome.runtime.sendMessage({ action: 'CLEAR_PENDING_AI_OUTPUT' }).catch(() => {});
+          console.log('[Colophon Content] Paste reclassified as AI paraphrase (similarity:', similarity, ')');
+        }
+      }
+    } catch { /* service worker unavailable */ }
 
     console.log("[Colophon Content] Final Event Ready:", event);
     send('LOG_EVENT', event);
@@ -978,9 +1031,35 @@ async function checkAndInjectStartToast() {
   });
 }
 
+// ── Gemini "Help me write" Detection ─────────────────────────────────────────
+
+function initGeminiObserver() {
+  if (_geminiObserver) return;
+  _geminiObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+        const el = /** @type {Element} */ (node);
+        // Gemini sidebar and "Help me write" panel use these markers
+        if (
+          el.matches?.('.docs-material-surface, [data-feature-id], [jsname="QkNstf"]') ||
+          el.querySelector?.('.docs-material-surface, [data-feature-id="smart-compose"]')
+        ) {
+          console.log('[Colophon Content] Gemini panel detected');
+          _geminiPanelActive = true;
+          // Auto-reset after 2 minutes to avoid false positives
+          setTimeout(() => { _geminiPanelActive = false; }, 120000);
+        }
+      }
+    }
+  });
+  _geminiObserver.observe(document.body, { childList: true, subtree: true });
+}
+
 // ── BOOT UP FOR TOAST NOTIFICATION──
 function initColophonUI() {
-  setTimeout(checkAndInjectStartToast, 2000); 
+  setTimeout(checkAndInjectStartToast, 2000);
+  initGeminiObserver();
 }
 
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
@@ -1025,30 +1104,39 @@ function findFirstDifference(oldText, newText) {
   return i; 
 }
 
-async function updateRollingBaseline() {
-  if (_isFetchingBaseline) return; // Mutex Lock: Abort if already downloading
+async function updateRollingBaseline(forceSendResponse = null) {
+  if (_isFetchingBaseline) {
+    if (forceSendResponse) forceSendResponse({ ok: false, reason: 'already_fetching' });
+    return;
+  }
 
   _isFetchingBaseline = true;
   try {
     const text = await getDocumentText();
     if (text) {
       _rollingBaselineState = text;
+      _lastSnapshotTime = Date.now();
 
       // Push clean export-API text so the AI always has fresh document context,
       // even when DOM scraping (GET_EDITOR_TEXT) fails due to extension reloads.
       chrome.runtime.sendMessage({
         action: 'UPDATE_DOC_CONTEXT',
-        payload: { text, cursorIndex: text.length, selectedText: '' },
+        payload: { text, cursorIndex: text.length, selectedText: '', lastSnapshotTime: _lastSnapshotTime },
       }).catch(() => {});
 
       // Keep pre_session_snapshot current (not frozen at recording start)
       chrome.runtime.sendMessage({
         action: 'SET_PRE_SESSION_TEXT',
-        payload: { text: text.slice(0, 20000) },
+        payload: { text: text.slice(0, 20000), timestamp: _lastSnapshotTime },
       }).catch(() => {});
+
+      if (forceSendResponse) forceSendResponse({ ok: true, timestamp: _lastSnapshotTime });
+    } else {
+      if (forceSendResponse) forceSendResponse({ ok: false, reason: 'no_text' });
     }
   } catch (err) {
     console.error("[Colophon Content] Baseline fetch failed:", err);
+    if (forceSendResponse) forceSendResponse({ ok: false, reason: err.message });
   } finally {
     _isFetchingBaseline = false; // Unlock
   }

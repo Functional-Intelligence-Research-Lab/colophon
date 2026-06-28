@@ -31,6 +31,8 @@ let _nativePort = null;
 let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'
 let _lastSelection = { text: '' };
 let _lastDocContext = null;
+let _lastSnapshotTimestamp = 0;
+let _pendingAIOutput = null; // { text, expiresAt } — set when sidepanel sends paraphrase/improve result
 
 function getNativePort() {
   if (_nativePort) return _nativePort;
@@ -210,8 +212,45 @@ async function handleMessage(msg, _sender) {
     case 'UPDATE_EVENT_METADATA':
       return updateEventMetadata(msg.payload);
 
-    case 'SET_PRE_SESSION_TEXT':
-      return updateMetadata({ key: 'pre_session_snapshot', value: msg.payload?.text ?? '' });
+    case 'SET_PRE_SESSION_TEXT': {
+      const ts = msg.payload?.timestamp ?? Date.now();
+      _lastSnapshotTimestamp = ts;
+      await updateMetadata({ key: 'pre_session_snapshot', value: msg.payload?.text ?? '' });
+      await updateMetadata({ key: 'last_snapshot_timestamp', value: ts });
+      return { ok: true };
+    }
+
+    case 'FORCE_SCAN': {
+      const session = await getSession();
+      const tabId = session?.tabId;
+      if (!tabId) return { ok: false, reason: 'no_active_tab' };
+      try {
+        const result = await chrome.tabs.sendMessage(tabId, { action: 'FORCE_SCAN' });
+        return result ?? { ok: false, reason: 'no_response' };
+      } catch (e) {
+        return { ok: false, reason: e.message };
+      }
+    }
+
+    case 'GET_SNAPSHOT_AGE': {
+      const ageMs = _lastSnapshotTimestamp ? Date.now() - _lastSnapshotTimestamp : Infinity;
+      return { ok: true, ageMs };
+    }
+
+    case 'SET_PENDING_AI_OUTPUT':
+      _pendingAIOutput = { text: msg.payload?.text ?? '', expiresAt: Date.now() + 5 * 60 * 1000 };
+      return { ok: true };
+
+    case 'GET_PENDING_AI_OUTPUT':
+      if (_pendingAIOutput && Date.now() < _pendingAIOutput.expiresAt) {
+        return { ok: true, text: _pendingAIOutput.text };
+      }
+      _pendingAIOutput = null;
+      return { ok: true, text: null };
+
+    case 'CLEAR_PENDING_AI_OUTPUT':
+      _pendingAIOutput = null;
+      return { ok: true };
 
     case 'SELECTION_CHANGED':
       _lastSelection = msg.payload ?? { text: '' };
