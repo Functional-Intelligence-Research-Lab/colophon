@@ -67,8 +67,15 @@ let _geminiPanelActive = false;
 let _geminiObserver = null;
 
 function _getDocText() {
-  return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
-    .map(p => p.textContent).join('\n').slice(0, 20000)
+  let nodes = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
+  if (nodes.length === 0 || nodes.every(n => !n.textContent.trim())) {
+    nodes = Array.from(document.querySelectorAll('.kix-lineview, .kix-wordhtmlgenerator-word-node, [role="document"] p, .kix-page p, .kix-page span'));
+  }
+  if (nodes.length > 0) {
+    const text = nodes.map(p => p.textContent).join('\n').trim();
+    if (text) return text.slice(0, 25000);
+  }
+  return _rollingBaselineState || "";
 }
 
 function _pushDocContext() {
@@ -167,7 +174,7 @@ const _geminiDetector = createGeminiDetector({
         }));
 
         if (docAfter) _rollingBaselineState = docAfter;
-      }, 600);
+      }, 800);
     } else {
       send('LOG_EVENT', aiInteractionEvent({
         source: 'ai',
