@@ -12,6 +12,8 @@ function debounce(func, wait) {
 let activeTabId = null;
 let _assignmentPrompt = '';
 let _docContext = null;
+let _lastScanTime = 0;
+let _scanLabelInterval = null;
 
 function _updateContextIndicator() {
   const el = document.getElementById('doc-context-indicator');
@@ -23,6 +25,33 @@ function _updateContextIndicator() {
   } else {
     el.textContent = '\u{1F4C4} No document context yet';
     el.style.color = 'var(--text-secondary, #999)';
+  }
+}
+
+function _updateScanLabel() {
+  const label = document.getElementById('last-scan-label');
+  if (!label) return;
+  if (!_lastScanTime) { label.textContent = 'Not scanned yet'; return; }
+  const ageS = Math.round((Date.now() - _lastScanTime) / 1000);
+  if (ageS < 10) label.textContent = 'Last scan: just now';
+  else if (ageS < 120) label.textContent = `Last scan: ${ageS}s ago`;
+  else label.textContent = `Last scan: ${Math.round(ageS / 60)}m ago`;
+}
+
+async function _triggerManualScan() {
+  const btn = document.getElementById('scan-btn');
+  if (btn) { btn.classList.add('scanning'); btn.disabled = true; }
+  try {
+    const result = await Promise.race([
+      chrome.runtime.sendMessage({ action: 'FORCE_SCAN' }),
+      new Promise(resolve => setTimeout(() => resolve({ ok: false }), 6000)),
+    ]);
+    if (result?.ok) {
+      _lastScanTime = Date.now();
+      _updateScanLabel();
+    }
+  } catch { /* ignore */ } finally {
+    if (btn) { btn.classList.remove('scanning'); btn.disabled = false; }
   }
 }
 
@@ -153,6 +182,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Wire the manual scan button
+  const scanBtn = document.getElementById('scan-btn');
+  if (scanBtn) scanBtn.addEventListener('click', _triggerManualScan);
+
+  // Wire the export button
+  const exportBtn = document.getElementById('export-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', async () => {
+      exportBtn.disabled = true;
+      try {
+        const result = await chrome.runtime.sendMessage({ action: 'EXPORT' });
+        if (result?.base64 && result?.filename) {
+          const blob = await (await fetch(`data:application/octet-stream;base64,${result.base64}`)).blob();
+          const url = URL.createObjectURL(blob);
+          chrome.downloads.download({ url, filename: result.filename, saveAs: true }, () => {
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          });
+        }
+      } catch (e) {
+        ModelStatus._onError(`Export failed: ${e.message}`);
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+  }
+  // Refresh the "last scan" label every 30 seconds
+  _scanLabelInterval = setInterval(_updateScanLabel, 30_000);
+  // Seed last scan time from session metadata if available
+  chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
+    const ts = res?.session?.metadata?.last_snapshot_timestamp;
+    if (ts) { _lastScanTime = ts; _updateScanLabel(); }
+  });
+
   // Boot the dynamic renderer
   TimelineRenderer.init();
   // Check local AI model status via native host
@@ -161,16 +223,169 @@ document.addEventListener('DOMContentLoaded', async () => {
   ChatInput.init();
   // Wire highlight-to-AI selection banner
   SelectionContext.init();
+  // Init suggestions manager
+  SuggestionsManager.init();
+  // Init quick actions bar
+  QuickActions.init();
+  // Seed scanning dot from initial session state
+  chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
+    _updateScanningDot(res?.session?.isRecording ?? false);
+  });
 });
 
+
+// ── Status Header ─────────────────────────────────────────────────────────────
+function updateStatusHeader(pendingCount = null) {
+  const icon = document.getElementById('status-icon');
+  const title = document.getElementById('status-title');
+  const subtitle = document.getElementById('status-subtitle');
+  if (!icon || !title || !subtitle) return;
+
+  const count = pendingCount ?? SuggestionsManager._queue.length;
+  if (count > 0) {
+    icon.className = 'status-icon status-warn';
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>';
+    title.textContent = `${count} thing${count > 1 ? 's' : ''} to review`;
+    subtitle.textContent = 'Check suggestions below.';
+  } else {
+    icon.className = 'status-icon status-ok';
+    icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+    title.textContent = 'All good';
+    subtitle.textContent = "We'll let you know if anything needs attention.";
+  }
+}
+
+// ── Suggestions Manager ───────────────────────────────────────────────────────
+const SuggestionsManager = {
+  _queue: [],   // array of { event, index } for unaddressed heuristic suggestions
+  _pointer: 0,  // which queue item is shown
+
+  _TAG_MAP: {
+    readability:        '✦ Coherence',
+    adverb_density:     '✦ Style',
+    long_paragraph:     '✦ Structure',
+    passive_voice:      '✦ Clarity',
+    filler_words:       '✦ Style',
+    wordy_phrase:       '✦ Clarity',
+    long_sentence:      '✦ Structure',
+    repeated_starts:    '✦ Style',
+    word_repetition:    '✦ Clarity',
+  },
+
+  init() {
+    const nextBtn = document.getElementById('next-suggestion-btn');
+    if (nextBtn) nextBtn.addEventListener('click', () => {
+      this._pointer = (this._pointer + 1) % this._queue.length;
+      this._render();
+    });
+
+    document.getElementById('active-suggestion-card')?.addEventListener('click', (e) => {
+      if (e.target.classList.contains('btn-ignore')) this._dismiss();
+      if (e.target.classList.contains('btn-apply'))  this._apply();
+      if (e.target.classList.contains('btn-preview')) {
+        e.preventDefault();
+        const preview = document.querySelector('.suggestion-preview-text');
+        if (preview) {
+          preview.classList.toggle('visible');
+          e.target.textContent = preview.classList.contains('visible') ? 'Hide' : 'Preview';
+        }
+      }
+    });
+  },
+
+  push(event) {
+    // Avoid duplicates by timestamp
+    if (!this._queue.find(q => q.event.timestamp === event.timestamp)) {
+      this._queue.push({ event });
+      this._render();
+      updateStatusHeader();
+    }
+  },
+
+  _dismiss() {
+    if (!this._queue.length) return;
+    const item = this._queue[this._pointer];
+    // Mark dismissed in service worker
+    chrome.runtime.sendMessage({
+      action: 'UPDATE_EVENT_STATE',
+      payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+    }).catch(() => {});
+    this._queue.splice(this._pointer, 1);
+    this._pointer = Math.max(0, Math.min(this._pointer, this._queue.length - 1));
+    this._render();
+    updateStatusHeader();
+  },
+
+  _apply() {
+    if (!this._queue.length) return;
+    const { event } = this._queue[this._pointer];
+    const excerpt = event.meta?.excerpt || '';
+    const message = event.meta?.text || '';
+    const prompt = excerpt
+      ? `Fix this writing issue — ${message}\n\nText: "${excerpt}"`
+      : `Improve this text: ${message}`;
+    ChatInput._submitText(prompt);
+    this._dismiss();
+  },
+
+  _render() {
+    const section = document.getElementById('suggestions-section');
+    const card = document.getElementById('active-suggestion-card');
+    const badge = document.getElementById('suggestion-count-badge');
+    if (!section || !card) return;
+
+    if (!this._queue.length) {
+      section.hidden = true;
+      return;
+    }
+
+    section.hidden = false;
+    if (badge) badge.textContent = this._queue.length;
+
+    const { event } = this._queue[this._pointer] ?? this._queue[0];
+    const tag = this._TAG_MAP[event.meta?.rule] ?? '✦ Writing tip';
+    const message = event.meta?.text || '';
+    const excerpt = event.meta?.excerpt || '';
+
+    card.innerHTML = `
+      <div class="suggestion-card-new">
+        <span class="suggestion-tag">${tag}</span>
+        <p>${message}</p>
+        ${excerpt ? `<div class="suggestion-context">"${excerpt.slice(0, 100)}"</div>` : ''}
+        ${excerpt ? `<div class="suggestion-preview-text">${excerpt}</div>` : ''}
+        <div class="suggestion-actions">
+          ${excerpt ? `<a href="#" class="btn-preview">Preview</a>` : ''}
+          <button class="btn-apply">Apply</button>
+          <button class="btn-ignore">Ignore</button>
+        </div>
+      </div>
+    `;
+  },
+};
 
 // ── Dynamic Timeline Renderer & State Manager ─────────────────────────────
 const TimelineRenderer = {
   container: document.getElementById('timeline-container'),
-  renderedTimestamps: new Set(), 
-  sessionStartTime: null, 
+  renderedTimestamps: new Set(),
+  sessionStartTime: null,
+  _showAll: false,
+  // Tracks grouped edit cards: key=groupKey, value=domNode
+  _editGroups: new Map(),
 
   init() {
+    // "See all" toggle
+    document.getElementById('see-all-events-btn')?.addEventListener('click', () => {
+      this._showAll = !this._showAll;
+      const btn = document.getElementById('see-all-events-btn');
+      if (btn) btn.textContent = this._showAll ? 'Collapse' : 'See all';
+      // Re-render from scratch
+      this.container.innerHTML = '';
+      this.renderedTimestamps = new Set();
+      this._editGroups = new Map();
+      chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
+        if (res?.session?.events) this.render(res.session.events);
+      });
+    });
 
     chrome.runtime.sendMessage({ action: 'GET_STATE' }, (response) => {
       if (response?.docContext) {
@@ -209,9 +424,14 @@ const TimelineRenderer = {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.action === 'SYNC_TIMELINE') {
         this.render(msg.events);
+        // Keep scanning dot in sync with recording state
+        chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
+          _updateScanningDot(res?.session?.isRecording ?? false);
+        });
       }
       if (msg.action === 'DOC_CONTEXT_UPDATE') {
         _docContext = { text: msg.text, cursorIndex: msg.cursorIndex, selectedText: msg.selectedText };
+        if (msg.lastSnapshotTime) { _lastScanTime = msg.lastSnapshotTime; _updateScanLabel(); }
         _updateContextIndicator();
       }
       if (msg.action === 'CONTEXT_MENU_ACTION') {
@@ -236,22 +456,108 @@ const TimelineRenderer = {
     this.attachClickHandlers();
   },
 
+  // Events shown in compact "important" mode (hide noisy individual edits)
+  _isImportant(evt) {
+    return ['paste', 'ai_interaction', 'heuristic_suggestion', 'ai_suggestion',
+            'gemini_suggestion', 'session_start', 'session_end'].includes(evt.type);
+  },
+
   render(events) {
     const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     const totalEventsCount = events.length;
 
+    // Collect edit events for grouping
+    const editRuns = [];
+    let currentRun = null;
+
     sortedEvents.forEach(evt => {
-      if (!this.renderedTimestamps.has(evt.timestamp)) {
-        const el = this.buildEventCard(evt, totalEventsCount);
-        if (el) {
-          this.container.appendChild(el);
-          this.renderedTimestamps.add(evt.timestamp);
-          this.container.parentElement.scrollTop = this.container.parentElement.scrollHeight;
-        }
+      // Push heuristic suggestions to the SuggestionsManager (idempotent)
+      if (evt.type === 'heuristic_suggestion' && evt.meta?.status !== 'dismissed') {
+        SuggestionsManager.push(evt);
+      }
+
+      if (evt.type === 'edit') {
+        if (!currentRun) currentRun = { events: [], totalDelta: 0 };
+        currentRun.events.push(evt);
+        currentRun.totalDelta += evt.meta?.char_delta ?? 0;
       } else {
-        this.updateEventState(evt);
+        if (currentRun) { editRuns.push(currentRun); currentRun = null; }
       }
     });
+    if (currentRun) editRuns.push(currentRun);
+
+    sortedEvents.forEach(evt => {
+      if (this.renderedTimestamps.has(evt.timestamp)) {
+        this.updateEventState(evt);
+        return;
+      }
+
+      // In compact mode, skip individual edit events (they'll be shown as grouped card)
+      if (!this._showAll && evt.type === 'edit') return;
+
+      // In compact mode, hide heuristic suggestions from timeline (shown in suggestions section)
+      if (!this._showAll && evt.type === 'heuristic_suggestion') return;
+
+      const el = this.buildEventCard(evt, totalEventsCount);
+      if (el) {
+        this.container.appendChild(el);
+        this.renderedTimestamps.add(evt.timestamp);
+        this.container.parentElement.scrollTop = this.container.parentElement.scrollHeight;
+      }
+    });
+
+    // Render grouped edit summary in compact mode
+    if (!this._showAll) {
+      editRuns.forEach(run => {
+        const groupKey = run.events[0].timestamp;
+        if (this._editGroups.has(groupKey)) {
+          // Update existing group card
+          const node = this._editGroups.get(groupKey);
+          const span = node.querySelector('.edit-group-delta');
+          if (span) span.textContent = this._formatDelta(run.totalDelta);
+          return;
+        }
+        const last = run.events[run.events.length - 1];
+        const el = this._buildEditGroupCard(run.events[0], last, run.totalDelta);
+        if (el) {
+          // Insert before first non-edit card that comes after this run's start time
+          const startTime = new Date(run.events[0].timestamp);
+          const allCards = [...this.container.children];
+          const insertBefore = allCards.find(c => {
+            const ts = c.dataset.timestamp;
+            return ts && new Date(ts) > startTime;
+          });
+          if (insertBefore) this.container.insertBefore(el, insertBefore);
+          else this.container.appendChild(el);
+          this._editGroups.set(groupKey, el);
+        }
+      });
+    }
+  },
+
+  _formatDelta(delta) {
+    if (delta > 0) return `+${delta} chars`;
+    if (delta < 0) return `${delta} chars`;
+    return '0 chars';
+  },
+
+  _buildEditGroupCard(first, last, totalDelta) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'timeline-event user';
+    wrapper.dataset.timestamp = first.timestamp;
+    const timeFrom = this.formatTime(first.timestamp);
+    const timeTo = first.timestamp !== last.timestamp ? `–${this.formatTime(last.timestamp)}` : '';
+    wrapper.innerHTML = `
+      <div class="node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
+      <div class="event-content">
+        <div class="event-header">
+          <span class="author">You • Edited</span>
+          <span class="time">${timeFrom}${timeTo}</span>
+        </div>
+        <div class="text-only"><span class="edit-group-delta">${this._formatDelta(totalDelta)}</span></div>
+      </div>
+    `;
+    return wrapper;
   },
 
   // ── Event Router ──
@@ -375,6 +681,20 @@ const TimelineRenderer = {
       }
     }
     
+    else if (evt.type === 'gemini_suggestion') {
+      typeClass = 'gemini';
+      authorLabel = 'Gemini • AI insert';
+      const charCount = evt.meta?.char_count ?? evt.meta?.char_delta ?? 0;
+      const velocity = evt.meta?.insertion_velocity;
+      const preview = evt.meta?.output_preview || '';
+      contentHTML = `
+        <div class="card suggestion-card gemini-card">
+          <p>${preview ? `"${preview}"` : `${charCount} characters inserted`}</p>
+          ${velocity ? `<div class="text-only" style="font-size:0.75rem;color:var(--text-secondary);">Detected via edit velocity (${velocity} chars/s)</div>` : ''}
+        </div>
+      `;
+    }
+
     else if (evt.type === 'session_end') {
       typeClass = 'user-action';
       authorLabel = 'Session ended';
@@ -617,15 +937,37 @@ function _extractLastSentence(text) {
   return segs.filter(s => s.trim().length > 10).at(-1)?.trim() ?? '';
 }
 
+const SNAPSHOT_MAX_AGE_MS = 30_000; // 30 seconds
+
+async function _ensureFreshSnapshot() {
+  try {
+    const ageRes = await chrome.runtime.sendMessage({ action: 'GET_SNAPSHOT_AGE' });
+    const ageMs = ageRes?.ageMs ?? Infinity;
+    if (ageMs > SNAPSHOT_MAX_AGE_MS) {
+      console.log('[Colophon SP] Snapshot stale (' + Math.round(ageMs / 1000) + 's), forcing rescan…');
+      const scanResult = await Promise.race([
+        chrome.runtime.sendMessage({ action: 'FORCE_SCAN' }),
+        new Promise(resolve => setTimeout(() => resolve({ ok: false, reason: 'timeout' }), 3000)),
+      ]);
+      if (scanResult?.ok) {
+        _lastScanTime = Date.now();
+        _updateScanLabel();
+      }
+    }
+  } catch { /* SW or content script unavailable — proceed anyway */ }
+}
+
 async function _buildSystemPrompt() {
   const base = 'You are a concise writing assistant embedded in Google Docs. Help the user with their writing. Reply only with the requested text — no explanations, no meta-commentary, no JSON wrappers.';
   const parts = [base];
 
   if (_assignmentPrompt) parts.push(`Assignment context: ${_assignmentPrompt}`);
 
-  // Always fetch the freshest snapshot from the service worker first.
-  // pre_session_snapshot is updated by updateRollingBaseline() on every keydown,
-  // so it reflects the current document state — not just what was present at session start.
+  // Ensure the snapshot is fresh before fetching context.
+  await _ensureFreshSnapshot();
+
+  // Fetch the freshest snapshot from the service worker.
+  // pre_session_snapshot is updated by updateRollingBaseline() on every keydown.
   // _docContext (in-memory) is used only as a fallback if the SW is unavailable.
   let ctx = null;
   try {
@@ -755,6 +1097,10 @@ const ChatInput = {
       const { text: rawReply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
       const reply = _cleanAIResponse(rawReply);
 
+      // If triggered by a quick action (paraphrase/improve), store output so
+      // content.js can reclassify the next paste as an AI interaction.
+      QuickActions.notifyAIResponse(reply);
+
       // Replace the placeholder card with the real suggestion
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
       if (existing) existing.remove();
@@ -807,10 +1153,11 @@ const ChatInput = {
 
 // ── Local AI Model Status Manager ─────────────────────────────────────────────
 const ModelStatus = {
-  statusEl: document.querySelector('.app-footer .status'),
+  statusEl: null,
   bannerEl: null,
 
   init() {
+    this.statusEl = document.getElementById('model-status-display');
     this.bannerEl = document.getElementById('model-banner');
 
     // Ask service worker to ping the native host
@@ -1096,3 +1443,65 @@ const SelectionContext = {
     }
   },
 };
+
+// ── Quick Actions Bar ──────────────────────────────────────────────────────────
+const QuickActions = {
+  _pendingType: null, // 'paraphrase' | 'improve'
+
+  init() {
+    document.getElementById('qa-paraphrase')?.addEventListener('click', () => this._run('paraphrase'));
+    document.getElementById('qa-improve')?.addEventListener('click', () => this._run('improve'));
+    document.getElementById('qa-grammar')?.addEventListener('click', () => this._runGrammar());
+    // qa-citation is disabled — no handler needed
+  },
+
+  _getSelectedText() {
+    return _docContext?.selectedText?.trim() || SelectionContext._state?.text?.trim() || '';
+  },
+
+  async _run(type) {
+    const sel = this._getSelectedText();
+    if (!sel) {
+      const input = document.querySelector('.input-box input');
+      if (input) {
+        input.placeholder = type === 'paraphrase'
+          ? 'Select text in your doc first, then click Paraphrase'
+          : 'Select text in your doc first, then click Improve';
+        input.focus();
+        setTimeout(() => { input.placeholder = 'Ask or reply...'; }, 4000);
+      }
+      return;
+    }
+    this._pendingType = type;
+    const prompt = type === 'paraphrase'
+      ? `Paraphrase this, keeping the same meaning:\n\n${sel}`
+      : `Improve this text for clarity and flow:\n\n${sel}`;
+    ChatInput._submitText(prompt);
+  },
+
+  _runGrammar() {
+    const sel = this._getSelectedText() || _docContext?.text || '';
+    if (!sel) return;
+    const prompt = `Check the grammar and style of this text and list any issues concisely:\n\n${sel.slice(0, 800)}`;
+    ChatInput._submitText(prompt);
+  },
+
+  // Called after an AI response completes — if it was triggered by a quick action,
+  // store the output so content.js can reclassify the subsequent paste as AI.
+  notifyAIResponse(replyText) {
+    if (!this._pendingType) return;
+    chrome.runtime.sendMessage({
+      action: 'SET_PENDING_AI_OUTPUT',
+      payload: { text: replyText },
+    }).catch(() => {});
+    this._pendingType = null;
+  },
+};
+
+// ── Footer scanning dot ───────────────────────────────────────────────────────
+function _updateScanningDot(isRecording) {
+  const dot = document.getElementById('scanning-dot');
+  const label = document.getElementById('scanning-label');
+  if (dot) dot.classList.toggle('active', !!isRecording);
+  if (label) label.style.opacity = isRecording ? '0.9' : '0.4';
+}

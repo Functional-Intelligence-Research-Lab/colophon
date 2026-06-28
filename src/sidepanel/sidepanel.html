@@ -47,13 +47,65 @@
           <p>Add assignment question or context for the AI…</p>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6" /></svg>
         </div>
-        <div id="doc-context-indicator" style="font-size:0.72rem;padding:3px 12px 6px;opacity:0.7;color:var(--text-secondary);">📄 No document context yet</div>
+        <div class="doc-context-row">
+          <div id="doc-context-indicator">📄 No document context yet</div>
+          <button id="scan-btn" title="Scan document now" aria-label="Scan document now">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+          <span id="last-scan-label">Not scanned yet</span>
+        </div>
       </div>
 
-      <div class="timeline" id="timeline-container">
+      <!-- At-a-glance status -->
+      <div id="status-header" class="status-header">
+        <div id="status-icon" class="status-icon status-ok">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
         </div>
+        <div class="status-body">
+          <strong id="status-title">All good</strong>
+          <p id="status-subtitle">We'll let you know if anything needs attention.</p>
+        </div>
+      </div>
+
+      <!-- Suggestions (one at a time) -->
+      <div id="suggestions-section" class="suggestions-section" hidden>
+        <div class="section-header">
+          <span>Suggestions</span>
+          <span id="suggestion-count-badge" class="count-badge">1</span>
+          <button id="next-suggestion-btn" title="Next suggestion">›</button>
+        </div>
+        <div id="active-suggestion-card"></div>
+      </div>
+
+      <!-- Recent events -->
+      <div class="section-header events-header">
+        <span>Recent events</span>
+        <button id="see-all-events-btn">See all</button>
+      </div>
+
+      <div class="timeline" id="timeline-container"></div>
 
     </main>
+
+    <!-- Quick actions bar -->
+    <div class="quick-actions">
+      <button id="qa-paraphrase" class="qa-btn" title="Paraphrase selected text">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <span>Paraphrase</span>
+      </button>
+      <button id="qa-grammar" class="qa-btn" title="Run grammar check">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+        <span>Grammar</span>
+      </button>
+      <button id="qa-citation" class="qa-btn qa-disabled" disabled title="Coming soon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
+        <span>Add citation</span>
+      </button>
+      <button id="qa-improve" class="qa-btn" title="Improve selected text">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>
+        <span>Improve</span>
+      </button>
+    </div>
 
     <div class="input-container">
       <div class="input-box">
@@ -65,9 +117,12 @@
     </div>
 
     <footer class="app-footer">
-      <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18" /></svg></button>
-      <div class="status"><span class="dot"></span> Local model</div>
-      <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg></button>
+      <div class="footer-left">
+        <span class="dot scanning-dot" id="scanning-dot"></span>
+        <span id="scanning-label">Auto-scanning</span>
+      </div>
+      <div class="status" id="model-status-display"><span class="dot"></span> Local model</div>
+      <button class="icon-btn" id="export-btn" title="Export session"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg></button>
     </footer>
   </body>
   <script type="module" src="./sidepanel.js"></script>
