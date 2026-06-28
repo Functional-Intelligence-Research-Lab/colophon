@@ -78,13 +78,14 @@ export const REFINE_LABELS = [
  */
 export const SUGGESTION_CONTAINER_SELECTORS = [
   // Barkick response area — checked first because it is the primary surface.
-  // More specific than any aria-label selector; only present when a response exists.
   '.appsElementsSidekickBarkickTopBox',
 
+  // Anchored canvas diff containers (the inline checkmark / cross buttons overlay next to document text)
+  '.docos-anchoreddocoview',
+  '.docosAiPreviewDiffVisibleSuggestionViewContent',
+  '.docos-docoview-tesla-conflict',
+
   // Semantic selectors for the classic "Help me write" popover.
-  // NOTE: '[aria-label*="Gemini" i]' (standalone) is intentionally omitted — it
-  // matches too many permanent UI elements (Ask Gemini button, menu items, etc.)
-  // and blocks detection of the real response container.
   '[role="dialog"]',
   '[role="region"][aria-label*="Gemini" i]',
   '[aria-label*="Help me write" i]',
@@ -102,6 +103,7 @@ export const SUGGESTION_CONTAINER_SELECTORS = [
 export const GEMINI_PRESENCE_SELECTORS = [
   '.appsElementsSidekickEntryPointRoot', // "Ask Gemini" side-panel entry button
   '.kixWizBarkickContainer',             // bottom Gemini bar (was .kixWizBarkickWrapper — drifted)
+  '.docos-anchoreddocoview',
   '[aria-label*="Gemini" i]',
 ]
 
@@ -111,13 +113,15 @@ export const GEMINI_PRESENCE_SELECTORS = [
  */
 export function classifyAction(el) {
   if (!el) return null
+  if (el.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewAcceptButton')) return 'accept'
+  if (el.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewRejectButton')) return 'reject'
   const actionType = el.getAttribute?.('data-action-type')
   if (actionType === '44' || el.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonPrimary')) return 'accept'
   if (actionType === '45' || el.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonSecondary')) return 'reject'
   const name = accessibleName(el)
   if (!name) return null
-  if (matchesAny(name, ACCEPT_LABELS) || name.includes('accept')) return 'accept'
-  if (matchesAny(name, REJECT_LABELS) || name.includes('reject')) return 'reject'
+  if (matchesAny(name, ACCEPT_LABELS) || name.startsWith('accept') || name.startsWith('insert') || name.startsWith('replace')) return 'accept'
+  if (matchesAny(name, REJECT_LABELS) || name.startsWith('reject') || name.startsWith('discard') || name.startsWith('close')) return 'reject'
   return null
 }
 
@@ -163,6 +167,9 @@ export function findSuggestionContainer(root = document) {
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
   if (container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
+      container.classList?.contains('docos-anchoreddocoview') ||
+      container.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewContent') ||
+      container.querySelector?.('.docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ||
       container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) {
@@ -173,7 +180,7 @@ export function looksLikeGeminiSuggestion(container) {
   const buttons = container.querySelectorAll?.('button, [role="button"]') ?? []
   for (const b of buttons) {
     const bn = accessibleName(b)
-    if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS)) return true
+    if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS) || bn.startsWith('accept') || bn.startsWith('reject')) return true
   }
   return false
 }
