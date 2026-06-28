@@ -46,7 +46,7 @@ const CONTEXT_LIMIT = 300
 // rejected so the timeline reflects that nothing was inserted.
 const ABANDON_MS = 5 * 60 * 1000
 
-export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, onResolve = () => {} }) {
+export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, onResolve = () => {}, emitInteractions = true }) {
   let _observer = null
   let _active = false
   let _clickHandler = null
@@ -195,18 +195,20 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     clearTimeout(_abandonTimer)
 
     const accepted = acceptance === 'fully_accepted'
-    emit(aiInteractionEvent({
-      source: 'ai',
-      model: GEMINI_MODEL_ID,
-      output_preview: preview(_current.text),
-      content_before: '',
-      content_after: accepted ? _current.text : '',
-      position_start: 0,
-      position_end: 0,
-      acceptance,
-      ai_chars: accepted ? _current.text.length : 0,
-      ...(reason ? { reason } : {}),
-    }))
+    if (emitInteractions) {
+      emit(aiInteractionEvent({
+        source: 'ai',
+        model: GEMINI_MODEL_ID,
+        output_preview: preview(_current.text),
+        content_before: '',
+        content_after: accepted ? _current.text : '',
+        position_start: 0,
+        position_end: 0,
+        acceptance,
+        ai_chars: accepted ? _current.text.length : 0,
+        ...(reason ? { reason } : {}),
+      }))
+    }
     log('[Colophon Gemini] suggestion resolved', { acceptance, reason: reason ?? null })
 
     onResolve({ acceptance, accepted, chars: _current.text.length, suggestionText: _current.text, reason })

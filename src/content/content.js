@@ -127,19 +127,31 @@ const _geminiDetector = createGeminiDetector({
   emit: event => send('LOG_EVENT', event),
   log: (...args) => console.log(...args),
   warn: (...args) => console.warn(...args),
+  emitInteractions: false,
   onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
     if (accepted) {
       _lastPasteAt = Date.now();
       _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
 
-      const docBefore = _getDocText();
+      const docBefore = _rollingBaselineState || _getDocText();
 
-      setTimeout(() => {
-        const docAfter = _getDocText();
-        const { addedText, removedText } = computeDocumentDiff(docBefore, docAfter);
+      setTimeout(async () => {
+        let docAfter = _getDocText();
+        let diff = computeDocumentDiff(docBefore, docAfter);
+
+        if (!diff.addedText) {
+          try {
+            const freshText = await getDocumentText();
+            if (freshText && freshText !== docBefore) {
+              docAfter = freshText;
+              diff = computeDocumentDiff(docBefore, docAfter);
+            }
+          } catch { /* ignore */ }
+        }
+
         const commentary = isMetaCommentary(suggestionText);
-        const finalAdded = addedText || (!commentary ? suggestionText : '');
-        const finalRemoved = removedText || '';
+        const finalAdded = diff.addedText || (!commentary ? suggestionText : '');
+        const finalRemoved = diff.removedText || '';
 
         send('LOG_EVENT', aiInteractionEvent({
           source: 'ai',
@@ -153,7 +165,9 @@ const _geminiDetector = createGeminiDetector({
           ai_chars: finalAdded.length,
           ...(reason ? { reason } : {})
         }));
-      }, 500);
+
+        if (docAfter) _rollingBaselineState = docAfter;
+      }, 600);
     } else {
       send('LOG_EVENT', aiInteractionEvent({
         source: 'ai',
@@ -430,9 +444,18 @@ function isContextValid() {
 
 // ── Edit capture: keydown (primary) ──────────────────────────────────────────
 
+function isTargetingFormInput(target) {
+  if (!target) return false;
+  const tag = target.tagName?.toUpperCase() ?? '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+  if (target.closest?.('.appsElementsSidekickBarkickTopBox, [role="dialog"], .docos-anchoreddocoview, #colophon-panel')) return true;
+  return false;
+}
+
 function onKeydown(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return
+  if (isTargetingFormInput(e.target)) return;
   if (SKIP_KEYS.has(e.key)) {
     console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
     return
@@ -550,6 +573,7 @@ function onCopy() {
 function onPaste(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return;
+  if (isTargetingFormInput(e.target)) return;
 
   const now = Date.now();
   if (now - _lastPasteAt < 100) {
@@ -578,6 +602,7 @@ function onPaste(e) {
 
 function onInput(e) {
   if (!_active) return
+  if (isTargetingFormInput(e.target)) return;
   const inputType = e.inputType ?? ''
   const insertedLength = e.data?.length ?? 0
   console.log('[Colophon Content] input event', {
