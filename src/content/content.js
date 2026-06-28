@@ -295,6 +295,7 @@ function attachInputListeners(target, label) {
   target.addEventListener('keydown', onKeydown, true)
   target.addEventListener('paste', onPaste, true)
   target.addEventListener('copy', onCopy, true)
+  target.addEventListener('input', onInput, true)
   _listenerTargets.push({ target, label })
   console.log('[Colophon Content] input listeners attached', { label })
 }
@@ -304,6 +305,7 @@ function detachInputListeners() {
     target.removeEventListener('keydown', onKeydown, true)
     target.removeEventListener('paste', onPaste, true)
     target.removeEventListener('copy', onCopy, true)
+    target.removeEventListener('input', onInput, true)
     console.log('[Colophon Content] input listeners detached', { label })
   }
   _listenerTargets = []
@@ -522,6 +524,23 @@ function onPaste(e) {
 
   _lastPasteAt = now;
 
+  if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') return;
+
+  const text = e.clipboardData?.getData('text/plain') ?? '';
+  if (!text) return;
+
+  // If the pasted text matches something the user copied from within this doc, skip logging
+  if (_lastInternalCopy &&
+      now - _lastInternalCopy.at < INTERNAL_COPY_TTL &&
+      text === _lastInternalCopy.text) {
+    console.log('[Colophon Content] Internal paste (text move within doc), skipping log.');
+    return;
+  }
+
+  console.log('[TWFF] Paste intercepted. Running Async Emitter...');
+  emitPaste(text);
+}
+
 function onInput(e) {
   if (!_active) return
   const inputType = e.inputType ?? ''
@@ -548,23 +567,6 @@ function onInput(e) {
       },
     })
   }
-}
-
-  if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') return;
-
-  const text = e.clipboardData?.getData('text/plain') ?? '';
-  if (!text) return;
-
-  // If the pasted text matches something the user copied from within this doc, skip logging
-  if (_lastInternalCopy &&
-      now - _lastInternalCopy.at < INTERNAL_COPY_TTL &&
-      text === _lastInternalCopy.text) {
-    console.log('[Colophon Content] Internal paste (text move within doc), skipping log.');
-    return;
-  }
-
-  console.log('[TWFF] Paste intercepted. Running Async Emitter...');
-  emitPaste(text);
 }
 // function onPaste(e) {
 //   if (!_active) return
@@ -1158,7 +1160,7 @@ async function getDocumentText() {
     const response = await fetch(`https://docs.google.com/document/d/${docId}/export?format=txt`);
     if (!response.ok) throw new Error(`Status: ${response.status}`);
     
-    let text = await response.text();
+    const text = await response.text();
     return text.replace(/^\uFEFF/, '');
   } catch (err) {
     console.error("[Colophon Content] Failed to download document state:", err);
