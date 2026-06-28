@@ -82,13 +82,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   const exportButton = $('btn-export')
   if (exportButton) {
     exportButton.addEventListener('click', async () => {
+      const originalText = exportButton.textContent;
+      exportButton.textContent = 'Exporting…';
+      exportButton.disabled = true;
       try {
         const result = await exportTwff()
+        exportButton.textContent = 'Exported ✓';
         showNotice(`Exported ${result.filename}`, false)
+        setTimeout(() => {
+          exportButton.textContent = originalText;
+          exportButton.disabled = false;
+        }, 2000);
       } catch (err) {
         console.error('[Colophon] Export failed:', err.message)
+        exportButton.textContent = originalText;
+        exportButton.disabled = false;
         showNotice('Start recording before exporting.')
       }
+    })
+  }
+
+  const viewerButton = $('btn-viewer')
+  if (viewerButton) {
+    viewerButton.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('viewer/viewer.html') + '?live=1' })
+      window.close()
     })
   }
 
@@ -154,7 +172,10 @@ function renderRecordButton(session, tab) {
 function renderScores(session) {
   const events = session?.events ?? []
   const editCount = events.filter(event => event.type === 'edit').length
-  const aiCount = events.filter(event => event.type === 'ai_interaction').length
+  const aiCount = events.filter(
+    event => event.type === 'ai_interaction' &&
+    (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_modified' || event.meta?.acceptance === 'modified')
+  ).length
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
   const total = Math.max(1, editCount + aiCount + sourceCount)
 
@@ -185,7 +206,7 @@ function activityFromSession(session) {
   const events = session?.events ?? []
   const mapped = events
     .filter(event => !['session_start', 'session_end', 'focus_change'].includes(event.type))
-    .slice(-4)
+    .slice(-3)
     .reverse()
     .map(eventToActivity)
 
