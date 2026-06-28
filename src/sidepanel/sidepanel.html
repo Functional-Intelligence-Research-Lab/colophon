@@ -17,14 +17,15 @@
   <body>
     <header class="top-nav">
       <div class="brand">
-        <svg class="logo" viewBox="0 0 24 24" fill="currentColor">
+        <!-- <svg class="logo" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.53c-.22-.38-.59-.68-1.04-.81l-1.47-.43c-.45-.13-.79-.53-.79-1v-1c0-.55-.45-1-1-1h-2v-2h2c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1h-1.5l-2.4-2.4c.28-.04.57-.07.86-.07 4.97 0 9 4.03 9 9 0 1.48-.36 2.87-1 4.07z" />
-        </svg>
+        </svg> -->
+        <img id="colophon-logo" alt="Colophon" style="width:24px;height:24px;">
         <h1>Colophon</h1>
       </div>
       <div class="nav-actions">
         <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></button>
-        <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h-8l-2 8h12l-2-8zM12 12v8" /></svg></button>
+        <button class="icon-btn" id="settings-btn" title="Settings"><img id="settings-icon" alt="Settings" style="width:18px;height:18px;"></button>
         <button class="icon-btn" id="close-panel-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12" /></svg></button>
       </div>
     </header>
@@ -46,6 +47,7 @@
           <p>Add assignment question or context for the AI…</p>
           <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6" /></svg>
         </div>
+        <div id="doc-context-indicator" style="font-size:0.72rem;padding:3px 12px 6px;opacity:0.7;color:var(--text-secondary);">📄 No document context yet</div>
       </div>
 
       <div class="timeline" id="timeline-container">
