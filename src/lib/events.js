@@ -196,4 +196,4 @@ export function geminiSuggestionEvent({ char_count = 0, output_preview = '', ins
       _hash: hash,
     },
   }
-}ntal
+}
