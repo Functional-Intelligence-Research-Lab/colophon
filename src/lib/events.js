@@ -144,4 +144,17 @@ export function sessionEndEvent() {
   };
 }
 
+export function geminiSuggestionEvent({ char_count = 0, output_preview = '', insertion_velocity = 0, content_before = '', content_after = '', hash = '' } = {}) {
+  return {
+    type: 'gemini_suggestion',
+    timestamp: new Date().toISOString(),
+    char_count,
+    output_preview: output_preview.slice(0, 100),
+    insertion_velocity,
+    content_before: content_before.slice(0, 500),
+    content_after: content_after.slice(0, 500),
+    _hash: hash,
+  };
+}
+
 

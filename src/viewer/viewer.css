@@ -250,6 +250,8 @@ body {
 
 .tl-event.ai .tl-node { color: var(--ai-color); }
 .tl-event.user .tl-node { color: var(--user-color); }
+.tl-event.gemini .tl-node { color: #1a73e8; }
+.tl-event.gemini .tl-author { color: #1a73e8; background: #e8f0fe; border-color: #a8c7fa; }
 
 .tl-node.solid {
   background: var(--user-color);
