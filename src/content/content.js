@@ -65,6 +65,9 @@ let _lastSnapshotTime = 0;
 let _bufferStartTime = 0;
 let _geminiPanelActive = false;
 let _geminiObserver = null;
+// Snapshot taken the moment a Gemini suggestion appears (used as the
+// pre-change baseline when computing what the AI actually inserted).
+let _preSuggestionSnapshot = null;
 
 function extractTextFromModelChunks() {
   try {
@@ -164,31 +167,46 @@ const _geminiDetector = createGeminiDetector({
   log: (...args) => console.log(...args),
   warn: (...args) => console.warn(...args),
   emitInteractions: false,
+
+  // Called the instant a Gemini suggestion popover appears — before the user
+  // has accepted or rejected. We grab a fresh, cache-busted doc snapshot here
+  // so we have a reliable "before" baseline for the diff on acceptance.
+  onSuggestionWillAppear: () => {
+    console.log('[Colophon Gemini] Pre-suggestion snapshot starting...');
+    getDocumentText().then(t => {
+      if (t) {
+        _preSuggestionSnapshot = t;
+        console.log('[Colophon Gemini] Pre-suggestion snapshot captured', { chars: t.length });
+      }
+    }).catch(() => {});
+  },
+
   onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
     if (accepted) {
       _lastPasteAt = Date.now();
       _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
 
-      const docBefore = _rollingBaselineState || _getDocText();
+      // Use the snapshot taken when the suggestion appeared; fall back to the
+      // rolling baseline if the per-suggestion snapshot wasn't ready in time.
+      const docBefore = _preSuggestionSnapshot || _rollingBaselineState || _getDocText();
       const domDiff = extractGeminiProposedDiff();
 
-      setTimeout(async () => {
-        let docAfter = _getDocText();
-        let diff = computeDocumentDiff(docBefore, docAfter);
-
-        if (!diff.addedText && !diff.removedText) {
-          try {
-            const freshText = await getDocumentText();
-            if (freshText && freshText !== docBefore) {
-              docAfter = freshText;
-              diff = computeDocumentDiff(docBefore, docAfter);
-            }
-          } catch { /* ignore */ }
-        }
+      // Poll the export API (with cache-busting) until the document text
+      // actually differs from the pre-suggestion snapshot. This handles the
+      // typical 5–15 s lag between Google Docs autosaving and the export
+      // endpoint reflecting the change.
+      pollForDocChange(docBefore).then(docAfter => {
+        const diff = docAfter ? computeDocumentDiff(docBefore, docAfter) : { addedText: '', removedText: '' };
 
         const commentary = isMetaCommentary(suggestionText);
         const finalAdded = diff.addedText || domDiff.insertedText || (!commentary ? suggestionText : '');
         const finalRemoved = diff.removedText || domDiff.deletedText || '';
+
+        console.log('[Colophon Gemini] onResolve diff result', {
+          addedChars: finalAdded.length,
+          removedChars: finalRemoved.length,
+          source: diff.addedText ? 'export-diff' : domDiff.insertedText ? 'dom-diff' : 'suggestion-text',
+        });
 
         send('LOG_EVENT', aiInteractionEvent({
           source: 'ai',
@@ -204,8 +222,10 @@ const _geminiDetector = createGeminiDetector({
         }));
 
         if (docAfter) _rollingBaselineState = docAfter;
-      }, 800);
+        _preSuggestionSnapshot = null; // reset for next suggestion
+      });
     } else {
+      _preSuggestionSnapshot = null; // dismissed — discard the snapshot
       send('LOG_EVENT', aiInteractionEvent({
         source: 'ai',
         model: GEMINI_MODEL_ID,
@@ -260,6 +280,32 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then(() => sendResponse({ status: "success" }))
       .catch(err => sendResponse({ status: "error", message: err.message }));
     return true; // Tells Chrome we will send the response asynchronously
+  }
+
+  // Programmatically click the native Gemini "Insert" / "Replace" button so the
+  // sidepanel can drive the accept action without the user having to reach back
+  // to the Gemini popover in the document.
+  if (msg.action === 'GEMINI_ACCEPT') {
+    const btn = findGeminiActionButton('accept');
+    if (btn) {
+      btn.click();
+      sendResponse({ status: 'ok' });
+    } else {
+      sendResponse({ status: 'error', message: 'Gemini accept button not found' });
+    }
+    return true;
+  }
+
+  // Programmatically click the native Gemini "Close" / "Cancel" button.
+  if (msg.action === 'GEMINI_REJECT') {
+    const btn = findGeminiActionButton('reject');
+    if (btn) {
+      btn.click();
+      sendResponse({ status: 'ok' });
+    } else {
+      sendResponse({ status: 'error', message: 'Gemini reject button not found' });
+    }
+    return true;
   }
 
   if (msg.action === 'GET_EDITOR_TEXT') {
@@ -413,11 +459,6 @@ function attachTextEventIframe() {
       const doc = frame.contentDocument
       if (!doc) continue
       attachInputListeners(doc, 'docs-text-iframe-document')
-      console.log('[Colophon Content] text iframe reachable', {
-        frame: describeElement(frame),
-        readyState: doc.readyState,
-        activeElement: describeElement(doc.activeElement),
-      })
     } catch (err) {
       console.log('[Colophon Content] text iframe inaccessible', {
         frame: describeElement(frame),
@@ -530,13 +571,33 @@ function attachObserver(editor) {
 
 function onMutation(mutations) {
   if (!_active) return
+
+  // Ignore mutations that originate inside the Gemini sidebar / suggestion panel —
+  // typing into the Gemini prompt box and the AI generating its response both
+  // produce DOM mutations that look like document edits. We only care about
+  // mutations that happen inside the actual document canvas.
+  const GEMINI_UI_SELECTORS = [
+    '.appsElementsSidekickBarkickTopBox',
+    '.appsElementsSidekick',
+    '.docos-anchoreddocoview',
+    '[id*="colophon"]',
+  ]
+  const isGeminiUI = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false
+    return GEMINI_UI_SELECTORS.some(sel => node.closest?.(sel))
+  }
+
   let delta = 0
   for (const m of mutations) {
+    const target = m.target
+    // Skip mutations whose target is inside any Gemini panel
+    if (isGeminiUI(target)) continue
+
     if (m.type === 'characterData') {
       delta += (m.newValue?.length ?? 0) - (m.oldValue?.length ?? 0)
     } else if (m.type === 'childList') {
-      for (const n of m.addedNodes)   delta += n.textContent?.length ?? 0
-      for (const n of m.removedNodes) delta -= n.textContent?.length ?? 0
+      for (const n of m.addedNodes)   { if (!isGeminiUI(n)) delta += n.textContent?.length ?? 0 }
+      for (const n of m.removedNodes) { if (!isGeminiUI(n)) delta -= n.textContent?.length ?? 0 }
     }
   }
   if (delta !== 0) {
@@ -1008,6 +1069,60 @@ function getDocsTitle() {
   return fallbackTitle;
 }
 
+// ── Find & click native Gemini action buttons ─────────────────────────────
+/**
+ * Searches the Gemini popover/sidebar for a button matching the given
+ * action type ('accept' | 'reject') and returns the first match.
+ *
+ * Uses the same classifyAction() logic as the detector so both paths stay
+ * in sync when Google reshuffles class names.
+ */
+function findGeminiActionButton(actionType) {
+  const { classifyAction: classify } = /** @type {any} */ (window.__colophon_geminiSelectors || {});
+
+  // Containers where the Gemini accept/reject buttons live.
+  const CONTAINERS = [
+    '.appsElementsSidekickBarkickTopBox',
+    '.docos-anchoreddocoview',
+    '.docosAiPreviewDiffVisibleSuggestionViewContent',
+    '[role="dialog"]',
+    '[aria-label*="Gemini" i]',
+    '[aria-label*="Help me write" i]',
+  ];
+
+  for (const sel of CONTAINERS) {
+    const containers = Array.from(document.querySelectorAll(sel));
+    for (const container of containers) {
+      const buttons = Array.from(container.querySelectorAll('button, [role="button"]'));
+      for (const btn of buttons) {
+        // Use classifyAction from gemini-selectors via the shared import.
+        // We inline a lightweight version here so content.js stays self-contained.
+        const label = (btn.getAttribute?.('aria-label') ?? btn.textContent ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const dataAction = btn.getAttribute?.('data-action-type');
+
+        const isAccept = (
+          dataAction === '44' ||
+          btn.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonPrimary') ||
+          btn.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
+          ['insert', 'replace', 'accept', 'accept all', 'accept suggestion'].includes(label) ||
+          label.startsWith('accept') || label.startsWith('insert') || label.startsWith('replace')
+        );
+        const isReject = (
+          dataAction === '45' ||
+          btn.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonSecondary') ||
+          btn.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewRejectButton') ||
+          ['close', 'cancel', 'discard', 'reject', 'reject all'].includes(label) ||
+          label.startsWith('reject') || label.startsWith('discard') || label.startsWith('close')
+        );
+
+        if (actionType === 'accept' && isAccept) return btn;
+        if (actionType === 'reject' && isReject) return btn;
+      }
+    }
+  }
+  return null;
+}
+
 // ── Insert AI Text into Docs Canvas ──────────────────────────────────
 async function insertTextIntoDocs(textToInsert) {
   try {
@@ -1254,7 +1369,13 @@ async function getDocumentText() {
   const docId = match[1];
 
   try {
-    const response = await fetch(`https://docs.google.com/document/d/${docId}/export?format=txt`);
+    // cache: 'no-store' prevents the browser from returning a cached response.
+    // The timestamp query param additionally busts Google's CDN cache so we
+    // always receive the current server-side document state.
+    const response = await fetch(
+      `https://docs.google.com/document/d/${docId}/export?format=txt&t=${Date.now()}`,
+      { cache: 'no-store' }
+    );
     if (!response.ok) throw new Error(`Status: ${response.status}`);
     
     const text = await response.text();
@@ -1263,6 +1384,50 @@ async function getDocumentText() {
     console.error("[Colophon Content] Failed to download document state:", err);
     return "";
   }
+}
+
+/**
+ * Resolves to a resolved(sic) utility.
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Polls getDocumentText() every `intervalMs` until the returned text differs
+ * from `baseline`, or until `maxWaitMs` has elapsed. Returns the new text if
+ * a change was detected, or null on timeout.
+ *
+ * This handles the 5–15 s lag between a Google Docs autosave and the export
+ * endpoint reflecting the change, which caused the old 800 ms single-fetch
+ * to always return stale (pre-change) content.
+ */
+async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) {
+  if (!baseline) {
+    // No baseline to compare against — just wait and return whatever we get.
+    await sleep(intervalMs);
+    return await getDocumentText() || null;
+  }
+
+  const deadline = Date.now() + maxWaitMs;
+  console.log('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
+
+  while (Date.now() < deadline) {
+    await sleep(intervalMs);
+    try {
+      const newText = await getDocumentText();
+      if (newText && newText !== baseline) {
+        console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
+        return newText;
+      }
+      console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
+    } catch {
+      // transient fetch error — keep polling
+    }
+  }
+
+  console.warn('[Colophon Content] pollForDocChange: timed out — export API did not reflect change within', maxWaitMs, 'ms');
+  return null;
 }
 
 /**
