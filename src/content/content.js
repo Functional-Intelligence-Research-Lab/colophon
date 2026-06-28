@@ -3,6 +3,8 @@ import { createGeminiDetector } from './gemini-detector.js'
 import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
 import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
+import { aiInteractionEvent } from '../lib/events.js'
+import { isMetaCommentary, GEMINI_MODEL_ID } from './gemini-selectors.js'
 
 /**
  * content.js — Colophon content script
@@ -125,13 +127,46 @@ const _geminiDetector = createGeminiDetector({
   emit: event => send('LOG_EVENT', event),
   log: (...args) => console.log(...args),
   warn: (...args) => console.warn(...args),
-  // When a Gemini suggestion is accepted, Docs inserts the text. Mark the paste
-  // suppression window so the resulting edit/paste isn't double-logged as a
-  // human edit — the ai_interaction event already records that insertion.
-  onResolve: ({ accepted }) => {
+  onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
     if (accepted) {
-      _lastPasteAt = Date.now()
-      _pendingPaste = { startedAt: Date.now(), text: '', logged: true }
+      _lastPasteAt = Date.now();
+      _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
+
+      const docBefore = _getDocText();
+
+      setTimeout(() => {
+        const docAfter = _getDocText();
+        const { addedText, removedText } = computeDocumentDiff(docBefore, docAfter);
+        const commentary = isMetaCommentary(suggestionText);
+        const finalAdded = addedText || (!commentary ? suggestionText : '');
+        const finalRemoved = removedText || '';
+
+        send('LOG_EVENT', aiInteractionEvent({
+          source: 'ai',
+          model: GEMINI_MODEL_ID,
+          output_preview: finalAdded.length > 0 ? finalAdded.slice(0, 100) : (commentary ? suggestionText.slice(0, 100) : ''),
+          content_before: finalRemoved,
+          content_after: finalAdded,
+          position_start: 0,
+          position_end: 0,
+          acceptance,
+          ai_chars: finalAdded.length,
+          ...(reason ? { reason } : {})
+        }));
+      }, 500);
+    } else {
+      send('LOG_EVENT', aiInteractionEvent({
+        source: 'ai',
+        model: GEMINI_MODEL_ID,
+        output_preview: suggestionText ? suggestionText.slice(0, 100) : '',
+        content_before: '',
+        content_after: '',
+        position_start: 0,
+        position_end: 0,
+        acceptance,
+        ai_chars: 0,
+        ...(reason ? { reason } : {})
+      }));
     }
   },
 })
@@ -1181,6 +1216,28 @@ function findFirstDifference(oldText, newText) {
     i++;
   }
   return i; 
+}
+
+function computeDocumentDiff(oldText, newText) {
+  if (!oldText || !newText) return { addedText: '', removedText: '' };
+  if (oldText === newText) return { addedText: '', removedText: '' };
+
+  let start = 0;
+  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
+    start++;
+  }
+
+  let oldEnd = oldText.length - 1;
+  let newEnd = newText.length - 1;
+  while (oldEnd >= start && newEnd >= start && oldText[oldEnd] === newText[newEnd]) {
+    oldEnd--;
+    newEnd--;
+  }
+
+  const removedText = oldText.slice(start, oldEnd + 1).trim();
+  const addedText = newText.slice(start, newEnd + 1).trim();
+
+  return { addedText, removedText };
 }
 
 async function updateRollingBaseline(forceSendResponse = null) {
