@@ -16,15 +16,125 @@
 import {
   getSession,
   saveSession,
-  clearSession,
+  getSessionByDocId,
+  saveSessionByDocId,
   ensureUserId,
+  clearSession,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
+import { HOST_PY_B64 } from "../generated/host-py-b64.js";
+
+// ── Native Messaging (llamafile host) ─────────────────────────────────────────
+
+const NATIVE_HOST = 'com.colophon.llamahost';
+let _nativePort = null;
+let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'
+let _lastSelection = { text: '' };
+let _lastDocContext = null;
+let _lastSnapshotTimestamp = 0;
+let _pendingAIOutput = null; // { text, expiresAt } — set when sidepanel sends paraphrase/improve result
+
+function getNativePort() {
+  if (_nativePort) return _nativePort;
+  try {
+    _nativePort = chrome.runtime.connectNative(NATIVE_HOST);
+    _nativePort.onMessage.addListener(onNativeMessage);
+    _nativePort.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError?.message || '';
+      console.log('[Colophon] Native host disconnected:', err);
+      _nativePort = null;
+      const notFound = err.toLowerCase().includes('not found') ||
+                       err.toLowerCase().includes('specified native') ||
+                       err.toLowerCase().includes('cannot find');
+      _modelStatus = notFound ? 'host_not_installed' : 'disconnected';
+      broadcastModelStatus();
+    });
+    return _nativePort;
+  } catch (e) {
+    console.log('[Colophon] Cannot connect to native host:', e.message);
+    _nativePort = null;
+    _modelStatus = 'host_not_installed';
+    broadcastModelStatus();
+    return null;
+  }
+}
+
+function onNativeMessage(msg) {
+  console.log('[Colophon] Native msg:', msg.action, msg);
+  switch (msg.action) {
+    case 'MODEL_STATUS':
+      _modelStatus = msg.found ? 'available' : 'no_model';
+      broadcastModelStatus();
+      break;
+    case 'PROGRESS':
+      chrome.runtime.sendMessage({
+        action: 'MODEL_DOWNLOAD_PROGRESS',
+        label: msg.label,
+        percent: msg.percent,
+      }).catch(() => {});
+      break;
+    case 'DOWNLOAD_DONE':
+      // Auto-launch after a successful download
+      _nativePort?.postMessage({ action: 'LAUNCH_MODEL' });
+      break;
+    case 'LAUNCHED':
+      _modelStatus = 'running';
+      chrome.storage.local.set({ llamafilePort: msg.port }).catch(() => {});
+      broadcastModelStatus({ port: msg.port });
+      break;
+    case 'STOPPED':
+      _modelStatus = 'available';
+      broadcastModelStatus();
+      break;
+    case 'ERROR':
+      chrome.runtime.sendMessage({
+        action: 'MODEL_ERROR',
+        message: msg.message,
+      }).catch(() => {});
+      break;
+  }
+}
+
+function broadcastModelStatus(extra = {}) {
+  chrome.runtime.sendMessage({
+    action: 'MODEL_STATUS_UPDATE',
+    status: _modelStatus,
+    ...extra,
+  }).catch(() => {});
+}
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[Colophon] Installed.");
+  chrome.contextMenus.create({
+    id: 'colophon-paraphrase',
+    title: 'Paraphrase with Colophon',
+    contexts: ['selection'],
+    documentUrlPatterns: ['https://docs.google.com/document/*'],
+  });
+  chrome.contextMenus.create({
+    id: 'colophon-add-source',
+    title: 'Add source for this text',
+    contexts: ['selection'],
+    documentUrlPatterns: ['https://docs.google.com/document/*'],
+  });
+});
+
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (!tab?.id) return;
+  const text = info.selectionText ?? '';
+  if (!text) return;
+
+  await chrome.sidePanel.open({ tabId: tab.id });
+
+  // Small delay so sidepanel has time to mount before receiving the message
+  setTimeout(() => {
+    chrome.runtime.sendMessage({
+      action: 'CONTEXT_MENU_ACTION',
+      payload: { menuId: info.menuItemId, text },
+    }).catch(() => {});
+  }, 400);
 });
 
 // ── Message routing ───────────────────────────────────────────────────────────
@@ -78,6 +188,99 @@ async function handleMessage(msg, _sender) {
     case 'SYNC_TIMELINE':
       return { ok: true, ignored: true };
 
+    case 'CHECK_MODEL_STATUS': {
+      const port = getNativePort();
+      if (port) port.postMessage({ action: 'CHECK_MODEL' });
+      return { ok: true, status: _modelStatus };
+    }
+
+    case 'REQUEST_DOWNLOAD_MODEL': {
+      const port = getNativePort();
+      if (!port) return { ok: false, error: 'Native host not installed' };
+      port.postMessage({ action: 'DOWNLOAD_MODEL' });
+      return { ok: true };
+    }
+
+    case 'REQUEST_LAUNCH_MODEL': {
+      const port = getNativePort();
+      if (!port) return { ok: false, error: 'Native host not installed' };
+      port.postMessage({ action: 'LAUNCH_MODEL' });
+      return { ok: true };
+    }
+
+    case 'REQUEST_STOP_MODEL': {
+      if (_nativePort) _nativePort.postMessage({ action: 'STOP_MODEL' });
+      return { ok: true };
+    }
+
+    case 'UPDATE_EVENT_ACCEPTANCE':
+      return updateEventAcceptance(msg.payload);
+
+    case 'UPDATE_EVENT_METADATA':
+      return updateEventMetadata(msg.payload);
+
+    case 'SET_PRE_SESSION_TEXT': {
+      const ts = msg.payload?.timestamp ?? Date.now();
+      _lastSnapshotTimestamp = ts;
+      await updateMetadata({ key: 'pre_session_snapshot', value: msg.payload?.text ?? '' });
+      await updateMetadata({ key: 'last_snapshot_timestamp', value: ts });
+      return { ok: true };
+    }
+
+    case 'FORCE_SCAN': {
+      const session = await getSession();
+      const tabId = session?.tabId;
+      if (!tabId) return { ok: false, reason: 'no_active_tab' };
+      try {
+        const result = await chrome.tabs.sendMessage(tabId, { action: 'FORCE_SCAN' });
+        return result ?? { ok: false, reason: 'no_response' };
+      } catch (e) {
+        return { ok: false, reason: e.message };
+      }
+    }
+
+    case 'GET_SNAPSHOT_AGE': {
+      const ageMs = _lastSnapshotTimestamp ? Date.now() - _lastSnapshotTimestamp : Infinity;
+      return { ok: true, ageMs };
+    }
+
+    case 'SET_PENDING_AI_OUTPUT':
+      _pendingAIOutput = { text: msg.payload?.text ?? '', expiresAt: Date.now() + 5 * 60 * 1000 };
+      return { ok: true };
+
+    case 'GET_PENDING_AI_OUTPUT':
+      if (_pendingAIOutput && Date.now() < _pendingAIOutput.expiresAt) {
+        return { ok: true, text: _pendingAIOutput.text };
+      }
+      _pendingAIOutput = null;
+      return { ok: true, text: null };
+
+    case 'CLEAR_PENDING_AI_OUTPUT':
+      _pendingAIOutput = null;
+      return { ok: true };
+
+    case 'SELECTION_CHANGED':
+      _lastSelection = msg.payload ?? { text: '' };
+      chrome.runtime.sendMessage({ action: 'SELECTION_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
+      return { ok: true };
+
+    case 'UPDATE_DOC_CONTEXT':
+      _lastDocContext = msg.payload ?? null;
+      chrome.runtime.sendMessage({ action: 'DOC_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
+      return { ok: true };
+
+    case 'GET_SELECTION':
+      return { ok: true, ..._lastSelection };
+
+    case 'REQUEST_SETUP_SCRIPT': {
+      const info = await chrome.runtime.getPlatformInfo();
+      const extId = chrome.runtime.id;
+      if (info.os === 'win') {
+        return { ok: true, script: _buildWindowsBat(HOST_PY_B64, extId), filename: 'colophon-setup.bat' };
+      }
+      return { ok: true, script: _buildPosixScript(HOST_PY_B64, extId), filename: 'colophon-setup.command' };
+    }
+
     default:
       throw new Error(`Unknown message type/action: ${route}`);
   }
@@ -86,28 +289,64 @@ async function handleMessage(msg, _sender) {
 // ── Session management ────────────────────────────────────────────────────────
 
 async function startSession({ tabId, docUrl } = {}) {
-  await clearSession();
-
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
   const now = new Date().toISOString();
 
-  const session = {
-    sessionId: crypto.randomUUID(),
-    startedAt: now,
-    tabId: tabId ?? null,
-    docId,
-    isRecording: true,
-    events: [],
-    metadata: {
-      assignment_prompt: ""
-    }
-  };
-  session.events.push({ timestamp: now, type: "session_start", meta: {} });
-  console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+  // Persist the currently-active session under its docId before switching away
+  const prevSession = await getSession();
+  if (prevSession?.docId && prevSession.docId !== docId) {
+    await saveSessionByDocId(prevSession.docId, prevSession);
+  }
+
+  // Resume an existing session for this document if one exists
+  let session = docId ? await getSessionByDocId(docId) : null;
+  if (session) {
+    session.isRecording = true;
+    session.tabId = tabId ?? null;
+    session.events.push({ timestamp: now, type: "session_resume", meta: {} });
+    console.log("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
+  } else {
+    const userId = await ensureUserId();
+    session = {
+      sessionId: crypto.randomUUID(),
+      startedAt: now,
+      tabId: tabId ?? null,
+      docId,
+      isRecording: true,
+      events: [],
+      authors: { [userId]: { label: 'Author 1', color: '#5c3ce6' } },
+      metadata: {
+        assignment_prompt: ""
+      }
+    };
+    session.events.push({ timestamp: now, type: "session_start", meta: {} });
+    console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+  }
   await saveSession(session);
 
   // Tell content script to activate its observers
-  if (tabId) await activateContentScript(tabId);
+  if (tabId) {
+    await activateContentScript(tabId);
+    // Snapshot the document state before any recording events — gives researchers a baseline
+    try {
+      const snap = await chrome.tabs.sendMessage(tabId, { action: 'GET_EDITOR_TEXT' });
+      if (snap?.text) {
+        const words = snap.text.trim().split(/\s+/).filter(Boolean).length;
+        session.events.push({
+          timestamp: new Date().toISOString(),
+          type: 'checkpoint',
+          meta: {
+            char_count_total: snap.text.length,
+            word_count_total: words,
+            _snapshot: snap.text.slice(0, 1500),
+            note: 'pre-recording state',
+          },
+        });
+        await saveSession(session);
+        chrome.runtime.sendMessage({ action: 'SYNC_TIMELINE', events: session.events }).catch(() => {});
+      }
+    } catch { /* not on a Docs page or content script not ready */ }
+  }
 
   return { ok: true, sessionId: session.sessionId };
 }
@@ -142,6 +381,7 @@ async function stopSession() {
     eventCount: session.events.length,
   });
   await saveSession(session);
+  if (session.docId) await saveSessionByDocId(session.docId, session);
 
   if (session.tabId) {
     chrome.tabs
@@ -169,7 +409,8 @@ async function appendEvent(event) {
     });
     return { ok: true, ignored: true };
   }
-  session.events.push(event);
+  const userId = await ensureUserId();
+  session.events.push({ author_id: userId, ...event });
   console.log("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
     meta: event.meta,
@@ -211,7 +452,7 @@ async function getState() {
     ? Date.now() - new Date(session.startedAt).getTime()
     : 0;
 
-  return { session, stats: { editCount, aiCount, elapsed } };
+  return { session, stats: { editCount, aiCount, elapsed }, docContext: _lastDocContext };
 }
 
 async function exportSession() {
@@ -294,6 +535,141 @@ async function updateMetadata({ key, value }) {
   await saveSession(session);
 
   return { status: 'success' };
+}
+
+async function updateEventAcceptance({ eventTimestamp, acceptance, content_before, content_after }) {
+  const session = await getSession();
+  if (!session) return { status: 'error' };
+
+  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  if (event?.meta) {
+    event.meta.acceptance = acceptance;
+    if (content_before !== undefined) event.meta.content_before = content_before;
+    if (content_after !== undefined) event.meta.content_after = content_after;
+    await saveSession(session);
+    chrome.runtime.sendMessage({
+      action: 'SYNC_TIMELINE',
+      events: session.events,
+    }).catch(() => {});
+  }
+  return { status: 'success' };
+}
+
+async function updateEventMetadata({ eventTimestamp, key, value }) {
+  const session = await getSession();
+  if (!session) return { status: 'error' };
+  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  if (event?.meta && key) {
+    event.meta[key] = value;
+    await saveSession(session);
+  }
+  return { status: 'success' };
+}
+
+// ── Setup script builders ──────────────────────────────────────────────────────
+
+function _buildWindowsBat(b64, extId) {
+  const chunkLines = [];
+  const cs = 1900;
+  for (let i = 0; i < b64.length; i += cs) {
+    chunkLines.push(`  echo ${b64.slice(i, i + cs)}`);
+  }
+
+  return [
+    '@echo off',
+    'setlocal',
+    '',
+    'echo Colophon Local AI Setup',
+    'echo =======================',
+    'echo.',
+    '',
+    'python --version >nul 2>&1',
+    'if %ERRORLEVEL% neq 0 (',
+    '  echo Python is not installed.',
+    '  echo.',
+    '  echo Install Python from: https://www.python.org/downloads/',
+    '  echo Check "Add Python to PATH" when installing, then run this file again.',
+    '  start "" "https://www.python.org/downloads/"',
+    '  pause & exit /b 1',
+    ')',
+    '',
+    'set "DEST=%APPDATA%\\Colophon\\native-host"',
+    'if not exist "%DEST%" mkdir "%DEST%"',
+    '',
+    'echo Installing host script...',
+    '> "%TEMP%\\ch.b64" (',
+    ...chunkLines,
+    ')',
+    'certutil -decode "%TEMP%\\ch.b64" "%DEST%\\host.py" >nul 2>&1',
+    'del "%TEMP%\\ch.b64" >nul 2>&1',
+    '',
+    `python -c "import os; d=os.path.join(os.environ['APPDATA'],'Colophon','native-host'); q=chr(34); open(os.path.join(d,'host_wrapper.bat'),'w').write('@echo off\\npython '+q+os.path.join(d,'host.py')+q+' %%*\\n')"`,
+    `python -c "import json,os; d=os.path.join(os.environ['APPDATA'],'Colophon','native-host'); m={'name':'com.colophon.llamahost','description':'Colophon local AI','path':os.path.join(d,'host_wrapper.bat'),'type':'stdio','allowed_origins':['chrome-extension://${extId}/']}; open(os.path.join(d,'com.colophon.llamahost.json'),'w').write(json.dumps(m,indent=2))"`,
+    '',
+    `for /f "usebackq tokens=*" %%P in (\`python -c "import os; print(os.path.join(os.environ['APPDATA'],'Colophon','native-host','com.colophon.llamahost.json'))"\`) do set "MP=%%P"`,
+    'reg add "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.colophon.llamahost" /ve /t REG_SZ /d "%MP%" /f >nul',
+    '',
+    'echo.',
+    'echo Setup complete! Return to Chrome and click "Check again" in Colophon.',
+    'echo.',
+    'pause',
+  ].join('\r\n');
+}
+
+function _buildPosixScript(b64, extId) {
+  const TEMPLATE = `#!/bin/bash
+echo "Colophon Local AI Setup"
+echo "========================"
+echo ""
+
+if ! command -v python3 &>/dev/null; then
+  echo "Python 3 is not installed."
+  echo "Install from: https://www.python.org/downloads/"
+  echo "Or with Homebrew: brew install python3"
+  read -p "Press Enter to close..."
+  exit 1
+fi
+
+python3 << 'PYEOF'
+import base64, json, os, shutil
+
+d = os.path.expanduser('~/.colophon/native-host')
+os.makedirs(d, exist_ok=True)
+
+with open(os.path.join(d, 'host.py'), 'wb') as f:
+    f.write(base64.b64decode('__B64__'))
+os.chmod(os.path.join(d, 'host.py'), 0o755)
+
+m = {
+    'name': 'com.colophon.llamahost',
+    'description': 'Colophon local AI',
+    'path': os.path.join(d, 'host.py'),
+    'type': 'stdio',
+    'allowed_origins': ['chrome-extension://__EXTID__/']
+}
+p = os.path.join(d, 'com.colophon.llamahost.json')
+with open(p, 'w') as f:
+    json.dump(m, f, indent=2)
+
+for cd in [
+    os.path.expanduser('~/Library/Application Support/Google/Chrome/NativeMessagingHosts'),
+    os.path.expanduser('~/Library/Application Support/Chromium/NativeMessagingHosts'),
+    os.path.expanduser('~/.config/google-chrome/NativeMessagingHosts'),
+    os.path.expanduser('~/.config/chromium/NativeMessagingHosts'),
+]:
+    if os.path.isdir(os.path.dirname(cd)):
+        os.makedirs(cd, exist_ok=True)
+        shutil.copy(p, cd)
+        print('Installed to:', cd)
+
+print('Setup complete!')
+PYEOF
+
+echo ""
+echo "Return to Chrome and click Check in Colophon."
+read -p "Press Enter to close..."
+`;
+  return TEMPLATE.replace('__B64__', b64).replace('__EXTID__', extId);
 }
 
 async function updateEventState({ eventTimestamp, status }) {

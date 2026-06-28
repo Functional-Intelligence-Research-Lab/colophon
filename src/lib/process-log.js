@@ -181,7 +181,8 @@ export class ProcessLog {
 
     formatFilename() {
         const d = new Date();
-        return `colophon-${d.getFullYear()}-${this.pad(d.getMonth() + 1)}-${this.pad(d.getDate())}-${this.pad(d.getHours())}-${this.pad(d.getMinutes())}.twff`;
+        const docPart = this._session?.docId ? `-${this._session.docId.slice(0, 8)}` : '';
+        return `colophon-${d.getFullYear()}-${this.pad(d.getMonth() + 1)}-${this.pad(d.getDate())}-${this.pad(d.getHours())}-${this.pad(d.getMinutes())}${docPart}.twff`;
         }
     
 

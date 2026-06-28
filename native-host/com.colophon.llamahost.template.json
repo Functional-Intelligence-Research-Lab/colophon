@@ -1,0 +1,9 @@
+{
+  "name": "com.colophon.llamahost",
+  "description": "Colophon llamafile host — manages local AI model download and server",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://__EXTENSION_ID__/"
+  ]
+}

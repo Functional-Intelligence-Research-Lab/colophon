@@ -37,6 +37,18 @@ export async function clearSession() {
   await chrome.storage.local.remove('session')
 }
 
+export async function getSessionByDocId(docId) {
+  const data = await chrome.storage.local.get('sessions')
+  return (data.sessions ?? {})[docId] ?? null
+}
+
+export async function saveSessionByDocId(docId, session) {
+  const data = await chrome.storage.local.get('sessions')
+  const sessions = data.sessions ?? {}
+  sessions[docId] = session
+  await chrome.storage.local.set({ sessions })
+}
+
 /** Returns the persisted anonymous user ID, generating one if missing. */
 export async function ensureUserId() {
   const settings = await getSettings()

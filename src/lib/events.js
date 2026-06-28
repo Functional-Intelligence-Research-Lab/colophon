@@ -10,9 +10,7 @@
 // (fields at the top level) would blank the side-panel cards and hash
 // `meta: undefined` for every event, silently destroying the integrity chain.
 //
-// Schema field coverage follows src/lib/schemas/process-log.schema.json (v0.2).
-
-/** ISO-8601 timestamp for "now". Helper so every constructor is consistent. */
+// Schema field coverage follows src/lib/schemas/process-log.schema.json (v0.2)./** ISO-8601 timestamp for "now". Helper so every constructor is consistent. */
 function now() {
   return new Date().toISOString()
 }
@@ -184,3 +182,18 @@ export function sessionEndEvent() {
     meta: {},
   }
 }
+
+export function geminiSuggestionEvent({ char_count = 0, output_preview = '', insertion_velocity = 0, content_before = '', content_after = '', hash = '' } = {}) {
+  return {
+    type: 'gemini_suggestion',
+    timestamp: now(),
+    meta: {
+      char_count,
+      output_preview: clip(output_preview, 100),
+      insertion_velocity,
+      content_before: clip(content_before, 500),
+      content_after: clip(content_after, 500),
+      _hash: hash,
+    },
+  }
+}ntal
