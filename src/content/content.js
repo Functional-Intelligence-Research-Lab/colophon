@@ -66,6 +66,32 @@ let _bufferStartTime = 0;
 let _geminiPanelActive = false;
 let _geminiObserver = null;
 
+function extractTextFromModelChunks() {
+  try {
+    const scripts = Array.from(document.querySelectorAll('script'));
+    let combined = '';
+    for (const script of scripts) {
+      const content = script.textContent || '';
+      if (content.includes('DOCS_modelChunk')) {
+        const matches = content.match(/"s"\s*:\s*"((?:[^"\\]|\\.)*)"/g);
+        if (matches) {
+          for (const m of matches) {
+            try {
+              const jsonVal = JSON.parse('{' + m + '}');
+              if (jsonVal.s && jsonVal.s.length > 20) {
+                combined += jsonVal.s + '\n';
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+    return combined.trim();
+  } catch {
+    return '';
+  }
+}
+
 function _getDocText() {
   let nodes = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
   if (nodes.length === 0 || nodes.every(n => !n.textContent.trim())) {
@@ -75,6 +101,9 @@ function _getDocText() {
     const text = nodes.map(p => p.textContent).join('\n').trim();
     if (text) return text.slice(0, 25000);
   }
+  const chunkText = extractTextFromModelChunks();
+  if (chunkText) return chunkText.slice(0, 25000);
+
   return _rollingBaselineState || "";
 }
 
