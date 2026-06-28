@@ -78,10 +78,10 @@ export function analyzeText(text) {
   const suggestions = [];
   const seen = new Set();
 
-  const add = (tipText, excerpt = '') => {
+  const add = (rule, tipText, excerpt = '') => {
     if (!seen.has(tipText)) {
       seen.add(tipText);
-      suggestions.push({ text: tipText, excerpt: excerpt.trim().slice(0, 100) });
+      suggestions.push({ rule, text: tipText, excerpt: excerpt.trim().slice(0, 100) });
     }
   };
 
@@ -89,13 +89,13 @@ export function analyzeText(text) {
   const score = fleschReadingEase(text);
   if (score !== null) {
     const label = readabilityLabel(score);
-    if (label) add(label, '');
+    if (label) add('readability', label, '');
   }
 
   // ── 2. Adverb overuse (whole document) ────────────────────────────────────
   const advRatio = adverbRatio(text);
   if (advRatio > 0.05) {
-    add(`High adverb density (${(advRatio * 100).toFixed(0)}% of words end in -ly). Consider replacing adverbs with stronger verbs.`, '');
+    add('adverb_density', `High adverb density (${(advRatio * 100).toFixed(0)}% of words end in -ly). Consider replacing adverbs with stronger verbs.`, '');
   }
 
   // ── Per-paragraph checks ───────────────────────────────────────────────────
@@ -110,6 +110,7 @@ export function analyzeText(text) {
     // 3. Long paragraph
     if (paraWords.length > 350) {
       add(
+        'long_paragraph',
         `Very long paragraph (${paraWords.length} words). Consider splitting it into sections.`,
         trimmed.slice(0, 80)
       );
@@ -120,6 +121,7 @@ export function analyzeText(text) {
     if (passiveMatches.length >= 2) {
       const excerpt = passiveMatches.slice(0, 2).join(', ');
       add(
+        'passive_voice',
         `Passive voice detected ${passiveMatches.length} time${passiveMatches.length > 1 ? 's' : ''} in this paragraph (e.g. "${excerpt}"). Consider rewriting in active voice.`,
         trimmed.slice(0, 80)
       );
@@ -130,6 +132,7 @@ export function analyzeText(text) {
     const foundWeak = [...WEAK_WORDS].filter(w => lowerPara.includes(w));
     if (foundWeak.length >= 2) {
       add(
+        'filler_words',
         `Weak filler words found: ${foundWeak.slice(0, 4).map(w => `"${w}"`).join(', ')}. Try removing or replacing them for a stronger voice.`,
         trimmed.slice(0, 80)
       );
@@ -143,7 +146,7 @@ export function analyzeText(text) {
         const tip = replacement
           ? `"${phrase}" is wordy. Consider replacing with "${replacement}".`
           : `"${phrase}" is unnecessary — try removing it.`;
-        add(tip, trimmed.slice(0, 80));
+        add('wordy_phrase', tip, trimmed.slice(0, 80));
       }
     }
 
@@ -155,6 +158,7 @@ export function analyzeText(text) {
       const wc = s.split(/\s+/).length;
       if (wc > 30) {
         add(
+          'long_sentence',
           `Long sentence (${wc} words). Consider splitting it for clarity.`,
           s.slice(0, 80) + (s.length > 80 ? '…' : '')
         );
@@ -170,6 +174,7 @@ export function analyzeText(text) {
           streak++;
           if (streak >= 3) {
             add(
+              'repeated_starts',
               `${streak} consecutive sentences start with "${starts[i]}". Vary your sentence openings to improve flow.`,
               sentences[i - 2]?.slice(0, 80)
             );
@@ -188,6 +193,7 @@ export function analyzeText(text) {
     for (const [w, n] of Object.entries(freq)) {
       if (n >= 3) {
         add(
+          'word_repetition',
           `"${w}" appears ${n} times in this paragraph. Consider varying your word choice.`,
           trimmed.slice(0, 80)
         );
