@@ -220,6 +220,14 @@ function buildCard(evt) {
     const preview = evt.meta?.text ? esc(evt.meta.text.slice(0, 120)) + (evt.meta.text.length > 120 ? '…' : '') : '';
     bodyHTML = `<p class="tl-text">${preview}</p>`;
   }
+  else if (evt.type === 'gemini_suggestion') {
+    typeClass = 'gemini';
+    authorLabel = 'Gemini • AI insert';
+    const chars = evt.meta?.char_count ?? 0;
+    const vel = evt.meta?.insertion_velocity;
+    const preview = evt.meta?.output_preview ? esc(evt.meta.output_preview) : `${chars} chars inserted`;
+    bodyHTML = `<p class="tl-text">${preview}${vel ? ` <span style="color:#888;font-size:0.85em">(${vel} chars/s)</span>` : ''}</p>`;
+  }
   else if (evt.type === 'checkpoint') {
     typeClass = 'user';
     const note = evt.meta?.note ?? 'Checkpoint';
@@ -483,8 +491,12 @@ function openAnnotatedView(log, meta, xhtmlStr) {
       else continue;
       searchText = evt.meta?.output_preview;
       expectedLength = evt.meta?.ai_chars ?? (searchText ? searchText.length : 0);
+    } else if (evt.type === 'gemini_suggestion' && evt.meta?.output_preview) {
+      annType = 'gemini'; label = 'Gemini';
+      searchText = evt.meta.output_preview;
+      expectedLength = evt.meta?.char_count ?? searchText.length;
     } else if (evt.type === 'paste' && evt.meta?.output_preview) {
-      annType = 'paste'; label = 'Pasted'; 
+      annType = 'paste'; label = 'Pasted';
       searchText = evt.meta.output_preview;
       expectedLength = evt.meta?.char_count ?? searchText.length;
     } else { continue; }
@@ -627,6 +639,7 @@ body {
 .swatch.ai-accepted { background: #ede9ff; border: 1.5px solid #7c3aed; }
 .swatch.ai-partial  { background: #ccfbf1; border: 1.5px solid #0d9488; }
 .swatch.paste       { background: #fef9c3; border: 1.5px solid #ca8a04; }
+.swatch.gemini      { background: #e8f0fe; border: 1.5px solid #1a73e8; }
 
 /* ── Document "Paper" Layout ── */
 .workspace {
@@ -672,6 +685,7 @@ body {
 mark.ann-ai-accepted { background: #ede9ff; border-bottom: 2px solid #7c3aed; border-radius: 2px; padding: 0 1px; }
 mark.ann-ai-partial  { background: #ccfbf1; border-bottom: 2px solid #0d9488; border-radius: 2px; padding: 0 1px; }
 mark.ann-paste       { background: #fef9c3; border-bottom: 2px solid #ca8a04; border-radius: 2px; padding: 0 1px; }
+mark.ann-gemini      { background: #e8f0fe; border-bottom: 2px solid #1a73e8; border-radius: 2px; padding: 0 1px; }
 
 /* ── Unlocated Page ── */
 .unlocated-banner { background: #fefce8; border-left: 4px solid #fde047; padding: 16px 24px; margin-bottom: 24px; }
@@ -684,6 +698,7 @@ mark.ann-paste       { background: #fef9c3; border-bottom: 2px solid #ca8a04; bo
 .pill.ai-accepted { background: #ede9ff; color: #6d28d9; }
 .pill.ai-partial  { background: #ccfbf1; color: #0f766e; }
 .pill.paste       { background: #fef9c3; color: #92400e; }
+.pill.gemini      { background: #e8f0fe; color: #1558b0; }
 
 /* ── Colophon Seal Page ── */
 .seal-page { font-family: 'Courier New', monospace; font-size: 10.5pt; color: #202124; }
@@ -722,6 +737,7 @@ mark.ann-paste       { background: #fef9c3; border-bottom: 2px solid #ca8a04; bo
     <div class="legend-item"><span class="swatch ai-accepted"></span> AI accepted</div>
     <div class="legend-item"><span class="swatch ai-partial"></span> AI partial</div>
     <div class="legend-item"><span class="swatch paste"></span> Pasted from external source</div>
+    <div class="legend-item"><span class="swatch gemini"></span> Gemini (Help me write)</div>
   </div>
 </div>
 
