@@ -11,7 +11,8 @@
     "downloads",
     "sidePanel",
     "clipboardWrite",
-    "nativeMessaging"
+    "nativeMessaging",
+    "contextMenus"
   ],
   "host_permissions": ["https://docs.google.com/*"],
 
@@ -30,7 +31,7 @@
 
   "icons": {
     "32": "icons/original@2x.png",
-    "48": "icons/original@3x.png"
+    "48": "icons/green_phi@3x.png"
   },
 
   "action": {
