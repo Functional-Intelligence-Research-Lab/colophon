@@ -49,10 +49,6 @@
         </div>
         <div class="doc-context-row">
           <div id="doc-context-indicator">📄 No document context yet</div>
-          <button id="scan-btn" title="Scan document now" aria-label="Scan document now">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          </button>
-          <span id="last-scan-label">Not scanned yet</span>
         </div>
       </div>
 
@@ -120,6 +116,10 @@
       <div class="footer-left">
         <span class="dot scanning-dot" id="scanning-dot"></span>
         <span id="scanning-label">Auto-scanning</span>
+        <button id="scan-btn" title="Scan document now" aria-label="Scan document now">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+        <span id="last-scan-label"></span>
       </div>
       <div class="status" id="model-status-display"><span class="dot"></span> Local model</div>
       <button class="icon-btn" id="export-btn" title="Export session"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14L21 3" /></svg></button>

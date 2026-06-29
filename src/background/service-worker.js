@@ -105,6 +105,12 @@ function broadcastModelStatus(extra = {}) {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+// Restore in-memory snapshot timestamp from persisted session metadata on SW startup
+getSession().then(session => {
+  const ts = session?.metadata?.last_snapshot_timestamp;
+  if (ts) _lastSnapshotTimestamp = ts;
+}).catch(() => {});
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("[Colophon] Installed.");
   chrome.contextMenus.create({
@@ -261,6 +267,9 @@ async function handleMessage(msg, _sender) {
       _lastDocContext = msg.payload ?? null;
       chrome.runtime.sendMessage({ action: 'DOC_CONTEXT_UPDATE', ...msg.payload }).catch(() => {});
       return { ok: true };
+
+    case 'GET_DOC_CONTEXT':
+      return _lastDocContext ?? null;
 
     case 'GET_SELECTION':
       return { ok: true, ..._lastSelection };

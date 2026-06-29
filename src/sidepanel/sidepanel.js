@@ -209,10 +209,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   // Refresh the "last scan" label every 30 seconds
   _scanLabelInterval = setInterval(_updateScanLabel, 30_000);
-  // Seed last scan time from session metadata if available
+  // Seed last scan time and doc context from session metadata if available
   chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
     const ts = res?.session?.metadata?.last_snapshot_timestamp;
     if (ts) { _lastScanTime = ts; _updateScanLabel(); }
+  });
+  // Restore doc context from service worker in case sidepanel was re-opened
+  chrome.runtime.sendMessage({ action: 'GET_DOC_CONTEXT' }, (res) => {
+    if (res?.text) { _docContext = res; _updateContextIndicator(); }
+  });
+
+  // Re-seed doc context whenever sidepanel regains visibility (e.g. user switches back)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      chrome.runtime.sendMessage({ action: 'GET_DOC_CONTEXT' }, (res) => {
+        if (res?.text) { _docContext = res; _updateContextIndicator(); }
+      });
+    }
   });
 
   // Boot the dynamic renderer
@@ -495,8 +508,7 @@ const TimelineRenderer = {
       // In compact mode, skip individual edit events (they'll be shown as grouped card)
       if (!this._showAll && evt.type === 'edit') return;
 
-      // In compact mode, hide heuristic suggestions from timeline (shown in suggestions section)
-      if (!this._showAll && evt.type === 'heuristic_suggestion') return;
+      // In compact mode, heuristic suggestions show as compact cards (also in suggestions section)
 
       const el = this.buildEventCard(evt, totalEventsCount);
       if (el) {
@@ -541,27 +553,102 @@ const TimelineRenderer = {
     return '0 chars';
   },
 
+  _ruleToLabel(rule) {
+    const MAP = {
+      passive_voice: 'Clarity issue', readability: 'Readability issue',
+      filler_words: 'Style issue', wordy_phrase: 'Style issue',
+      long_sentence: 'Clarity issue', repeated_starts: 'Flow issue',
+      word_repetition: 'Coherence issue', long_paragraph: 'Structure issue',
+      adverb_density: 'Style issue',
+    };
+    return MAP[rule] || 'Writing tip';
+  },
+
   _buildEditGroupCard(first, last, totalDelta) {
     const wrapper = document.createElement('div');
-    wrapper.className = 'timeline-event user';
+    wrapper.className = 'timeline-event-compact';
     wrapper.dataset.timestamp = first.timestamp;
     const timeFrom = this.formatTime(first.timestamp);
     const timeTo = first.timestamp !== last.timestamp ? `–${this.formatTime(last.timestamp)}` : '';
     wrapper.innerHTML = `
-      <div class="node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></div>
-      <div class="event-content">
-        <div class="event-header">
-          <span class="author">You • Edited</span>
-          <span class="time">${timeFrom}${timeTo}</span>
-        </div>
-        <div class="text-only"><span class="edit-group-delta">${this._formatDelta(totalDelta)}</span></div>
+      <div class="ecc-icon ecc-user">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </div>
+      <div class="ecc-body">
+        <div class="ecc-title">Edited</div>
+        <div class="ecc-meta">${timeFrom}${timeTo} · <span class="edit-group-delta">${this._formatDelta(totalDelta)}</span></div>
+      </div>
+      <div class="ecc-action"></div>
+    `;
+    return wrapper;
+  },
+
+  _buildCompactCard(evt) {
+    const time = this.formatTime(evt.timestamp);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'timeline-event-compact';
+    wrapper.dataset.timestamp = evt.timestamp;
+
+    let iconSvg = '', iconClass = 'ecc-user', title = '', meta = '', actionHTML = '';
+
+    if (evt.type === 'paste') {
+      const wordCount = Math.round((evt.meta?.char_count ?? 0) / 5);
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+      title = 'Pasted content';
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}`;
+      if (evt.meta?.source !== 'internal') {
+        actionHTML = evt.meta?.source_url
+          ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
+          : `<button class="ecc-btn btn-add-source">Add source</button>`;
+      }
+    } else if (evt.type === 'ai_interaction') {
+      iconClass = 'ecc-ai';
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
+      const isParaphrase = evt.meta?.source === 'paraphrase';
+      title = evt.meta?.acceptance === 'fully_accepted' ? 'AI suggestion accepted' : 'AI interaction';
+      meta = `${time}${isParaphrase ? ' · Paraphrased' : ''}`;
+      if (evt.meta?.acceptance === 'fully_accepted') {
+        actionHTML = `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`;
+      }
+    } else if (evt.type === 'heuristic_suggestion') {
+      iconClass = 'ecc-warn';
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
+      title = this._ruleToLabel(evt.meta?.rule);
+      const excerpt = evt.meta?.excerpt ? evt.meta.excerpt.slice(0, 32) + (evt.meta.excerpt.length > 32 ? '…' : '') : '';
+      meta = `${time}${excerpt ? ' · ' + excerpt : ''}`;
+      actionHTML = evt.meta?.status === 'dismissed'
+        ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
+        : `<button class="ecc-btn ecc-btn-review" data-ts="${evt.timestamp}">Review</button>`;
+    } else if (evt.type === 'gemini_suggestion') {
+      iconClass = 'ecc-gemini';
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
+      title = 'Gemini insert';
+      meta = `${time} · ${evt.meta?.char_count ?? 0} chars`;
+    } else if (evt.type === 'session_start') {
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+      title = 'Session started';
+      meta = time;
+    }
+
+    wrapper.innerHTML = `
+      <div class="ecc-icon ${iconClass}">${iconSvg}</div>
+      <div class="ecc-body">
+        <div class="ecc-title">${title}</div>
+        <div class="ecc-meta">${meta}</div>
+      </div>
+      <div class="ecc-action">${actionHTML}</div>
     `;
     return wrapper;
   },
 
   // ── Event Router ──
   buildEventCard(evt, totalEventsCount) {
+    // In compact mode, use clean icon cards for key event types
+    const COMPACT_TYPES = ['paste', 'ai_interaction', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
+    if (!this._showAll && COMPACT_TYPES.includes(evt.type)) {
+      return this._buildCompactCard(evt);
+    }
+
     const timeAgo = this.formatTime(evt.timestamp);
     const wrapper = document.createElement('div');
     
@@ -759,7 +846,7 @@ const TimelineRenderer = {
       if (e.target.classList.contains('btn-add-source')) {
         const btn = e.target;
         const row = btn.parentElement;
-        const eventCard = btn.closest('.timeline-event');
+        const eventCard = btn.closest('.timeline-event') || btn.closest('.timeline-event-compact');
         const cardTimestamp = eventCard?.dataset.timestamp;
 
         const input = document.createElement('input');
@@ -789,6 +876,16 @@ const TimelineRenderer = {
 
         saveBtn.addEventListener('click', save);
         input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') row.replaceChildren(btn); });
+        return;
+      }
+
+      // Review button on compact heuristic suggestion cards
+      if (e.target.classList.contains('ecc-btn-review')) {
+        const section = document.getElementById('suggestions-section');
+        if (section) {
+          section.hidden = false;
+          section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
         return;
       }
 
@@ -1444,6 +1541,23 @@ const SelectionContext = {
   },
 };
 
+// ── Quick action hint banner ───────────────────────────────────────────────────
+let _qaHintTimer = null;
+function _showQuickActionHint(msg) {
+  let hint = document.getElementById('qa-hint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'qa-hint';
+    hint.className = 'qa-hint';
+    const inputContainer = document.querySelector('.input-container');
+    if (inputContainer) inputContainer.before(hint);
+  }
+  hint.textContent = msg;
+  hint.style.display = 'block';
+  clearTimeout(_qaHintTimer);
+  _qaHintTimer = setTimeout(() => { if (hint) hint.style.display = 'none'; }, 5000);
+}
+
 // ── Quick Actions Bar ──────────────────────────────────────────────────────────
 const QuickActions = {
   _pendingType: null, // 'paraphrase' | 'improve'
@@ -1461,29 +1575,42 @@ const QuickActions = {
 
   async _run(type) {
     const sel = this._getSelectedText();
-    if (!sel) {
+    const label = type === 'paraphrase' ? 'Paraphrase' : 'Improve';
+    const verb = type === 'paraphrase'
+      ? 'Paraphrase this, keeping the same meaning'
+      : 'Improve this text for clarity and flow';
+
+    if (sel) {
+      this._pendingType = type;
+      ChatInput._submitText(`${verb}:\n\n${sel}`);
+    } else {
       const input = document.querySelector('.input-box input');
-      if (input) {
-        input.placeholder = type === 'paraphrase'
-          ? 'Select text in your doc first, then click Paraphrase'
-          : 'Select text in your doc first, then click Improve';
-        input.focus();
-        setTimeout(() => { input.placeholder = 'Ask or reply...'; }, 4000);
-      }
-      return;
+      if (!input) return;
+      input.value = `${verb}:\n\n`;
+      input.focus();
+      input.selectionStart = input.selectionEnd = input.value.length;
+      _showQuickActionHint(`${label}: paste or type the text below, then press Enter ↵`);
+      this._pendingType = type;
     }
-    this._pendingType = type;
-    const prompt = type === 'paraphrase'
-      ? `Paraphrase this, keeping the same meaning:\n\n${sel}`
-      : `Improve this text for clarity and flow:\n\n${sel}`;
-    ChatInput._submitText(prompt);
   },
 
   _runGrammar() {
-    const sel = this._getSelectedText() || _docContext?.text || '';
-    if (!sel) return;
-    const prompt = `Check the grammar and style of this text and list any issues concisely:\n\n${sel.slice(0, 800)}`;
-    ChatInput._submitText(prompt);
+    const sel = this._getSelectedText();
+    if (sel) {
+      ChatInput._submitText(`Check the grammar and style of this text and list any issues concisely:\n\n${sel.slice(0, 800)}`);
+      return;
+    }
+    const docText = _docContext?.text?.slice(0, 800) || '';
+    const input = document.querySelector('.input-box input');
+    if (!input) return;
+    if (docText) {
+      ChatInput._submitText(`Check the grammar and style of this text and list any issues concisely:\n\n${docText}`);
+    } else {
+      input.value = 'Check the grammar and style of this text:\n\n';
+      input.focus();
+      input.selectionStart = input.selectionEnd = input.value.length;
+      _showQuickActionHint('Grammar: paste or type the text below, then press Enter ↵');
+    }
   },
 
   // Called after an AI response completes — if it was triggered by a quick action,
