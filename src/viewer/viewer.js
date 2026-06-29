@@ -8,7 +8,7 @@ const viewerContent = document.getElementById('viewer-content');
 const errorBanner   = document.getElementById('error-banner');
 const pdfBtn        = document.getElementById('btn-annotated-pdf');
 
-let _liveXhtmlStr = '';   // kept empty for live sessions (no XHTML available until export)
+const _liveXhtmlStr = '';   // kept empty for live sessions (no XHTML available until export)
 let _liveInterval = null;
 
 fileInput.addEventListener('change', (e) => {
@@ -233,7 +233,7 @@ function buildCard(evt) {
     const note = evt.meta?.note ?? 'Checkpoint';
     const wc = evt.meta?.word_count_total;
     authorLabel = `Checkpoint`;
-    bodyHTML = `<p class="tl-text">${esc(note)}${wc != null ? ` — ${wc.toLocaleString()} words` : ''}</p>`;
+    bodyHTML = `<p class="tl-text">${esc(note)}${wc !== null ? ` — ${wc.toLocaleString()} words` : ''}</p>`;
   }
   else {
     return null;
@@ -335,7 +335,7 @@ function _fuzzyFind(haystack, needle, expectedLength, consumedRanges, ctxBefore 
     if (prefix.length < 10) break;
 
     // Build the regex for the start boundary
-    let startRegexParts = [];
+    const startRegexParts = [];
     if (normB) startRegexParts.push(escapeRe(normB));
     startRegexParts.push(escapeRe(prefix));
     const startRegexStr = startRegexParts.join('\\s*');

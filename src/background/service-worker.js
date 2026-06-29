@@ -163,6 +163,13 @@ async function handleMessage(msg, _sender) {
     case "startSession":
       return startSession(msg); // Pass the whole msg so we can grab msg.title
 
+    case "AUTO_SESSION_START":
+      // Always-on recording (spike): the content script asks to start as soon as
+      // a Doc opens, so writing before any button click is still captured. The
+      // tab/url come from the message sender (a content script doesn't know its
+      // own tabId), and we never clobber a session that's already recording.
+      return autoStartSession(_sender);
+
     case "SESSION_STOP":
     case "endSession":
       return stopSession();
@@ -353,6 +360,22 @@ async function startSession({ tabId, docUrl } = {}) {
   return { ok: true, sessionId: session.sessionId };
 }
 
+/**
+ * Auto-start a session from a content-script request (always-on recording).
+ * Derives tab/url from the sender and refuses to disturb an already-recording
+ * session, so it's safe to call on every Doc load.
+ */
+async function autoStartSession(sender) {
+  const existing = await getSession();
+  if (existing?.isRecording) {
+    return { ok: true, alreadyRecording: true, sessionId: existing.sessionId };
+  }
+  const tabId = sender?.tab?.id ?? null;
+  const docUrl = sender?.tab?.url ?? "";
+  console.log("[Colophon SW] auto session_start", { tabId, hasUrl: !!docUrl });
+  return startSession({ tabId, docUrl });
+}
+
 async function stopSession() {
   const session = await getSession();
   if (!session) return { ok: false, reason: "no session" };
@@ -387,6 +410,14 @@ async function appendEvent(event) {
     });
     return { ok: false };
   }
+  if (isNoOpEditEvent(event)) {
+    console.log("[Colophon SW] LOG_EVENT ignored", {
+      type: event?.type ?? "unknown",
+      reason: "zero edit",
+      meta: event?.meta,
+    });
+    return { ok: true, ignored: true };
+  }
   const userId = await ensureUserId();
   session.events.push({ author_id: userId, ...event });
   console.log("[Colophon SW] LOG_EVENT stored", {
@@ -402,6 +433,20 @@ async function appendEvent(event) {
   }).catch(() => {});
 
   return { ok: true };
+}
+
+function isNoOpEditEvent(event) {
+  if (event?.type !== "edit") return false;
+  const meta = event.meta ?? {};
+  const deltaWords = Number(meta.delta_words ?? 0);
+  const charDelta = Number(meta.char_delta ?? 0);
+  const contentAfter = typeof meta.content_after === "string" ? meta.content_after : "";
+
+  return contentAfter.length === 0
+    && Number.isFinite(deltaWords)
+    && Number.isFinite(charDelta)
+    && deltaWords === 0
+    && charDelta === 0;
 }
 
 async function getState() {
