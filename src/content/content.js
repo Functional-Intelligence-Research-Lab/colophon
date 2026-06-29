@@ -1,5 +1,10 @@
 import { mountColophonPanel } from '../panel/app.js'
+import { createGeminiDetector } from './gemini-detector.js'
+import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
+import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
+import { aiInteractionEvent } from '../lib/events.js'
+import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 
 /**
  * content.js — Colophon content script
@@ -60,10 +65,49 @@ let _lastSnapshotTime = 0;
 let _bufferStartTime = 0;
 let _geminiPanelActive = false;
 let _geminiObserver = null;
+// Snapshot taken the moment a Gemini suggestion appears (used as the
+// pre-change baseline when computing what the AI actually inserted).
+let _preSuggestionSnapshot = null;
+
+function extractTextFromModelChunks() {
+  try {
+    const scripts = Array.from(document.querySelectorAll('script'));
+    let combined = '';
+    for (const script of scripts) {
+      const content = script.textContent || '';
+      if (content.includes('DOCS_modelChunk')) {
+        const matches = content.match(/"s"\s*:\s*"((?:[^"\\]|\\.)*)"/g);
+        if (matches) {
+          for (const m of matches) {
+            try {
+              const jsonVal = JSON.parse('{' + m + '}');
+              if (jsonVal.s && jsonVal.s.length > 20) {
+                combined += jsonVal.s + '\n';
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+    return combined.trim();
+  } catch {
+    return '';
+  }
+}
 
 function _getDocText() {
-  return Array.from(document.querySelectorAll('.kix-paragraphrenderer'))
-    .map(p => p.textContent).join('\n').slice(0, 20000)
+  let nodes = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
+  if (nodes.length === 0 || nodes.every(n => !n.textContent.trim())) {
+    nodes = Array.from(document.querySelectorAll('.kix-lineview, .kix-wordhtmlgenerator-word-node, [role="document"] p, .kix-page p, .kix-page span'));
+  }
+  if (nodes.length > 0) {
+    const text = nodes.map(p => p.textContent).join('\n').trim();
+    if (text) return text.slice(0, 25000);
+  }
+  const chunkText = extractTextFromModelChunks();
+  if (chunkText) return chunkText.slice(0, 25000);
+
+  return _rollingBaselineState || "";
 }
 
 function _pushDocContext() {
@@ -116,6 +160,88 @@ function onSelectionChange() {
   }, 600)
 }
 
+// Native Google Docs Gemini ("Help me write" / "Refine") suggestion detector.
+// Emits ai_suggestion / ai_interaction events via the same send() path as edits.
+const _geminiDetector = createGeminiDetector({
+  emit: event => send('LOG_EVENT', event),
+  log: (...args) => console.log(...args),
+  warn: (...args) => console.warn(...args),
+  emitInteractions: false,
+
+  // Called the instant a Gemini suggestion popover appears — before the user
+  // has accepted or rejected. We grab a fresh, cache-busted doc snapshot here
+  // so we have a reliable "before" baseline for the diff on acceptance.
+  onSuggestionWillAppear: () => {
+    console.log('[Colophon Gemini] Pre-suggestion snapshot starting...');
+    getDocumentText().then(t => {
+      if (t) {
+        _preSuggestionSnapshot = t;
+        console.log('[Colophon Gemini] Pre-suggestion snapshot captured', { chars: t.length });
+      }
+    }).catch(() => {});
+  },
+
+  onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
+    if (accepted) {
+      _lastPasteAt = Date.now();
+      _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
+
+      // Use the snapshot taken when the suggestion appeared; fall back to the
+      // rolling baseline if the per-suggestion snapshot wasn't ready in time.
+      const docBefore = _preSuggestionSnapshot || _rollingBaselineState || _getDocText();
+      const domDiff = extractGeminiProposedDiff();
+
+      // Poll the export API (with cache-busting) until the document text
+      // actually differs from the pre-suggestion snapshot. This handles the
+      // typical 5–15 s lag between Google Docs autosaving and the export
+      // endpoint reflecting the change.
+      pollForDocChange(docBefore).then(docAfter => {
+        const diff = docAfter ? computeDocumentDiff(docBefore, docAfter) : { addedText: '', removedText: '' };
+
+        const commentary = isMetaCommentary(suggestionText);
+        const finalAdded = diff.addedText || domDiff.insertedText || (!commentary ? suggestionText : '');
+        const finalRemoved = diff.removedText || domDiff.deletedText || '';
+
+        console.log('[Colophon Gemini] onResolve diff result', {
+          addedChars: finalAdded.length,
+          removedChars: finalRemoved.length,
+          source: diff.addedText ? 'export-diff' : domDiff.insertedText ? 'dom-diff' : 'suggestion-text',
+        });
+
+        send('LOG_EVENT', aiInteractionEvent({
+          source: 'ai',
+          model: GEMINI_MODEL_ID,
+          output_preview: finalAdded.length > 0 ? finalAdded.slice(0, 100) : (commentary ? suggestionText.slice(0, 100) : ''),
+          content_before: finalRemoved,
+          content_after: finalAdded,
+          position_start: 0,
+          position_end: 0,
+          acceptance,
+          ai_chars: finalAdded.length,
+          ...(reason ? { reason } : {})
+        }));
+
+        if (docAfter) _rollingBaselineState = docAfter;
+        _preSuggestionSnapshot = null; // reset for next suggestion
+      });
+    } else {
+      _preSuggestionSnapshot = null; // dismissed — discard the snapshot
+      send('LOG_EVENT', aiInteractionEvent({
+        source: 'ai',
+        model: GEMINI_MODEL_ID,
+        output_preview: suggestionText ? suggestionText.slice(0, 100) : '',
+        content_before: '',
+        content_after: '',
+        position_start: 0,
+        position_end: 0,
+        acceptance,
+        ai_chars: 0,
+        ...(reason ? { reason } : {})
+      }));
+    }
+  },
+})
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 console.log('[Colophon] Content script injected on', location.pathname)
@@ -155,6 +281,32 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then(() => sendResponse({ status: "success" }))
         .catch(err => sendResponse({ status: "error", message: err.message }));
       return true; // Tells Chrome we will send the response asynchronously
+    }
+
+    // Programmatically click the native Gemini "Insert" / "Replace" button so the
+    // sidepanel can drive the accept action without the user having to reach back
+    // to the Gemini popover in the document.
+    if (msg.action === 'GEMINI_ACCEPT') {
+      const btn = findGeminiActionButton('accept');
+      if (btn) {
+        btn.click();
+        sendResponse({ status: 'ok' });
+      } else {
+        sendResponse({ status: 'error', message: 'Gemini accept button not found' });
+      }
+      return true;
+    }
+
+    // Programmatically click the native Gemini "Close" / "Cancel" button.
+    if (msg.action === 'GEMINI_REJECT') {
+      const btn = findGeminiActionButton('reject');
+      if (btn) {
+        btn.click();
+        sendResponse({ status: 'ok' });
+      } else {
+        sendResponse({ status: 'error', message: 'Gemini reject button not found' });
+      }
+      return true;
     }
 
     if (msg.action === 'GET_EDITOR_TEXT') {
@@ -213,6 +365,8 @@ function activate() {
   watchTextEventIframe()
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
   waitForEditor(attachObserver)
+  // Native Gemini suggestion detection (Help me write / Refine)
+  _geminiDetector.start()
   document.addEventListener('visibilitychange', onVisibilityChange)
   // Periodic checkpoints every 5 minutes + heuristic pass
   _checkpointTimer = setInterval(() => {
@@ -281,6 +435,7 @@ function attachInputListeners(target, label) {
   target.addEventListener('keydown', onKeydown, true)
   target.addEventListener('paste', onPaste, true)
   target.addEventListener('copy', onCopy, true)
+  target.addEventListener('input', onInput, true)
   _listenerTargets.push({ target, label })
   console.log('[Colophon Content] input listeners attached', { label })
 }
@@ -290,6 +445,7 @@ function detachInputListeners() {
     target.removeEventListener('keydown', onKeydown, true)
     target.removeEventListener('paste', onPaste, true)
     target.removeEventListener('copy', onCopy, true)
+    target.removeEventListener('input', onInput, true)
     console.log('[Colophon Content] input listeners detached', { label })
   }
   _listenerTargets = []
@@ -311,11 +467,6 @@ function attachTextEventIframe() {
       const doc = frame.contentDocument
       if (!doc) continue
       attachInputListeners(doc, 'docs-text-iframe-document')
-      console.log('[Colophon Content] text iframe reachable', {
-        frame: describeElement(frame),
-        readyState: doc.readyState,
-        activeElement: describeElement(doc.activeElement),
-      })
     } catch (err) {
       console.log('[Colophon Content] text iframe inaccessible', {
         frame: describeElement(frame),
@@ -325,6 +476,11 @@ function attachTextEventIframe() {
   }
 }
 
+// Always-on recording (spike). When true, a Doc load auto-starts a session so
+// text written before any "Start recording" click is still captured — closing
+// the opt-in blind spot. Flip to false to revert to manual/opt-in recording.
+const AUTO_RECORD = true
+
 async function syncRecordingState() {
   try {
     const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
@@ -332,9 +488,18 @@ async function syncRecordingState() {
       hasSession: !!state?.session,
       isRecording: !!state?.session?.isRecording,
     })
-    if (state?.session?.isRecording) activate()
+    if (state?.session?.isRecording) {
+      activate()
+      return
+    }
+    if (AUTO_RECORD) {
+      // SW derives tab/url from the sender and won't clobber a live session.
+      const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
+      console.log('[Colophon Content] auto-record requested', res)
+      if (res?.ok) activate()
+    }
   } catch {
-    // Popup activation remains the main path if the service worker is waking.
+    // Popup activation remains the fallback path if the service worker is waking.
   }
 }
 
@@ -342,6 +507,7 @@ function deactivate() {
   if (!_active) return
   _active = false
   detachInputListeners()
+  _geminiDetector.stop()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   clearTimeout(_selectionDebounce)
   _observer?.disconnect()
@@ -364,9 +530,18 @@ function isContextValid() {
 
 // ── Edit capture: keydown (primary) ──────────────────────────────────────────
 
+function isTargetingFormInput(target) {
+  if (!target) return false;
+  const tag = target.tagName?.toUpperCase() ?? '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+  if (target.closest?.('.appsElementsSidekickBarkickTopBox, [role="dialog"], .docos-anchoreddocoview, #colophon-panel')) return true;
+  return false;
+}
+
 function onKeydown(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return
+  if (isTargetingFormInput(e.target)) return;
   if (SKIP_KEYS.has(e.key)) {
     console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
     return
@@ -377,9 +552,10 @@ function onKeydown(e) {
   }
 
   // Backspace/Delete remove a character; everything else adds one
-  const delta = (e.key === 'Backspace' || e.key === 'Delete') ? -1 : 1
+  const isDelete = (e.key === 'Backspace' || e.key === 'Delete')
+  const delta = isDelete ? -1 : 1
   console.log('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
-  bufferEdit(delta)
+  bufferEdit(delta, isDelete)
   scheduleHeuristics()
 }
 
@@ -403,13 +579,33 @@ function attachObserver(editor) {
 
 function onMutation(mutations) {
   if (!_active) return
+
+  // Ignore mutations that originate inside the Gemini sidebar / suggestion panel —
+  // typing into the Gemini prompt box and the AI generating its response both
+  // produce DOM mutations that look like document edits. We only care about
+  // mutations that happen inside the actual document canvas.
+  const GEMINI_UI_SELECTORS = [
+    '.appsElementsSidekickBarkickTopBox',
+    '.appsElementsSidekick',
+    '.docos-anchoreddocoview',
+    '[id*="colophon"]',
+  ]
+  const isGeminiUI = (node) => {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false
+    return GEMINI_UI_SELECTORS.some(sel => node.closest?.(sel))
+  }
+
   let delta = 0
   for (const m of mutations) {
+    const target = m.target
+    // Skip mutations whose target is inside any Gemini panel
+    if (isGeminiUI(target)) continue
+
     if (m.type === 'characterData') {
       delta += (m.newValue?.length ?? 0) - (m.oldValue?.length ?? 0)
     } else if (m.type === 'childList') {
-      for (const n of m.addedNodes)   delta += n.textContent?.length ?? 0
-      for (const n of m.removedNodes) delta -= n.textContent?.length ?? 0
+      for (const n of m.addedNodes)   { if (!isGeminiUI(n)) delta += n.textContent?.length ?? 0 }
+      for (const n of m.removedNodes) { if (!isGeminiUI(n)) delta -= n.textContent?.length ?? 0 }
     }
   }
   if (delta !== 0) {
@@ -420,17 +616,19 @@ function onMutation(mutations) {
 
 // ── Shared buffer + debounce ──────────────────────────────────────────────────
 
-function bufferEdit(delta) {
+function bufferEdit(delta, isDelete = false) {
   if (Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
     console.log('[Colophon Content] Edit suppressed after paste', { delta })
     return;
   }
+  const nowMs = Date.now()
   if (!_editBuffer) {
-    _editBuffer = { timestamp: new Date().toISOString(), delta: 0 }
+    _editBuffer = { timestamp: new Date().toISOString(), delta: 0, velocity: createVelocityTracker() }
     _bufferStartTime = Date.now();
     console.log('[Colophon Content] edit buffer started', { delta })
   }
   _editBuffer.delta += delta
+  _editBuffer.velocity.record(isDelete, nowMs)
   console.log('[Colophon Content] edit buffer updated', { delta, total: _editBuffer.delta })
   clearTimeout(_debounce)
   _debounce = setTimeout(flushEdit, DEBOUNCE_MS)
@@ -438,13 +636,14 @@ function bufferEdit(delta) {
 
 function flushEdit() {
   if (!_editBuffer) return
+  const v = _editBuffer.velocity.summary()
+  const cpm = v.chars_per_min
   const elapsed = Math.max((Date.now() - _bufferStartTime) / 1000, 0.1);
   const absDelta = Math.abs(_editBuffer.delta);
   const insertion_velocity = Math.round(absDelta / elapsed);
-  // Flag rapid large insertions as likely AI (programmatic injection is 1000s chars/sec)
   const likely_ai = insertion_velocity > 150 && absDelta > 80;
 
-  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, insertion_velocity, likely_ai })
+  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai })
 
   const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit';
   if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
@@ -460,6 +659,8 @@ function flushEdit() {
       source:         likely_ai ? 'ai' : 'human',
       insertion_velocity,
       likely_ai,
+      ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
+      churn_keys: v.churn_keys,
     },
   })
   _editBuffer = null
@@ -478,6 +679,7 @@ function onCopy() {
 function onPaste(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return;
+  if (isTargetingFormInput(e.target)) return;
 
   const now = Date.now();
   if (now - _lastPasteAt < 100) {
@@ -502,6 +704,35 @@ function onPaste(e) {
 
   console.log('[TWFF] Paste intercepted. Running Async Emitter...');
   emitPaste(text);
+}
+
+function onInput(e) {
+  if (!_active) return
+  if (isTargetingFormInput(e.target)) return;
+  const inputType = e.inputType ?? ''
+  const insertedLength = e.data?.length ?? 0
+  console.log('[Colophon Content] input event', {
+    inputType,
+    dataLength: insertedLength,
+    target: describeElement(e.target),
+  })
+
+  const { isBlock, origin, chars } = classifyInsertion({ inputType, insertedLength })
+  if (isBlock && origin === 'unknown') {
+    console.log('[Colophon Content] block insertion (unattributed)', { chars, inputType })
+    send('LOG_EVENT', {
+      timestamp: new Date().toISOString(),
+      type: 'edit',
+      meta: {
+        position_start: 0,
+        position_end:   chars,
+        char_delta:     chars,
+        source:         'unknown',
+        block_insertion: true,
+        block_chars:     chars,
+      },
+    })
+  }
 }
 // function onPaste(e) {
 //   if (!_active) return
@@ -686,9 +917,14 @@ function onVisibilityChange() {
 
 function send(type, payload = {}) {
   console.log('[Colophon Content] send message', { type, payloadType: payload?.type ?? null })
-  chrome.runtime.sendMessage({ type, payload }).catch(() => {
-    // SW may be inactive — Chrome will revive it on the next message
-  })
+  try {
+    chrome.runtime.sendMessage({ type, payload }).catch(() => {
+      // SW may be inactive — Chrome will revive it on the next message
+    })
+  } catch {
+    // Extension context invalidated: extension was reloaded mid-session.
+    // Silently drop the message — refreshing the tab will restore the connection.
+  }
 }
 
 // ── Export Fetcher (Bypasses Auth Blocks) ─────────────────────────────────────
@@ -742,6 +978,7 @@ function createFloatingPanel() {
 
   const panel = mountColophonPanel(shell, {
     mode: 'floating',
+    docTitle: getDocsTitle(),
     onClose: destroyFloatingPanel,
     onPin: toggleFloatingPin,
   })
@@ -838,6 +1075,60 @@ function getDocsTitle() {
   }
 
   return fallbackTitle;
+}
+
+// ── Find & click native Gemini action buttons ─────────────────────────────
+/**
+ * Searches the Gemini popover/sidebar for a button matching the given
+ * action type ('accept' | 'reject') and returns the first match.
+ *
+ * Uses the same classifyAction() logic as the detector so both paths stay
+ * in sync when Google reshuffles class names.
+ */
+function findGeminiActionButton(actionType) {
+  const { classifyAction: classify } = /** @type {any} */ (window.__colophon_geminiSelectors || {});
+
+  // Containers where the Gemini accept/reject buttons live.
+  const CONTAINERS = [
+    '.appsElementsSidekickBarkickTopBox',
+    '.docos-anchoreddocoview',
+    '.docosAiPreviewDiffVisibleSuggestionViewContent',
+    '[role="dialog"]',
+    '[aria-label*="Gemini" i]',
+    '[aria-label*="Help me write" i]',
+  ];
+
+  for (const sel of CONTAINERS) {
+    const containers = Array.from(document.querySelectorAll(sel));
+    for (const container of containers) {
+      const buttons = Array.from(container.querySelectorAll('button, [role="button"]'));
+      for (const btn of buttons) {
+        // Use classifyAction from gemini-selectors via the shared import.
+        // We inline a lightweight version here so content.js stays self-contained.
+        const label = (btn.getAttribute?.('aria-label') ?? btn.textContent ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const dataAction = btn.getAttribute?.('data-action-type');
+
+        const isAccept = (
+          dataAction === '44' ||
+          btn.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonPrimary') ||
+          btn.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
+          ['insert', 'replace', 'accept', 'accept all', 'accept suggestion'].includes(label) ||
+          label.startsWith('accept') || label.startsWith('insert') || label.startsWith('replace')
+        );
+        const isReject = (
+          dataAction === '45' ||
+          btn.classList?.contains('appsElementsSidekickResponseOptionsActionBarButtonSecondary') ||
+          btn.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewRejectButton') ||
+          ['close', 'cancel', 'discard', 'reject', 'reject all'].includes(label) ||
+          label.startsWith('reject') || label.startsWith('discard') || label.startsWith('close')
+        );
+
+        if (actionType === 'accept' && isAccept) return btn;
+        if (actionType === 'reject' && isReject) return btn;
+      }
+    }
+  }
+  return null;
 }
 
 // ── Insert AI Text into Docs Canvas ──────────────────────────────────
@@ -1086,15 +1377,65 @@ async function getDocumentText() {
   const docId = match[1];
 
   try {
-    const response = await fetch(`https://docs.google.com/document/d/${docId}/export?format=txt`);
+    // cache: 'no-store' prevents the browser from returning a cached response.
+    // The timestamp query param additionally busts Google's CDN cache so we
+    // always receive the current server-side document state.
+    const response = await fetch(
+      `https://docs.google.com/document/d/${docId}/export?format=txt&t=${Date.now()}`,
+      { cache: 'no-store' }
+    );
     if (!response.ok) throw new Error(`Status: ${response.status}`);
     
-    let text = await response.text();
+    const text = await response.text();
     return text.replace(/^\uFEFF/, '');
   } catch (err) {
     console.error("[Colophon Content] Failed to download document state:", err);
     return "";
   }
+}
+
+/**
+ * Resolves to a resolved(sic) utility.
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Polls getDocumentText() every `intervalMs` until the returned text differs
+ * from `baseline`, or until `maxWaitMs` has elapsed. Returns the new text if
+ * a change was detected, or null on timeout.
+ *
+ * This handles the 5–15 s lag between a Google Docs autosave and the export
+ * endpoint reflecting the change, which caused the old 800 ms single-fetch
+ * to always return stale (pre-change) content.
+ */
+async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) {
+  if (!baseline) {
+    // No baseline to compare against — just wait and return whatever we get.
+    await sleep(intervalMs);
+    return await getDocumentText() || null;
+  }
+
+  const deadline = Date.now() + maxWaitMs;
+  console.log('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
+
+  while (Date.now() < deadline) {
+    await sleep(intervalMs);
+    try {
+      const newText = await getDocumentText();
+      if (newText && newText !== baseline) {
+        console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
+        return newText;
+      }
+      console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
+    } catch {
+      // transient fetch error — keep polling
+    }
+  }
+
+  console.warn('[Colophon Content] pollForDocChange: timed out — export API did not reflect change within', maxWaitMs, 'ms');
+  return null;
 }
 
 /**
@@ -1110,6 +1451,28 @@ function findFirstDifference(oldText, newText) {
     i++;
   }
   return i; 
+}
+
+function computeDocumentDiff(oldText, newText) {
+  if (!oldText || !newText) return { addedText: '', removedText: '' };
+  if (oldText === newText) return { addedText: '', removedText: '' };
+
+  let start = 0;
+  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
+    start++;
+  }
+
+  let oldEnd = oldText.length - 1;
+  let newEnd = newText.length - 1;
+  while (oldEnd >= start && newEnd >= start && oldText[oldEnd] === newText[newEnd]) {
+    oldEnd--;
+    newEnd--;
+  }
+
+  const removedText = oldText.slice(start, oldEnd + 1).trim();
+  const addedText = newText.slice(start, newEnd + 1).trim();
+
+  return { addedText, removedText };
 }
 
 async function updateRollingBaseline(forceSendResponse = null) {
