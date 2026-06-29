@@ -126,64 +126,72 @@ console.log('[Colophon Content] injected', {
 })
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
-  if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
-  if (msg.action === 'CLEAR_SELECTION') {
-    clearTimeout(_selectionDebounce)
-    window.getSelection()?.removeAllRanges()
-    sendResponse({ ok: true })
-  }
-  if (msg.type === 'TOGGLE_FLOATING_PANEL') {
-    toggleFloatingPanel()
-    sendResponse({ ok: true, open: !!_floatingPanel })
-  }
-  if (msg.type === '__PING__')   sendResponse({ ok: true, active: _active })
-  if (msg.action === 'FETCH_DOC_EXPORT') {
-    console.log('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
-    forceFetchExport(msg.docId, msg.format)
-      .then(data => sendResponse(data))
-      .catch(err => sendResponse({ error: err.message }));
-    return true; // Tells Chrome we will send the response asynchronously
-  }
-  if (msg.action === 'GET_TITLE') {
-    sendResponse({ title: getDocsTitle() });
-  }
-
-  if (msg.action === 'APPLY_SUGGESTION') {
-    insertTextIntoDocs(msg.text)
-      .then(() => sendResponse({ status: "success" }))
-      .catch(err => sendResponse({ status: "error", message: err.message }));
-    return true; // Tells Chrome we will send the response asynchronously
-  }
-
-  if (msg.action === 'GET_EDITOR_TEXT') {
-    const paras = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
-    const text = paras.map(p => p.textContent).join('\n');
-    // Try to locate cursor position by paragraph
-    const cursorEl = document.querySelector('.kix-cursor');
-    let cursorIndex = text.length;
-    if (cursorEl) {
-      const cursorPara = cursorEl.closest('.kix-paragraphrenderer');
-      if (cursorPara) {
-        let offset = 0;
-        for (const para of paras) {
-          if (para === cursorPara) break;
-          offset += para.textContent.length + 1;
-        }
-        cursorIndex = offset;
-      }
+  try {
+    if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
+    if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
+    if (msg.action === 'CLEAR_SELECTION') {
+      clearTimeout(_selectionDebounce)
+      window.getSelection()?.removeAllRanges()
+      sendResponse({ ok: true })
     }
-    sendResponse({ text, cursorIndex });
-  }
+    if (msg.type === 'TOGGLE_FLOATING_PANEL') {
+      toggleFloatingPanel()
+      sendResponse({ ok: true, open: !!_floatingPanel })
+    }
+    if (msg.type === '__PING__')   sendResponse({ ok: true, active: _active })
+    if (msg.action === 'FETCH_DOC_EXPORT') {
+      console.log('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
+      forceFetchExport(msg.docId, msg.format)
+        .then(data => sendResponse(data))
+        .catch(err => sendResponse({ error: err.message }));
+      return true; // Tells Chrome we will send the response asynchronously
+    }
+    if (msg.action === 'GET_TITLE') {
+      sendResponse({ title: getDocsTitle() });
+    }
 
-  if (msg.action === 'FORCE_SCAN') {
-    clearTimeout(_baselineTimer);
-    updateRollingBaseline(sendResponse);
-    return true; // async response
-  }
+    if (msg.action === 'APPLY_SUGGESTION') {
+      insertTextIntoDocs(msg.text)
+        .then(() => sendResponse({ status: "success" }))
+        .catch(err => sendResponse({ status: "error", message: err.message }));
+      return true; // Tells Chrome we will send the response asynchronously
+    }
 
-  if (msg.action === 'GET_SNAPSHOT_AGE') {
-    sendResponse({ ok: true, ageMs: _lastSnapshotTime ? Date.now() - _lastSnapshotTime : Infinity });
+    if (msg.action === 'GET_EDITOR_TEXT') {
+      const paras = Array.from(document.querySelectorAll('.kix-paragraphrenderer'));
+      const text = paras.map(p => p.textContent).join('\n');
+      // Try to locate cursor position by paragraph
+      const cursorEl = document.querySelector('.kix-cursor');
+      let cursorIndex = text.length;
+      if (cursorEl) {
+        const cursorPara = cursorEl.closest('.kix-paragraphrenderer');
+        if (cursorPara) {
+          let offset = 0;
+          for (const para of paras) {
+            if (para === cursorPara) break;
+            offset += para.textContent.length + 1;
+          }
+          cursorIndex = offset;
+        }
+      }
+      sendResponse({ text, cursorIndex });
+    }
+
+    if (msg.action === 'FORCE_SCAN') {
+      clearTimeout(_baselineTimer);
+      updateRollingBaseline(sendResponse);
+      return true; // async response
+    }
+
+    if (msg.action === 'GET_SNAPSHOT_AGE') {
+      sendResponse({ ok: true, ageMs: _lastSnapshotTime ? Date.now() - _lastSnapshotTime : Infinity });
+    }
+  } catch (err) {
+    if (err.message?.includes('Extension context invalidated')) {
+      console.warn('[Colophon] Extension context invalidated — ignoring message:', msg.action || msg.type);
+    } else {
+      console.error('[Colophon] Error handling message:', err);
+    }
   }
 })
 

@@ -722,46 +722,20 @@ body {
 }
 .gemini-card { border-left-color: var(--gemini-color) !important; }
 
-/* ── Doc context row (indicator + scan button) ─────────────── */
+/* ── Doc context row ─────────────── */
 .doc-context-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 3px 0 6px;
 }
 
 #doc-context-indicator {
-  flex: 1;
   font-size: 0.72rem;
   opacity: 0.7;
   color: var(--text-secondary);
 }
 
-#scan-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  padding: 2px;
-  border-radius: 4px;
-  transition: color 0.2s, transform 0.4s;
-}
-#scan-btn svg { width: 14px; height: 14px; }
-#scan-btn:hover { color: var(--user-color); }
-#scan-btn.scanning svg { animation: spin 0.8s linear infinite; }
-
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
-}
-
-#last-scan-label {
-  font-size: 0.67rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  opacity: 0.7;
 }
 
 /* ── At-a-glance status header ─────────────── */
@@ -998,3 +972,114 @@ body {
 }
 
 .footer-left #scanning-label { opacity: 0.7; }
+
+/* ── Scan button in footer ─────────────── */
+#scan-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 4px;
+  transition: color 0.2s;
+  margin-left: 2px;
+}
+#scan-btn svg { width: 13px; height: 13px; }
+#scan-btn:hover { color: var(--user-color); }
+#scan-btn.scanning svg { animation: spin 0.8s linear infinite; }
+
+#last-scan-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+/* ── Compact event cards ─────────────── */
+.timeline-event-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.timeline-event-compact:last-child { border-bottom: none; }
+
+.ecc-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ecc-icon svg { width: 15px; height: 15px; }
+
+.ecc-user  { background: var(--user-bg);  color: var(--user-color); }
+.ecc-ai    { background: var(--ai-bg);    color: var(--ai-color); }
+.ecc-gemini { background: var(--gemini-bg, #e8f0fe); color: var(--gemini-color, #1a73e8); }
+.ecc-warn  { background: #fff8e1; color: #b45309; }
+
+.ecc-body {
+  flex: 1;
+  min-width: 0;
+}
+.ecc-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ecc-meta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecc-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ecc-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ecc-btn:hover {
+  border-color: var(--ai-color);
+  color: var(--ai-color);
+}
+
+.ecc-check {
+  color: var(--user-color);
+  display: flex;
+  align-items: center;
+}
+.ecc-check svg { width: 16px; height: 16px; }
+
+/* ── Quick action hint banner ─────────────── */
+.qa-hint {
+  display: none;
+  padding: 6px 20px;
+  font-size: 0.75rem;
+  color: #7a5500;
+  background: #fff8e1;
+  border-top: 1px solid #f0d060;
+}
