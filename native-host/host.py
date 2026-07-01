@@ -30,6 +30,8 @@ import urllib.error
 import threading
 import subprocess
 import time
+import socket
+import tempfile
 from pathlib import Path
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -198,12 +200,26 @@ def handle_launch_model():
         "--nobrowser",
     ]
 
+    # Check if the port is already occupied before launching
+    try:
+        with socket.create_connection(("127.0.0.1", SERVER_PORT), timeout=0.5):
+            send({"action": "ERROR", "message": f"Port {SERVER_PORT} is already in use. Another process may be occupying it."})
+            return
+    except (ConnectionRefusedError, OSError):
+        pass  # Port is free — good
+
+    stderr_log = COLOPHON_DIR / "llamafile-stderr.log"
+    try:
+        stderr_file = open(stderr_log, "w")
+    except OSError:
+        stderr_file = subprocess.DEVNULL
+
     try:
         _llamafile_proc = subprocess.Popen(
             cmd,
             creationflags=creation_flags,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_file,
         )
     except Exception as exc:
         send({"action": "ERROR", "message": f"Failed to start llamafile: {exc}"})
@@ -214,7 +230,15 @@ def handle_launch_model():
     for _ in range(30):
         time.sleep(1)
         if _llamafile_proc.poll() is not None:
-            send({"action": "ERROR", "message": "llamafile exited unexpectedly on startup."})
+            # Read last 400 chars of stderr for a useful error message
+            try:
+                if hasattr(stderr_file, 'flush'):
+                    stderr_file.flush()
+                tail = stderr_log.read_text(errors='replace')[-400:].strip() if stderr_log.exists() else ""
+            except Exception:
+                tail = ""
+            detail = tail if tail else "No output captured."
+            send({"action": "ERROR", "message": f"llamafile exited unexpectedly.\n{detail}"})
             return
         try:
             urllib.request.urlopen(health_url, timeout=2)

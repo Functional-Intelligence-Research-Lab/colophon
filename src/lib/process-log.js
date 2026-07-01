@@ -187,57 +187,83 @@ export class ProcessLog {
     
 
     /**
-     * loads EPUB file into memory from google docs
-     * and extracts text content from xhtml file located in EPUB file
-     * @returns {<String>} Content of main xhtml file located in EPUB file.
+     * Replaces relative image src attributes in XHTML with base64 data URIs
+     * extracted from the EPUB zip, so images survive in the TWFF container.
+     */
+    async _inlineEpubImages(xhtmlString, loadedEpub, xhtmlFolder) {
+        const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml' };
+        const imgRe = /(<img[^>]*?src=")([^"]+)(")/gi;
+        const replacements = [];
+        let match;
+        while ((match = imgRe.exec(xhtmlString)) !== null) {
+            replacements.push({ full: match[0], prefix: match[1], src: match[2], suffix: match[3], index: match.index });
+        }
+        if (!replacements.length) return xhtmlString;
+
+        // Build filename→zipKey lookup
+        const fileMap = {};
+        Object.keys(loadedEpub.files).forEach(k => { fileMap[k.split('/').pop()] = k; });
+
+        let result = xhtmlString;
+        for (const rep of replacements.reverse()) {
+            const src = rep.src;
+            if (src.startsWith('data:') || src.startsWith('http')) continue;
+            // Resolve relative path
+            let resolved = src.startsWith('/') ? src.slice(1) : xhtmlFolder + src;
+            const parts = resolved.split('/');
+            const norm = [];
+            for (const p of parts) { if (p === '..') norm.pop(); else if (p && p !== '.') norm.push(p); }
+            resolved = norm.join('/');
+            const zipKey = loadedEpub.files[resolved] ? resolved : fileMap[src.split('/').pop()];
+            if (!zipKey || loadedEpub.files[zipKey].dir) continue;
+            try {
+                const ext = (zipKey.split('.').pop() || '').toLowerCase();
+                const mime = MIME[ext] || 'image/png';
+                const b64 = await loadedEpub.files[zipKey].async('base64');
+                const dataUri = `data:${mime};base64,${b64}`;
+                result = result.slice(0, rep.index) + rep.prefix + dataUri + rep.suffix + result.slice(rep.index + rep.full.length);
+            } catch { /* skip unreadable image */ }
+        }
+        return result;
+    }
+
+    /**
+     * Loads EPUB file from Google Docs and extracts the main XHTML content.
+     * Images are inlined as base64 data URIs so they survive in the TWFF container.
+     * @returns {Promise<string>} XHTML string with inlined images.
      */
     async getXhtmlContentEpub(){
-        // Gets the URL from the currently active Chrome tab
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab || !tab.url) throw new Error("Could not find active tab.");
 
-        // Gets the Document ID
         const docIdMatch = tab.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
         if (!docIdMatch) throw new Error("Not a valid Google Doc URL");
         const docId = docIdMatch[1];
 
-        // Fetch the EPUB version directly from Google's API
         const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=epub`;
         const response = await fetch(exportUrl);
         const epubBlob = await response.blob();
 
-        //  Unzips the EPUB in memory
         const zip = new JSZip();
         const loadedEpub = await zip.loadAsync(epubBlob);
 
-        //  Find the actual XHTML content file inside the EPUB
-       //   by trying to read the EPUB's official map
         try {
-            // Find the .opf file (the brain of the EPUB)
             const opfKey = Object.keys(loadedEpub.files).find(k => k.endsWith('.opf'));
             if (opfKey) {
                 const opfContent = await loadedEpub.files[opfKey].async("string");
-                
-                // Find the <spine> (the official reading order) using regex
                 const spineMatch = opfContent.match(/<spine[^>]*>([\s\S]*?)<\/spine>/i);
                 if (spineMatch) {
-                    // Get all the chapter IDs in order
                     const idRefs = [...spineMatch[1].matchAll(/<itemref[^>]+idref="([^"]+)"/gi)].map(m => m[1]);
-                    
-                    // Skip the title page if it exists and grab the first actual content ID.
                     const targetId = (idRefs.length > 1 && idRefs[0].includes('titlepage')) ? idRefs[1] : idRefs[0];
-
-                    // Looks up the actual filename for that ID
                     const itemRegex = new RegExp(`<item[^>]+id="${targetId}"[^>]+href="([^"]+)"`, "i");
                     const itemMatch = opfContent.match(itemRegex);
-                    
                     if (itemMatch) {
                         const opfFolder = opfKey.includes('/') ? opfKey.substring(0, opfKey.lastIndexOf('/') + 1) : "";
                         const targetFilePath = opfFolder + itemMatch[1];
-                        
-                        // If found perfectly, return it immediately!
                         if (loadedEpub.files[targetFilePath]) {
-                            return await loadedEpub.files[targetFilePath].async("string");
+                            const xhtmlFolder = targetFilePath.includes('/') ? targetFilePath.substring(0, targetFilePath.lastIndexOf('/') + 1) : "";
+                            const raw = await loadedEpub.files[targetFilePath].async("string");
+                            return await this._inlineEpubImages(raw, loadedEpub, xhtmlFolder);
                         }
                     }
                 }
@@ -247,30 +273,22 @@ export class ProcessLog {
         }
 
         // SAFETY NET: FALLBACK TO LARGEST FILE
-        // If Google Docs changes their EPUB format and breaks the map reader above, 
         const xhtmlFileKeys = Object.keys(loadedEpub.files).filter(fileName => {
-            return (fileName.endsWith('.xhtml') || fileName.endsWith('.html')) 
+            return (fileName.endsWith('.xhtml') || fileName.endsWith('.html'))
                    && !loadedEpub.files[fileName].dir;
         });
-        
-        if (xhtmlFileKeys.length === 0) {
-            throw new Error("Could not find any XHTML files inside the EPUB.");
-        }
-        
-        let mainContent = "";
+        if (xhtmlFileKeys.length === 0) throw new Error("Could not find any XHTML files inside the EPUB.");
+
+        let mainContent = "", mainKey = "";
         for (const key of xhtmlFileKeys) {
-            const content = await loadedEpub.files[key].async("string");
+            const c = await loadedEpub.files[key].async("string");
             if (key.includes('nav.xhtml')) continue;
-            if (content.length > mainContent.length) {
-                mainContent = content;
-            }
+            if (c.length > mainContent.length) { mainContent = c; mainKey = key; }
         }
+        if (!mainContent) throw new Error("Failed to extract the main essay text.");
 
-        if (!mainContent) {
-            throw new Error("Failed to extract the main essay text.");
-        }
-
-        return mainContent;
+        const xhtmlFolder = mainKey.includes('/') ? mainKey.substring(0, mainKey.lastIndexOf('/') + 1) : "";
+        return await this._inlineEpubImages(mainContent, loadedEpub, xhtmlFolder);
     }
 
     /**
