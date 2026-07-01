@@ -6,34 +6,6 @@
  * 'heuristic_suggestion' events in the timeline.
  */
 
-// ── Readability (Flesch-Kincaid Reading Ease) ──────────────────────────────────
-
-function syllableCount(word) {
-  word = word.toLowerCase().replace(/[^a-z]/g, '');
-  if (!word) return 0;
-  const groups = word.match(/[aeiouy]+/g);
-  let n = groups ? groups.length : 1;
-  if (word.length > 2 && word.endsWith('e')) n = Math.max(1, n - 1);
-  return Math.max(1, n);
-}
-
-function fleschReadingEase(text) {
-  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 3);
-  const words = text.match(/\b[a-zA-Z']+\b/g) ?? [];
-  if (sentences.length === 0 || words.length < 10) return null;
-  const sylls = words.reduce((n, w) => n + syllableCount(w), 0);
-  return 206.835
-    - 1.015  * (words.length / sentences.length)
-    - 84.6   * (sylls / words.length);
-}
-
-function readabilityLabel(score) {
-  if (score >= 70) return null; // Standard or easier — no tip needed
-  if (score >= 50) return `Readability score: ${score.toFixed(0)}/100 (fairly difficult). Consider using shorter sentences and simpler words.`;
-  if (score >= 30) return `Readability score: ${score.toFixed(0)}/100 (difficult). Your writing may be hard to follow — aim for shorter sentences.`;
-  return `Readability score: ${score.toFixed(0)}/100 (very difficult). Most readers will struggle with this text. Try breaking it into simpler sentences.`;
-}
-
 // ── Sentence-level helpers ─────────────────────────────────────────────────────
 
 const PASSIVE_RE = /\b(was|were|is|are|be|been|being)\s+\w+ed\b/gi;
@@ -81,16 +53,9 @@ export function analyzeText(text) {
   const add = (rule, tipText, excerpt = '') => {
     if (!seen.has(tipText)) {
       seen.add(tipText);
-      suggestions.push({ rule, text: tipText, excerpt: excerpt.trim().slice(0, 100) });
+      suggestions.push({ rule, text: tipText, excerpt: excerpt.trim().slice(0, 150) });
     }
   };
-
-  // ── 1. Readability score (whole document) ──────────────────────────────────
-  const score = fleschReadingEase(text);
-  if (score !== null) {
-    const label = readabilityLabel(score);
-    if (label) add('readability', label, '');
-  }
 
   // ── 2. Adverb overuse (whole document) ────────────────────────────────────
   const advRatio = adverbRatio(text);
@@ -107,7 +72,7 @@ export function analyzeText(text) {
 
     const paraWords = trimmed.split(/\s+/);
 
-    // 3. Long paragraph
+    // 1. Long paragraph
     if (paraWords.length > 350) {
       add(
         'long_paragraph',

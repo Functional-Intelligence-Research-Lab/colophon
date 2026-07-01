@@ -154,10 +154,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     activeTabId = tab.id;
     
     try {
-      const response = await chrome.tabs.sendMessage(activeTabId, { action: 'GET_TITLE' });
-      if (response && response.title) {
-        document.querySelector('.context-card h3').textContent = response.title;
-      }
+      await chrome.tabs.sendMessage(activeTabId, { action: 'GET_TITLE' });
     } catch (msgErr) {
       console.warn("Colophon: Content script not ready. (Are you on a Google Doc?)");
     }
@@ -166,14 +163,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Assignment Prompt Editable Logic
-  const promptElement = document.querySelector('.context-card p');
+  const promptElement = document.getElementById('assignment-brief-text');
   if (promptElement) {
     promptElement.setAttribute('contenteditable', 'true');
-    promptElement.style.outline = 'none'; 
+    promptElement.style.outline = 'none';
     promptElement.style.cursor = 'text';
 
     const autoSavePrompt = debounce((newPromptText) => {
-      promptElement.style.opacity = '0.6'; 
+      promptElement.style.opacity = '0.6';
       chrome.runtime.sendMessage({
         action: 'UPDATE_METADATA',
         payload: { key: 'assignment_prompt', value: newPromptText }
@@ -185,7 +182,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           promptElement.style.color = "var(--text-secondary)";
         }
       });
-    }, 800); 
+    }, 800);
 
     promptElement.addEventListener('input', (e) => {
       _assignmentPrompt = e.target.textContent.trim();
@@ -197,27 +194,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const scanBtn = document.getElementById('scan-btn');
   if (scanBtn) scanBtn.addEventListener('click', _triggerManualScan);
 
-  // Wire the export button
-  const exportBtn = document.getElementById('export-btn');
-  if (exportBtn) {
-    exportBtn.addEventListener('click', async () => {
-      exportBtn.disabled = true;
-      try {
-        const result = await chrome.runtime.sendMessage({ action: 'EXPORT' });
-        if (result?.base64 && result?.filename) {
-          const blob = await (await fetch(`data:application/octet-stream;base64,${result.base64}`)).blob();
-          const url = URL.createObjectURL(blob);
-          chrome.downloads.download({ url, filename: result.filename, saveAs: true }, () => {
-            setTimeout(() => URL.revokeObjectURL(url), 60_000);
-          });
-        }
-      } catch (e) {
-        ModelStatus._onError(`Export failed: ${e.message}`);
-      } finally {
-        exportBtn.disabled = false;
-      }
-    });
-  }
+  // Export button is temporarily disabled (PDF export coming soon)
   // Refresh the "last scan" label every 30 seconds
   _scanLabelInterval = setInterval(_updateScanLabel, 30_000);
   // Seed last scan time and doc context from session metadata if available
@@ -281,8 +258,9 @@ function updateStatusHeader(pendingCount = null) {
 
 // ── Suggestions Manager ───────────────────────────────────────────────────────
 const SuggestionsManager = {
-  _queue: [],   // array of { event, index } for unaddressed heuristic suggestions
-  _pointer: 0,  // which queue item is shown
+  _queue: [],         // array of { event, key } for unaddressed heuristic suggestions
+  _pointer: 0,        // which queue item is shown
+  _dismissedKeys: new Set(), // rule::excerpt keys the user explicitly dismissed
 
   _TAG_MAP: {
     readability:        '✦ Coherence',
@@ -318,9 +296,11 @@ const SuggestionsManager = {
   },
 
   push(event) {
-    // Avoid duplicates by timestamp
-    if (!this._queue.find(q => q.event.timestamp === event.timestamp)) {
-      this._queue.push({ event });
+    // Dedup by (rule, excerpt prefix) — prevents same issue firing every scan
+    const key = `${event.meta?.rule}::${(event.meta?.excerpt || '').slice(0, 60)}`;
+    if (this._dismissedKeys.has(key)) return;
+    if (!this._queue.find(q => q.key === key)) {
+      this._queue.push({ event, key });
       this._render();
       updateStatusHeader();
     }
@@ -329,6 +309,7 @@ const SuggestionsManager = {
   _dismiss() {
     if (!this._queue.length) return;
     const item = this._queue[this._pointer];
+    this._dismissedKeys.add(item.key);
     // Mark dismissed in service worker
     chrome.runtime.sendMessage({
       action: 'UPDATE_EVENT_STATE',
@@ -371,12 +352,13 @@ const SuggestionsManager = {
     const message = event.meta?.text || '';
     const excerpt = event.meta?.excerpt || '';
 
+    const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     card.innerHTML = `
       <div class="suggestion-card-new">
         <span class="suggestion-tag">${tag}</span>
-        <p>${message}</p>
-        ${excerpt ? `<div class="suggestion-context">"${excerpt.slice(0, 100)}"</div>` : ''}
-        ${excerpt ? `<div class="suggestion-preview-text">${excerpt}</div>` : ''}
+        <p>${_esc(message)}</p>
+        ${excerpt ? `<div class="suggestion-context">&ldquo;${_esc(excerpt.slice(0, 100))}&rdquo;</div>` : ''}
+        ${excerpt ? `<div class="suggestion-preview-text">${_esc(excerpt)}</div>` : ''}
         <div class="suggestion-actions">
           ${excerpt ? `<a href="#" class="btn-preview">Preview</a>` : ''}
           <button class="btn-apply">Apply</button>
@@ -392,23 +374,14 @@ const TimelineRenderer = {
   container: document.getElementById('timeline-container'),
   renderedTimestamps: new Set(),
   sessionStartTime: null,
-  _showAll: false,
   // Tracks grouped edit cards: key=groupKey, value=domNode
   _editGroups: new Map(),
 
   init() {
-    // "See all" toggle
+    // "See all" opens the viewer page in a new tab with live session data
     document.getElementById('see-all-events-btn')?.addEventListener('click', () => {
-      this._showAll = !this._showAll;
-      const btn = document.getElementById('see-all-events-btn');
-      if (btn) btn.textContent = this._showAll ? 'Collapse' : 'See all';
-      // Re-render from scratch
-      this.container.innerHTML = '';
-      this.renderedTimestamps = new Set();
-      this._editGroups = new Map();
-      chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
-        if (res?.session?.events) this.render(res.session.events);
-      });
+      const viewerUrl = chrome.runtime.getURL('viewer/viewer.html') + '?live=1';
+      chrome.tabs.create({ url: viewerUrl });
     });
 
     chrome.runtime.sendMessage({ action: 'GET_STATE' }, (response) => {
@@ -418,30 +391,11 @@ const TimelineRenderer = {
       }
       if (response?.session?.events) {
         this.render(response.session.events);
-
-        // ── TEMPORARY MOCK DATA FOR TEAM TESTING ──
-        if (response.session.events.length === 1 && response.session.events[0].type === 'session_start') {
-          const now = Date.now();
-          const mockSuggestion = {
-            timestamp: new Date(now + 1000).toISOString(), 
-            type: "ai_suggestion",
-            meta: {
-              text: "This paragraph is quite long and might lose the reader's attention. I suggest breaking it into two distinct points: first discussing the environmental impact, and then transitioning into the economic benefits in a new paragraph."
-            }
-          };
-
-          this.render([mockSuggestion]);
-
-          chrome.runtime.sendMessage({
-            action: 'LOG_EVENT',
-            payload: mockSuggestion
-          });
-        }
-        // ──────────────────────────────────────────
       }
       if (response?.session?.metadata?.assignment_prompt) {
         _assignmentPrompt = response.session.metadata.assignment_prompt;
-        document.querySelector('.context-card p').textContent = _assignmentPrompt;
+        const brief = document.getElementById('assignment-brief-text');
+        if (brief) brief.textContent = _assignmentPrompt;
       }
     });
 
@@ -516,8 +470,8 @@ const TimelineRenderer = {
         return;
       }
 
-      // In compact mode, skip individual edit events (they'll be shown as grouped card)
-      if (!this._showAll && evt.type === 'edit') return;
+      // Skip individual edit events — shown as grouped card below
+      if (evt.type === 'edit') return;
 
       // In compact mode, heuristic suggestions show as compact cards (also in suggestions section)
 
@@ -529,8 +483,8 @@ const TimelineRenderer = {
       }
     });
 
-    // Render grouped edit summary in compact mode
-    if (!this._showAll) {
+    // Render grouped edit summary
+    {
       editRuns.forEach(run => {
         const groupKey = run.events[0].timestamp;
         if (this._editGroups.has(groupKey)) {
@@ -555,6 +509,11 @@ const TimelineRenderer = {
           this._editGroups.set(groupKey, el);
         }
       });
+
+      // Show only the last 4 cards in compact mode
+      const cards = [...this.container.children];
+      const cutoff = Math.max(0, cards.length - 4);
+      cards.forEach((c, i) => { c.style.display = i < cutoff ? 'none' : ''; });
     }
   },
 
@@ -654,9 +613,9 @@ const TimelineRenderer = {
 
   // ── Event Router ──
   buildEventCard(evt, totalEventsCount) {
-    // In compact mode, use clean icon cards for key event types
+    // Use compact icon cards for key event types
     const COMPACT_TYPES = ['paste', 'ai_interaction', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
-    if (!this._showAll && COMPACT_TYPES.includes(evt.type)) {
+    if (COMPACT_TYPES.includes(evt.type)) {
       return this._buildCompactCard(evt);
     }
 
@@ -1197,6 +1156,7 @@ async function scoreAcceptance(eventTimestamp, suggestionText, tabId) {
 const ChatInput = {
   // Port stored when ModelStatus receives LAUNCHED
   _endpoint: 'http://127.0.0.1:8080',
+  _lastInput: '', // saved for retry
 
   init() {
     const input = document.querySelector('.input-box input');
@@ -1227,6 +1187,7 @@ const ChatInput = {
   async _submit(input, sendBtn) {
     const text = input.value.trim();
     if (!text) return;
+    this._lastInput = text;
 
     input.value = '';
     input.disabled = true;
@@ -1280,12 +1241,38 @@ const ChatInput = {
       if (existing) existing.remove();
       TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
 
-      const errMsg = err.name === 'AbortError'
-        ? 'Request timed out. Is the local AI running?'
-        : `AI error: ${err.message}`;
+      const isTimeout = err.name === 'AbortError';
+      const isNetworkErr = err instanceof TypeError && (
+        err.message.includes('fetch') || err.message.includes('network') || err.message.includes('connect')
+      );
+      const errMeta = (isTimeout || isNetworkErr)
+        ? { title: 'AI not responding', detail: 'Local model is not running. Start it from the model setup panel.' }
+        : { title: 'AI error', detail: err.message };
 
-      // Show error as a brief banner flash
-      ModelStatus._onError(errMsg);
+      // Show a dismissable inline error card in the timeline
+      const errTs = new Date().toISOString();
+      const errCard = document.createElement('div');
+      errCard.className = 'timeline-event-compact ecc-error-card';
+      errCard.dataset.timestamp = errTs;
+      errCard.innerHTML = `
+        <div class="ecc-icon ecc-warn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div class="ecc-body">
+          <div class="ecc-title">${errMeta.title}</div>
+          <div class="ecc-meta">${errMeta.detail}</div>
+        </div>
+        <div class="ecc-action" style="gap:4px;display:flex;">
+          ${(isTimeout || isNetworkErr) ? '<button class="ecc-btn ecc-btn-retry-ai">Retry</button>' : ''}
+          <button class="ecc-btn-close-err" title="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;">✕</button>
+        </div>
+      `;
+      errCard.querySelector('.ecc-btn-close-err')?.addEventListener('click', () => errCard.remove());
+      errCard.querySelector('.ecc-btn-retry-ai')?.addEventListener('click', () => {
+        errCard.remove();
+        if (this._lastInput) this._submitText(this._lastInput);
+      });
+      TimelineRenderer.container.appendChild(errCard);
     } finally {
       input.disabled = false;
       sendBtn.disabled = false;
@@ -1359,7 +1346,7 @@ const ModelStatus = {
 
     const configs = {
       setup: {
-        text: 'Local AI needs one-time setup.',
+        text: 'Local AI needs one-time setup. Requires Python 3.8+ installed on your system.',
         actionLabel: 'Download setup file',
         actionFn: () => this._downloadSetup(),
       },
@@ -1438,7 +1425,16 @@ const ModelStatus = {
 
   _onError(message) {
     if (this.bannerEl) {
-      this.bannerEl.innerHTML = `<span class="banner-text error">Error: ${message}</span>`;
+      // Truncate long messages (e.g. llamafile stderr dumps) to keep banner readable
+      const display = message.length > 200 ? message.slice(0, 200) + '…' : message;
+      this.bannerEl.style.display = 'flex';
+      this.bannerEl.innerHTML = `
+        <span class="banner-text error" style="white-space:pre-wrap;font-size:0.75rem;">${display}</span>
+        <button class="banner-btn" style="flex-shrink:0;align-self:flex-start;" id="err-retry-btn">Retry</button>
+      `;
+      this.bannerEl.querySelector('#err-retry-btn')?.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }).catch(() => {});
+      });
     }
     this._setFooter('disconnected', 'AI error');
   },
@@ -1606,25 +1602,65 @@ function _showQuickActionHint(msg) {
 
 // ── Quick Actions Bar ──────────────────────────────────────────────────────────
 const QuickActions = {
-  _pendingType: null, // 'paraphrase' | 'improve'
+  _pendingType: null,       // 'paraphrase' | 'improve'
+  _paraphraseCardOpen: false,
 
   init() {
-    document.getElementById('qa-paraphrase')?.addEventListener('click', () => this._run('paraphrase'));
+    document.getElementById('qa-paraphrase')?.addEventListener('click', () => this._openParaphraseCard());
     document.getElementById('qa-improve')?.addEventListener('click', () => this._run('improve'));
     document.getElementById('qa-grammar')?.addEventListener('click', () => this._runGrammar());
-    // qa-citation is disabled — no handler needed
+
+    // Paraphrase card wiring
+    document.getElementById('btn-paraphrase-dismiss')?.addEventListener('click', () => this._closeParaphraseCard());
+    document.getElementById('btn-paraphrase-submit')?.addEventListener('click', () => this._submitParaphrase());
+    document.getElementById('paraphrase-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this._submitParaphrase();
+    });
   },
 
   _getSelectedText() {
     return _docContext?.selectedText?.trim() || SelectionContext._state?.text?.trim() || '';
   },
 
+  _openParaphraseCard() {
+    const card = document.getElementById('paraphrase-card');
+    if (!card) return;
+    if (this._paraphraseCardOpen) {
+      // Already open — just focus the textarea
+      document.getElementById('paraphrase-input')?.focus();
+      return;
+    }
+    this._paraphraseCardOpen = true;
+    card.hidden = false;
+    const textarea = document.getElementById('paraphrase-input');
+    if (textarea) {
+      const sel = this._getSelectedText();
+      textarea.value = sel;
+      textarea.focus();
+    }
+  },
+
+  _closeParaphraseCard() {
+    const card = document.getElementById('paraphrase-card');
+    if (card) card.hidden = true;
+    const textarea = document.getElementById('paraphrase-input');
+    if (textarea) textarea.value = '';
+    this._paraphraseCardOpen = false;
+  },
+
+  _submitParaphrase() {
+    const textarea = document.getElementById('paraphrase-input');
+    const text = textarea?.value?.trim();
+    if (!text) return;
+    this._pendingType = 'paraphrase';
+    ChatInput._submitText(`Paraphrase this, keeping the same meaning:\n\n${text}`);
+    this._closeParaphraseCard();
+  },
+
   async _run(type) {
     const sel = this._getSelectedText();
-    const label = type === 'paraphrase' ? 'Paraphrase' : 'Improve';
-    const verb = type === 'paraphrase'
-      ? 'Paraphrase this, keeping the same meaning'
-      : 'Improve this text for clarity and flow';
+    const label = 'Improve';
+    const verb = 'Improve this text for clarity and flow';
 
     if (sel) {
       this._pendingType = type;
