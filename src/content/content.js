@@ -1135,6 +1135,7 @@ function findGeminiActionButton(actionType) {
 async function insertTextIntoDocs(textToInsert) {
   try {
     let targetElement = null;
+    let targetFrame = null;
 
     const frames = [
       ...document.querySelectorAll('.docs-texteventtarget-iframe'),
@@ -1144,7 +1145,8 @@ async function insertTextIntoDocs(textToInsert) {
     for (const frame of frames) {
       const doc = frame.contentDocument || frame.contentWindow?.document;
       if (doc) {
-        targetElement = doc.activeElement || doc.body;
+        targetElement = doc.body;
+        targetFrame = frame;
         break;
       }
     }
@@ -1153,7 +1155,11 @@ async function insertTextIntoDocs(textToInsert) {
       throw new Error("Could not find Google Docs input element to paste into.");
     }
 
+    targetFrame.contentWindow.focus();
     targetElement.focus();
+
+    // 50 ms for the browser to settle focus before dispatching the paste event.
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const dataTransfer = new DataTransfer();
     dataTransfer.setData('text/plain', textToInsert);

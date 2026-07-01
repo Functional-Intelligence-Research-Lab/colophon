@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     activeTabId = tab.id;
-    
+
     try {
       await chrome.tabs.sendMessage(activeTabId, { action: 'GET_TITLE' });
     } catch (msgErr) {
@@ -621,10 +621,10 @@ const TimelineRenderer = {
 
     const timeAgo = this.formatTime(evt.timestamp);
     const wrapper = document.createElement('div');
-    
+
     wrapper.dataset.timestamp = evt.timestamp;
 
-    let typeClass = 'user'; 
+    let typeClass = 'user';
     let authorLabel = '';
     let contentHTML = '';
     let nodeHTML = `
@@ -637,19 +637,19 @@ const TimelineRenderer = {
     if (evt.type === 'session_start') {
       this.sessionStartTime = new Date(evt.timestamp);
       authorLabel = 'You • Session started';
-      
+
       const durationMs = Date.now() - this.sessionStartTime.getTime();
       const mins = Math.floor(durationMs / 60000);
       const durationStr = mins > 0 ? `${mins}m` : `< 1m`;
-      
+
       contentHTML = `<div class="text-only">${timeAgo} – Duration: ${durationStr}</div>`;
     }
-    
+
     else if (evt.type === 'edit') {
       authorLabel = 'You • Edited';
       contentHTML = `<div class="text-only">${evt.meta.char_delta || 0} characters</div>`;
     }
-    
+
     else if (evt.type === 'paste') {
       authorLabel = 'You • Pasted';
       const sourceLabel = evt.meta.source === 'internal' ? 'within doc' : 'external';
@@ -665,7 +665,7 @@ const TimelineRenderer = {
         }
       }
     }
-    
+
     else if (evt.type === 'heuristic_suggestion') {
       typeClass = 'ai';
       authorLabel = '✦ Writing tip';
@@ -698,24 +698,25 @@ const TimelineRenderer = {
         <div class="card suggestion-card" data-gemini="${isGemini}">
           <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
           <div class="actions">
-            <button class="btn-use"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg> ${isGemini ? 'Accept' : 'Use'}</button>
+            <button class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
+            ${!isGemini ? '<button class="btn-copy-ai">Copy</button>' : ''}
             <button class="btn-dismiss">Dismiss</button>
           </div>
         </div>
       `;
     }
-    
+
     else if (evt.type === 'ai_interaction') {
       const isAccepted = evt.meta.acceptance === 'fully_accepted';
-      
+
       if (isAccepted) {
         typeClass = 'user-action';
         authorLabel = 'You • Accepted';
         nodeHTML = `<div class="node solid"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></div>`;
-        
+
         const beforeText = evt.meta.content_before || "...";
         const afterText = evt.meta.content_after || "...";
-        
+
         contentHTML = `
           <div class="card diff-card">
             <div class="diff-block removed" style="display: none;">
@@ -734,13 +735,13 @@ const TimelineRenderer = {
           </div>
         `;
       } else {
-        typeClass = 'ai'; 
+        typeClass = 'ai';
         authorLabel = 'You • Dismissed';
         const reason = evt.meta.reason || "User dismissed suggestion.";
         contentHTML = `<div class="text-only">${reason}</div>`;
       }
     }
-    
+
     else if (evt.type === 'gemini_suggestion') {
       typeClass = 'gemini';
       authorLabel = 'Gemini • AI insert';
@@ -761,9 +762,9 @@ const TimelineRenderer = {
       nodeHTML = `<div class="node solid"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"/></svg></div>`;
       contentHTML = `<div class="text-only"> ${totalEventsCount} events logged</div>`;
     }
-    
+
     else {
-      return null; 
+      return null;
     }
 
     wrapper.className = `timeline-event ${typeClass}`;
@@ -788,20 +789,20 @@ const TimelineRenderer = {
 
     if (evt.meta.status === 'dismissed') {
       const dismissBtn = node.querySelector('.btn-dismiss');
-      const useBtn = node.querySelector('.btn-use');
+      const insertBtn = node.querySelector('.btn-insert');
       if (dismissBtn) { dismissBtn.innerHTML = "Dismissed"; dismissBtn.disabled = true; }
-      if (useBtn) useBtn.disabled = true;
+      if (insertBtn) insertBtn.disabled = true;
       node.style.opacity = '0.5';
-    } 
+    }
     else if (evt.meta.status === 'used') {
-      const useBtn = node.querySelector('.btn-use');
+      const insertBtn = node.querySelector('.btn-insert');
       const dismissBtn = node.querySelector('.btn-dismiss');
-      if (useBtn) {
-        useBtn.innerHTML = "Inserted ✓";
-        useBtn.style.backgroundColor = "var(--user-color)";
-        useBtn.style.color = "white";
-        useBtn.style.borderColor = "var(--user-color)";
-        useBtn.disabled = true;
+      if (insertBtn) {
+        insertBtn.innerHTML = "Inserted ✓";
+        insertBtn.style.backgroundColor = "var(--user-color)";
+        insertBtn.style.color = "white";
+        insertBtn.style.borderColor = "var(--user-color)";
+        insertBtn.disabled = true;
       }
       if (dismissBtn) dismissBtn.disabled = true;
     }
@@ -814,7 +815,7 @@ const TimelineRenderer = {
   // ── Interactive Event Delegation ──────────────────────────────────────────
   attachClickHandlers() {
     this.container.addEventListener('click', async (e) => {
-      
+
       // ── ADD SOURCE (paste attribution) ──
       if (e.target.classList.contains('btn-add-source')) {
         const btn = e.target;
@@ -868,7 +869,7 @@ const TimelineRenderer = {
         const card = e.target.closest('.diff-card');
         const removedBlock = card.querySelector('.diff-block.removed');
         const arrowBlock = card.querySelector('.diff-arrow');
-        
+
         if (removedBlock.style.display === 'none') {
           removedBlock.style.display = 'flex';
           arrowBlock.style.display = 'flex';
@@ -878,7 +879,7 @@ const TimelineRenderer = {
           arrowBlock.style.display = 'none';
           e.target.textContent = 'View diff';
         }
-        return; 
+        return;
       }
 
       // Expand/Collapse Toggle
@@ -892,7 +893,7 @@ const TimelineRenderer = {
           p.innerHTML = `${p.dataset.fullText} <a href="#" class="expand-toggle" style="color: var(--text-secondary); font-weight: bold; text-decoration: none; margin-left: 4px;">Hide</a>`;
           p.dataset.expanded = "true";
         }
-        return; 
+        return;
       }
 
       // ── DISMISS BUTTON LOGIC ──
@@ -939,8 +940,8 @@ const TimelineRenderer = {
       }
 
 
-      // ── USE BUTTON LOGIC ──
-      const useBtn = e.target.closest('.btn-use');
+      // ── INSERT BUTTON LOGIC ──
+      const useBtn = e.target.closest('.btn-insert');
       if (useBtn) {
         const eventCard = useBtn.closest('.timeline-event');
         const cardTimestamp = eventCard.dataset.timestamp;
@@ -1026,6 +1027,24 @@ const TimelineRenderer = {
         } catch (err) {
           useBtn.innerHTML = 'Failed';
           useBtn.style.borderColor = 'var(--diff-red)';
+        }
+      }
+
+      // ── COPY BUTTON LOGIC ──
+      const copyBtn = e.target.closest('.btn-copy-ai');
+      if (copyBtn) {
+        const eventCard = copyBtn.closest('.timeline-event');
+        const p = eventCard.querySelector('p');
+        let text = p.dataset.fullText || p.textContent;
+        text = text.replace(/Show$|Hide$/, '').replace(/\.\.\.$/,'').trim();
+        try {
+          await navigator.clipboard.writeText(text);
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = 'Copied!';
+          copyBtn.disabled = true;
+          setTimeout(() => { copyBtn.textContent = orig; copyBtn.disabled = false; }, 1800);
+        } catch {
+          copyBtn.textContent = 'Failed';
         }
       }
     });
@@ -1583,38 +1602,44 @@ const SelectionContext = {
   },
 };
 
-// ── Quick action hint banner ───────────────────────────────────────────────────
-let _qaHintTimer = null;
-function _showQuickActionHint(msg) {
-  let hint = document.getElementById('qa-hint');
-  if (!hint) {
-    hint = document.createElement('div');
-    hint.id = 'qa-hint';
-    hint.className = 'qa-hint';
-    const inputContainer = document.querySelector('.input-container');
-    if (inputContainer) inputContainer.before(hint);
-  }
-  hint.textContent = msg;
-  hint.style.display = 'block';
-  clearTimeout(_qaHintTimer);
-  _qaHintTimer = setTimeout(() => { if (hint) hint.style.display = 'none'; }, 5000);
-}
-
 // ── Quick Actions Bar ──────────────────────────────────────────────────────────
 const QuickActions = {
-  _pendingType: null,       // 'paraphrase' | 'improve'
+  _pendingType: null,
   _paraphraseCardOpen: false,
+  _grammarCardOpen: false,
+  _brainstormCardOpen: false,
+  _brainstormFormat: 'paragraph',
 
   init() {
+    // Paraphrase
     document.getElementById('qa-paraphrase')?.addEventListener('click', () => this._openParaphraseCard());
-    document.getElementById('qa-improve')?.addEventListener('click', () => this._run('improve'));
-    document.getElementById('qa-grammar')?.addEventListener('click', () => this._runGrammar());
-
-    // Paraphrase card wiring
     document.getElementById('btn-paraphrase-dismiss')?.addEventListener('click', () => this._closeParaphraseCard());
     document.getElementById('btn-paraphrase-submit')?.addEventListener('click', () => this._submitParaphrase());
     document.getElementById('paraphrase-input')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this._submitParaphrase();
+    });
+
+    // Grammar
+    document.getElementById('qa-grammar')?.addEventListener('click', () => this._openGrammarCard());
+    document.getElementById('btn-grammar-dismiss')?.addEventListener('click', () => this._closeGrammarCard());
+    document.getElementById('btn-grammar-submit')?.addEventListener('click', () => this._submitGrammar());
+    document.getElementById('grammar-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this._submitGrammar();
+    });
+
+    // Brainstorm
+    document.getElementById('qa-brainstorm')?.addEventListener('click', () => this._openBrainstormCard());
+    document.getElementById('btn-brainstorm-dismiss')?.addEventListener('click', () => this._closeBrainstormCard());
+    document.getElementById('btn-brainstorm-submit')?.addEventListener('click', () => this._submitBrainstorm());
+    document.getElementById('brainstorm-input')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this._submitBrainstorm();
+    });
+    document.querySelectorAll('.fmt-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this._brainstormFormat = btn.dataset.fmt;
+      });
     });
   },
 
@@ -1622,81 +1647,99 @@ const QuickActions = {
     return _docContext?.selectedText?.trim() || SelectionContext._state?.text?.trim() || '';
   },
 
+  _closeAllCards() {
+    this._closeParaphraseCard();
+    this._closeGrammarCard();
+    this._closeBrainstormCard();
+  },
+
+  // ── Paraphrase ──
   _openParaphraseCard() {
+    if (this._paraphraseCardOpen) { document.getElementById('paraphrase-input')?.focus(); return; }
+    this._closeAllCards();
     const card = document.getElementById('paraphrase-card');
     if (!card) return;
-    if (this._paraphraseCardOpen) {
-      // Already open — just focus the textarea
-      document.getElementById('paraphrase-input')?.focus();
-      return;
-    }
     this._paraphraseCardOpen = true;
     card.hidden = false;
-    const textarea = document.getElementById('paraphrase-input');
-    if (textarea) {
-      const sel = this._getSelectedText();
-      textarea.value = sel;
-      textarea.focus();
-    }
+    const ta = document.getElementById('paraphrase-input');
+    if (ta) { ta.value = this._getSelectedText(); ta.focus(); }
   },
 
   _closeParaphraseCard() {
     const card = document.getElementById('paraphrase-card');
     if (card) card.hidden = true;
-    const textarea = document.getElementById('paraphrase-input');
-    if (textarea) textarea.value = '';
+    const ta = document.getElementById('paraphrase-input');
+    if (ta) ta.value = '';
     this._paraphraseCardOpen = false;
   },
 
   _submitParaphrase() {
-    const textarea = document.getElementById('paraphrase-input');
-    const text = textarea?.value?.trim();
+    const text = document.getElementById('paraphrase-input')?.value?.trim();
     if (!text) return;
     this._pendingType = 'paraphrase';
     ChatInput._submitText(`Paraphrase this, keeping the same meaning:\n\n${text}`);
     this._closeParaphraseCard();
   },
 
-  async _run(type) {
-    const sel = this._getSelectedText();
-    const label = 'Improve';
-    const verb = 'Improve this text for clarity and flow';
-
-    if (sel) {
-      this._pendingType = type;
-      ChatInput._submitText(`${verb}:\n\n${sel}`);
-    } else {
-      const input = document.querySelector('.input-box input');
-      if (!input) return;
-      input.value = `${verb}:\n\n`;
-      input.focus();
-      input.selectionStart = input.selectionEnd = input.value.length;
-      _showQuickActionHint(`${label}: paste or type the text below, then press Enter ↵`);
-      this._pendingType = type;
-    }
+  // ── Grammar ──
+  _openGrammarCard() {
+    if (this._grammarCardOpen) { document.getElementById('grammar-input')?.focus(); return; }
+    this._closeAllCards();
+    const card = document.getElementById('grammar-card');
+    if (!card) return;
+    this._grammarCardOpen = true;
+    card.hidden = false;
+    const ta = document.getElementById('grammar-input');
+    if (ta) { ta.value = this._getSelectedText(); ta.focus(); }
   },
 
-  _runGrammar() {
-    const sel = this._getSelectedText();
-    if (sel) {
-      ChatInput._submitText(`Check the grammar and style of this text and list any issues concisely:\n\n${sel.slice(0, 800)}`);
-      return;
-    }
-    const docText = _docContext?.text?.slice(0, 800) || '';
-    const input = document.querySelector('.input-box input');
-    if (!input) return;
-    if (docText) {
-      ChatInput._submitText(`Check the grammar and style of this text and list any issues concisely:\n\n${docText}`);
-    } else {
-      input.value = 'Check the grammar and style of this text:\n\n';
-      input.focus();
-      input.selectionStart = input.selectionEnd = input.value.length;
-      _showQuickActionHint('Grammar: paste or type the text below, then press Enter ↵');
-    }
+  _closeGrammarCard() {
+    const card = document.getElementById('grammar-card');
+    if (card) card.hidden = true;
+    const ta = document.getElementById('grammar-input');
+    if (ta) ta.value = '';
+    this._grammarCardOpen = false;
   },
 
-  // Called after an AI response completes — if it was triggered by a quick action,
-  // store the output so content.js can reclassify the subsequent paste as AI.
+  _submitGrammar() {
+    const text = document.getElementById('grammar-input')?.value?.trim();
+    if (!text) return;
+    this._pendingType = 'grammar';
+    ChatInput._submitText(`Fix any grammar and style issues in this text, making only the necessary corrections:\n\n${text}`);
+    this._closeGrammarCard();
+  },
+
+  // ── Brainstorm ──
+  _openBrainstormCard() {
+    if (this._brainstormCardOpen) { document.getElementById('brainstorm-input')?.focus(); return; }
+    this._closeAllCards();
+    const card = document.getElementById('brainstorm-card');
+    if (!card) return;
+    this._brainstormCardOpen = true;
+    card.hidden = false;
+    document.getElementById('brainstorm-input')?.focus();
+  },
+
+  _closeBrainstormCard() {
+    const card = document.getElementById('brainstorm-card');
+    if (card) card.hidden = true;
+    const ta = document.getElementById('brainstorm-input');
+    if (ta) ta.value = '';
+    this._brainstormCardOpen = false;
+  },
+
+  _submitBrainstorm() {
+    const text = document.getElementById('brainstorm-input')?.value?.trim();
+    if (!text) return;
+    const fmtMap = { paragraph: 'paragraph', sentences: 'short sentences', bullets: 'bullet-point list' };
+    const fmt = fmtMap[this._brainstormFormat] || 'paragraph';
+    this._pendingType = 'brainstorm';
+    ChatInput._submitText(`Organise these ideas into a ${fmt}. Write clearly and concisely:\n\n${text}`);
+    this._closeBrainstormCard();
+  },
+
+  // Called after an AI response completes — store output so content.js can
+  // reclassify the subsequent paste as AI-sourced.
   notifyAIResponse(replyText) {
     if (!this._pendingType) return;
     chrome.runtime.sendMessage({
@@ -1710,7 +1753,19 @@ const QuickActions = {
 // ── Footer scanning dot ───────────────────────────────────────────────────────
 function _updateScanningDot(isRecording) {
   const dot = document.getElementById('scanning-dot');
-  const label = document.getElementById('scanning-label');
   if (dot) dot.classList.toggle('active', !!isRecording);
-  if (label) label.style.opacity = isRecording ? '0.9' : '0.4';
 }
+
+// ── Panel tab switching ───────────────────────────────────────────────────────
+document.querySelectorAll('.panel-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (tab.disabled) return;
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const target = tab.dataset.panel;
+    const toolsPanel = document.getElementById('panel-tools');
+    const chatPanel  = document.getElementById('panel-chat');
+    if (toolsPanel) toolsPanel.hidden = (target !== 'tools');
+    if (chatPanel)  chatPanel.hidden  = (target !== 'chat');
+  });
+});

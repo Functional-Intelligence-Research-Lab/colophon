@@ -70,55 +70,102 @@
       <div class="timeline" id="timeline-container"></div>
     </div>
 
-    <!-- Paraphrase card (injected above quick-actions when active) -->
-    <div class="paraphrase-card" id="paraphrase-card" hidden>
-      <div class="paraphrase-card-header">
-        <span class="suggestion-tag">✦ Paraphrase</span>
-        <button class="btn-paraphrase-dismiss" id="btn-paraphrase-dismiss" title="Close">✕</button>
-      </div>
-      <textarea id="paraphrase-input" placeholder="Paste or type the text you want paraphrased…" rows="3"></textarea>
-      <div class="suggestion-actions">
-        <button class="btn-apply" id="btn-paraphrase-submit">Paraphrase</button>
-      </div>
-    </div>
-
-    <!-- Quick actions bar -->
-    <div class="quick-actions">
-      <button id="qa-paraphrase" class="qa-btn" title="Paraphrase text">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        <span>Paraphrase</span>
-      </button>
-      <button id="qa-grammar" class="qa-btn" title="Run grammar check">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
-        <span>Grammar</span>
-      </button>
-      <button id="qa-citation" class="qa-btn qa-disabled" disabled title="Coming soon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
-        <span>Citation</span>
-      </button>
-      <button id="qa-improve" class="qa-btn" title="Improve selected text">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>
-        <span>Improve</span>
+    <!-- Panel tab bar -->
+    <div class="panel-tabs" role="tablist">
+      <button class="panel-tab active" data-panel="tools" role="tab">AI Tools</button>
+      <button class="panel-tab" data-panel="chat" role="tab" disabled title="Coming soon">
+        Chat <span class="soon-badge">Soon</span>
       </button>
     </div>
 
-    <div class="input-container">
-      <div class="input-box">
-        <input type="text" placeholder="Ask or reply..." />
-        <button class="send-btn">
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+    <!-- AI Tools panel -->
+    <div id="panel-tools" class="panel-body">
+
+      <!-- Paraphrase card (shown when Paraphrase is clicked) -->
+      <div class="paraphrase-card" id="paraphrase-card" hidden>
+        <div class="paraphrase-card-header">
+          <span class="suggestion-tag">✦ Paraphrase</span>
+          <button class="btn-paraphrase-dismiss" id="btn-paraphrase-dismiss" title="Close">✕</button>
+        </div>
+        <textarea id="paraphrase-input" placeholder="Paste or type the text you want paraphrased…" rows="3"></textarea>
+        <div class="suggestion-actions">
+          <button class="btn-apply" id="btn-paraphrase-submit">Paraphrase</button>
+        </div>
+      </div>
+
+      <!-- Grammar card (shown when Grammar is clicked) -->
+      <div class="paraphrase-card" id="grammar-card" hidden>
+        <div class="paraphrase-card-header">
+          <span class="suggestion-tag">✦ Grammar</span>
+          <button class="btn-paraphrase-dismiss" id="btn-grammar-dismiss" title="Close">✕</button>
+        </div>
+        <textarea id="grammar-input" placeholder="Paste or type text to check…" rows="3"></textarea>
+        <div class="suggestion-actions">
+          <button class="btn-apply" id="btn-grammar-submit">Check Grammar</button>
+        </div>
+      </div>
+
+      <!-- Brainstorm card (shown when Brainstorm is clicked) -->
+      <div class="paraphrase-card brainstorm-card" id="brainstorm-card" hidden>
+        <div class="paraphrase-card-header">
+          <span class="suggestion-tag">✦ Brainstorm</span>
+          <button class="btn-paraphrase-dismiss" id="btn-brainstorm-dismiss" title="Close">✕</button>
+        </div>
+        <textarea id="brainstorm-input" placeholder="Dump your ideas — bullet points, fragments, anything…" rows="4"></textarea>
+        <div class="brainstorm-format">
+          <button class="fmt-btn active" data-fmt="paragraph">Paragraph</button>
+          <button class="fmt-btn" data-fmt="sentences">Sentences</button>
+          <button class="fmt-btn" data-fmt="bullets">Bullet list</button>
+        </div>
+        <div class="suggestion-actions">
+          <button class="btn-apply" id="btn-brainstorm-submit">Generate</button>
+        </div>
+      </div>
+
+      <!-- Quick actions bar -->
+      <div class="quick-actions">
+        <button id="qa-paraphrase" class="qa-btn" title="Paraphrase text">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <span>Paraphrase</span>
         </button>
+        <button id="qa-grammar" class="qa-btn" title="Check grammar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+          <span>Grammar</span>
+        </button>
+        <button id="qa-citation" class="qa-btn qa-disabled" disabled title="Coming soon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V20c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
+          <span>Citation</span>
+        </button>
+        <button id="qa-brainstorm" class="qa-btn" title="Organise ideas into text">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+          <span>Brainstorm</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Chat panel (coming soon) -->
+    <div id="panel-chat" class="panel-body" hidden>
+      <div class="coming-soon-panel">
+        <p class="coming-soon-title">Chat is coming soon</p>
+        <p class="coming-soon-sub">Use Paraphrase, Grammar, and Brainstorm for AI assistance with your writing.</p>
+      </div>
+      <div class="input-container">
+        <div class="input-box">
+          <input type="text" placeholder="Ask or reply..." disabled />
+          <button class="send-btn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+          </button>
+        </div>
       </div>
     </div>
 
     <footer class="app-footer">
-      <div class="footer-left">
-        <span class="dot scanning-dot" id="scanning-dot"></span>
-        <span id="scanning-label">Auto-scanning</span>
+      <div class="footer-scan">
+        <span class="scanning-dot" id="scanning-dot"></span>
         <button id="scan-btn" title="Scan document now" aria-label="Scan document now">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         </button>
-        <span id="last-scan-label"></span>
+        <span id="last-scan-label" class="scan-time-label"></span>
       </div>
       <div class="status" id="model-status-display"><span class="dot"></span> Local model</div>
       <button class="icon-btn" id="export-btn" title="PDF export coming soon" disabled style="opacity:0.35;cursor:not-allowed;">
