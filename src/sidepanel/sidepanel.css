@@ -942,15 +942,10 @@ body {
   background: var(--bg-primary);
 }
 
-.footer-left {
+.footer-scan {
   display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  font-weight: 500;
+  gap: 6px;
 }
 
 .scanning-dot {
@@ -967,8 +962,6 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
-
-.footer-left #scanning-label { opacity: 0.7; }
 
 /* ── Scan button in footer ─────────────── */
 #scan-btn {
@@ -1071,16 +1064,6 @@ body {
 }
 .ecc-check svg { width: 16px; height: 16px; }
 
-/* ── Quick action hint banner ─────────────── */
-.qa-hint {
-  display: none;
-  padding: 6px 20px;
-  font-size: 0.75rem;
-  color: #7a5500;
-  background: #fff8e1;
-  border-top: 1px solid #f0d060;
-}
-
 /* ── Paraphrase card ─────────────── */
 .paraphrase-card {
   margin: 0 20px 6px;
@@ -1125,6 +1108,105 @@ body {
 }
 .paraphrase-card textarea:focus {
   border-color: var(--ai-color);
+}
+
+/* ── Panel tabs ─────────────────────────────── */
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.panel-tab {
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.15s;
+}
+.panel-tab.active {
+  color: var(--ai-color);
+  border-bottom-color: var(--ai-color);
+}
+.panel-tab[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.soon-badge {
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--border-color);
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.panel-body {
+  flex-shrink: 0;
+}
+
+/* ── Coming-soon chat panel ─────────────────── */
+.coming-soon-panel {
+  padding: 18px 20px 10px;
+  text-align: center;
+}
+.coming-soon-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.coming-soon-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── Brainstorm format toggle ───────────────── */
+.brainstorm-format {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.fmt-btn {
+  flex: 1;
+  padding: 4px 0;
+  font-size: 0.74rem;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.fmt-btn.active {
+  background: var(--ai-color);
+  color: #fff;
+  border-color: var(--ai-color);
+}
+.fmt-btn:not(.active):hover {
+  border-color: var(--ai-color);
+  color: var(--ai-color);
+}
+
+/* ── Scan time label ────────────────────────── */
+.scan-time-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0.75;
 }
 
 /* ── events-pane section header ─────────────── */
