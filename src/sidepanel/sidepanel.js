@@ -690,9 +690,12 @@ const TimelineRenderer = {
 
   // ── Event Router ──
   buildEventCard(evt, totalEventsCount) {
-    // Use compact icon cards for key event types
-    const COMPACT_TYPES = ['paste', 'ai_interaction', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
-    if (COMPACT_TYPES.includes(evt.type)) {
+    // Use compact icon cards for key event types.
+    // ai_interaction that is fully_accepted is excluded here so it gets the
+    // full diff card (with before/after blocks and "View diff" toggle) instead.
+    const COMPACT_TYPES = ['paste', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
+    const isCompactAiInteraction = evt.type === 'ai_interaction' && evt.meta?.acceptance !== 'fully_accepted';
+    if (COMPACT_TYPES.includes(evt.type) || isCompactAiInteraction) {
       return this._buildCompactCard(evt);
     }
 
@@ -788,25 +791,35 @@ const TimelineRenderer = {
 
       if (isAccepted) {
         typeClass = 'user-action';
-        authorLabel = 'You • Accepted';
+        const isGeminiModel = evt.meta?.model === 'google/gemini';
+        authorLabel = isGeminiModel ? 'You • Accepted Gemini' : 'You • Accepted';
         nodeHTML = `<div class="node solid"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></div>`;
 
-        const beforeText = evt.meta.content_before || "...";
-        const afterText = evt.meta.content_after || "...";
+        const beforeText = evt.meta.content_before || '';
+        const afterText = evt.meta.content_after || '';
+        const hasBefore = beforeText.trim().length > 0;
+        const hasAfter = afterText.trim().length > 0;
+
+        // Show the "View diff" toggle only when there is both removed and added
+        // text to compare. Pure insertions (no replaced content) surface the
+        // added block immediately so the user sees what was inserted at a glance.
+        const footerHTML = hasBefore
+          ? `<a href="#" class="link toggle-diff-btn">View diff</a>`
+          : `<span style="font-size:0.75rem;color:var(--text-secondary);">Inserted text</span>`;
 
         contentHTML = `
           <div class="card diff-card">
-            <div class="diff-block removed" style="display: none;">
+            <div class="diff-block removed" style="display: ${hasBefore ? 'none' : 'none'};">
               <div class="indicator"></div>
-              <p>${beforeText}</p>
+              <p>${beforeText || '—'}</p>
             </div>
             <div class="diff-arrow" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
             <div class="diff-block added">
               <div class="indicator"></div>
-              <p>${afterText}</p>
+              <p>${hasAfter ? afterText : '(no preview available)'}</p>
             </div>
             <div class="card-footer">
-              <a href="#" class="link toggle-diff-btn">View diff</a>
+              ${footerHTML}
               <button class="icon-btn small"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
             </div>
           </div>
