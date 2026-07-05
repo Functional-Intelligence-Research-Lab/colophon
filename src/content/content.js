@@ -68,6 +68,11 @@ let _geminiObserver = null;
 // Snapshot taken the moment a Gemini suggestion appears (used as the
 // pre-change baseline when computing what the AI actually inserted).
 let _preSuggestionSnapshot = null;
+// True while pollForDocChange() is actively waiting for the export API to
+// reflect an accepted Gemini suggestion. During this window the keydown-
+// triggered baseline update is suppressed to avoid a race condition where the
+// rolling baseline would be overwritten with stale pre-acceptance content.
+let _pollActive = false;
 
 function extractTextFromModelChunks() {
   try {
@@ -1425,19 +1430,24 @@ async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) 
 
   const deadline = Date.now() + maxWaitMs;
   console.log('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
+  _pollActive = true;
 
-  while (Date.now() < deadline) {
-    await sleep(intervalMs);
-    try {
-      const newText = await getDocumentText();
-      if (newText && newText !== baseline) {
-        console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
-        return newText;
+  try {
+    while (Date.now() < deadline) {
+      await sleep(intervalMs);
+      try {
+        const newText = await getDocumentText();
+        if (newText && newText !== baseline) {
+          console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
+          return newText;
+        }
+        console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
+      } catch {
+        // transient fetch error — keep polling
       }
-      console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
-    } catch {
-      // transient fetch error — keep polling
     }
+  } finally {
+    _pollActive = false;
   }
 
   console.warn('[Colophon Content] pollForDocChange: timed out — export API did not reflect change within', maxWaitMs, 'ms');
@@ -1463,20 +1473,33 @@ function computeDocumentDiff(oldText, newText) {
   if (!oldText || !newText) return { addedText: '', removedText: '' };
   if (oldText === newText) return { addedText: '', removedText: '' };
 
-  let start = 0;
-  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
-    start++;
+  // ── Step 1: find length of shared prefix ──────────────────────────────────
+  let prefixLen = 0;
+  const minLen = Math.min(oldText.length, newText.length);
+  while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) {
+    prefixLen++;
   }
 
-  let oldEnd = oldText.length - 1;
-  let newEnd = newText.length - 1;
-  while (oldEnd >= start && newEnd >= start && oldText[oldEnd] === newText[newEnd]) {
-    oldEnd--;
-    newEnd--;
+  // ── Step 2: find length of shared suffix (from respective ends) ────────────
+  // IMPORTANT: the suffix search must not overlap the already-matched prefix.
+  let oldSuffixLen = 0;
+  let newSuffixLen = 0;
+  let oi = oldText.length - 1;
+  let ni = newText.length - 1;
+  while (
+    oi >= prefixLen &&
+    ni >= prefixLen &&
+    oldText[oi] === newText[ni]
+  ) {
+    oi--;
+    ni--;
+    oldSuffixLen++;
+    newSuffixLen++;
   }
 
-  const removedText = oldText.slice(start, oldEnd + 1).trim();
-  const addedText = newText.slice(start, newEnd + 1).trim();
+  // ── Step 3: extract the changed middle regions ─────────────────────────────
+  const removedText = oldText.slice(prefixLen, oldText.length - oldSuffixLen).trim();
+  const addedText   = newText.slice(prefixLen, newText.length - newSuffixLen).trim();
 
   return { addedText, removedText };
 }
@@ -1523,6 +1546,8 @@ document.addEventListener('keydown', (e) => {
   if (!isContextValid()) return;
   // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
+  // Don't race against an active Gemini acceptance poll
+  if (_pollActive) return;
 
   clearTimeout(_baselineTimer);
   
