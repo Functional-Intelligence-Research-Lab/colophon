@@ -64,6 +64,11 @@ let _isFetchingBaseline = false;
 let _lastSnapshotTime = 0;
 let _bufferStartTime = 0;
 let _geminiPanelActive = false;
+// Timestamp (ms) until which MutationObserver callbacks are suppressed.
+// Set to Date.now() + OBSERVER_SETTLE_MS whenever the observer attaches so
+// that the initial DOM-render burst on page load is not counted as edits.
+let _observerSettleUntil = 0;
+const OBSERVER_SETTLE_MS = 1500; // 1.5 s is enough for Docs to paint its canvas
 let _geminiObserver = null;
 // Snapshot taken the moment a Gemini suggestion appears (used as the
 // pre-change baseline when computing what the AI actually inserted).
@@ -366,6 +371,11 @@ function activate() {
     return
   }
   _active = true
+  // Set the settle window here — before any listeners are attached — so that
+  // ALL handlers (keydown, input, MutationObserver) ignore the initial burst
+  // of events that Google Docs fires when it paints the document canvas.
+  _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
+  console.log('[Colophon Content] DOM settle window active until', new Date(_observerSettleUntil).toISOString())
   attachInputListeners(document, 'top-document')
   watchTextEventIframe()
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
@@ -488,20 +498,25 @@ const AUTO_RECORD = true
 
 async function syncRecordingState() {
   try {
-    const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
-    console.log('[Colophon Content] sync recording state', {
-      hasSession: !!state?.session,
-      isRecording: !!state?.session?.isRecording,
-    })
-    if (state?.session?.isRecording) {
-      activate()
-      return
-    }
     if (AUTO_RECORD) {
-      // SW derives tab/url from the sender and won't clobber a live session.
+      // Always send AUTO_SESSION_START so the SW can reattach to the new tab
+      // context after a page reload. The startSession guard in the SW ensures
+      // that an already-recording session for this doc is never clobbered —
+      // it simply updates the tabId and re-sends ACTIVATE without adding any
+      // new events to the timeline.
       const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
       console.log('[Colophon Content] auto-record requested', res)
       if (res?.ok) activate()
+    } else {
+      // Manual mode: only activate if the SW says we're already recording.
+      const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
+      console.log('[Colophon Content] sync recording state', {
+        hasSession: !!state?.session,
+        isRecording: !!state?.session?.isRecording,
+      })
+      if (state?.session?.isRecording) {
+        activate()
+      }
     }
   } catch {
     // Popup activation remains the fallback path if the service worker is waking.
@@ -546,6 +561,8 @@ function isTargetingFormInput(target) {
 function onKeydown(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return
+  // Ignore events during the initial DOM settle window
+  if (Date.now() < _observerSettleUntil) return
   if (isTargetingFormInput(e.target)) return;
   if (SKIP_KEYS.has(e.key)) {
     console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
@@ -579,11 +596,17 @@ function attachObserver(editor) {
     childList: true, subtree: true,
     characterData: true, characterDataOldValue: true,
   })
-  console.log('[Colophon Content] MutationObserver attached', { target: describeElement(editor) })
+  // Suppress the initial DOM-render burst — Docs re-inserts every paragraph
+  // node when the canvas first paints, which looks like a huge insertion.
+  _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
+  console.log('[Colophon Content] MutationObserver attached', { target: describeElement(editor), settleUntil: _observerSettleUntil })
 }
 
 function onMutation(mutations) {
   if (!_active) return
+  // Skip mutations that arrive during the settle window after the observer
+  // first attaches — these are just the initial DOM render, not real edits.
+  if (Date.now() < _observerSettleUntil) return
 
   // Ignore mutations that originate inside the Gemini sidebar / suggestion panel —
   // typing into the Gemini prompt box and the AI generating its response both
@@ -713,6 +736,8 @@ function onPaste(e) {
 
 function onInput(e) {
   if (!_active) return
+  // Ignore events during the initial DOM settle window
+  if (Date.now() < _observerSettleUntil) return
   if (isTargetingFormInput(e.target)) return;
   const inputType = e.inputType ?? ''
   const insertedLength = e.data?.length ?? 0

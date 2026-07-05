@@ -301,8 +301,24 @@ async function startSession({ tabId, docUrl } = {}) {
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
   const now = new Date().toISOString();
 
+  // ── Guard: do not create a new session if one is already actively recording
+  // for this exact document. This prevents a spurious session_start event on
+  // page reload when the user left recording on. The active session lives only
+  // under the 'session' key (not in the per-docId archive) until it is stopped,
+  // so checking getSessionByDocId() alone is insufficient.
+  const activeSession = await getSession();
+  if (activeSession?.isRecording && activeSession.docId === docId) {
+    console.log("[Colophon SW] startSession: already recording for this doc — reattaching only", { docId });
+    if (tabId) {
+      activeSession.tabId = tabId;
+      await saveSession(activeSession);
+      await activateContentScript(tabId);
+    }
+    return { ok: true, alreadyRecording: true, sessionId: activeSession.sessionId };
+  }
+
   // Persist the currently-active session under its docId before switching away
-  const prevSession = await getSession();
+  const prevSession = activeSession;
   if (prevSession?.docId && prevSession.docId !== docId) {
     await saveSessionByDocId(prevSession.docId, prevSession);
   }
