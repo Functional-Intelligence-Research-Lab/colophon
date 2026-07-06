@@ -1018,11 +1018,48 @@ const TimelineRenderer = {
             if (response?.status === 'error') throw new Error('Content script reported an error.');
             logAcceptance();
           } catch (msgErr) {
-            console.warn('Auto-paste failed or blocked. Falling back to manual paste.', msgErr);
-            useBtn.innerHTML = 'Copied! Press Ctrl+V';
-            useBtn.style.backgroundColor = 'var(--text-secondary)';
-            useBtn.style.color = 'white';
-            logAcceptance();
+            const isNoScript = msgErr?.message?.includes('Receiving end') || msgErr?.message?.includes('Could not establish');
+            if (isNoScript && activeTabId) {
+              // Content script not running (tab not refreshed after extension update) — inject paste inline.
+              try {
+                await chrome.scripting.executeScript({
+                  target: { tabId: activeTabId },
+                  func: async (text) => {
+                    const frames = [
+                      ...document.querySelectorAll('.docs-texteventtarget-iframe'),
+                      ...document.querySelectorAll('iframe[aria-hidden="true"]'),
+                    ];
+                    for (const frame of frames) {
+                      const doc = frame.contentDocument || frame.contentWindow?.document;
+                      if (!doc) continue;
+                      frame.contentWindow.focus();
+                      doc.body.focus();
+                      await new Promise(r => setTimeout(r, 50));
+                      const dt = new DataTransfer();
+                      dt.setData('text/plain', text);
+                      dt.setData('application/x-colophon-ai', 'true');
+                      doc.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+                      return true;
+                    }
+                    return false;
+                  },
+                  args: [textToInsert],
+                });
+                logAcceptance();
+              } catch (scriptErr) {
+                console.warn('scripting.executeScript fallback failed:', scriptErr);
+                useBtn.innerHTML = 'Copied! Press Ctrl+V';
+                useBtn.style.backgroundColor = 'var(--text-secondary)';
+                useBtn.style.color = 'white';
+                logAcceptance();
+              }
+            } else {
+              console.warn('Auto-paste failed or blocked. Falling back to manual paste.', msgErr);
+              useBtn.innerHTML = 'Copied! Press Ctrl+V';
+              useBtn.style.backgroundColor = 'var(--text-secondary)';
+              useBtn.style.color = 'white';
+              logAcceptance();
+            }
           }
         } catch (err) {
           useBtn.innerHTML = 'Failed';
