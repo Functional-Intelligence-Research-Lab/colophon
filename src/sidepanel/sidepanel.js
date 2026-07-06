@@ -1407,7 +1407,7 @@ const ModelStatus = {
       }
       // Status may already be known if SW was already running
       if (res?.status && res.status !== 'unknown') {
-        this._update(res.status);
+        this._update(res.status, res);
       }
     });
 
@@ -1424,6 +1424,10 @@ const ModelStatus = {
       case 'running':
         this._setFooter('connected', 'Local AI ready');
         this._hideBanner();
+        if (data.port) {
+          ChatInput._endpoint = `http://127.0.0.1:${data.port}`;
+          console.log('[Colophon] Local AI endpoint set to:', ChatInput._endpoint);
+        }
         break;
       case 'available':
         this._setFooter('available', 'Model ready');
@@ -1472,7 +1476,16 @@ const ModelStatus = {
       launch: {
         text: 'Model downloaded.',
         actionLabel: 'Start AI',
-        actionFn: () => chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {}),
+        actionFn: (e) => {
+          const btn = e.target;
+          if (btn) {
+            btn.textContent = 'Starting AI...';
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+          }
+          chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {});
+        },
       },
     };
 
