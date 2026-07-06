@@ -1167,22 +1167,46 @@ async function insertTextIntoDocs(textToInsert) {
     let targetElement = null;
     let targetFrame = null;
 
-    const frames = [
-      ...document.querySelectorAll('.docs-texteventtarget-iframe'),
-      ...document.querySelectorAll('iframe[aria-hidden="true"]'),
-    ];
+    // ── 1. Find the correct event target iframe ──
+    // Prioritize the specific Google Docs iframe class inside the editor container
+    targetFrame = document.querySelector('.kix-appview-editor iframe.docs-texteventtarget-iframe') ||
+                  document.querySelector('iframe.docs-texteventtarget-iframe') ||
+                  document.querySelector('.docs-texteventtarget-iframe');
 
-    for (const frame of frames) {
-      const doc = frame.contentDocument || frame.contentWindow?.document;
-      if (doc) {
-        targetElement = doc.body;
+    // Settle for any iframe inside the editor container if the class is not present
+    if (!targetFrame) {
+      targetFrame = document.querySelector('.kix-appview-editor iframe');
+    }
+
+    // Fallback: search for any aria-hidden iframe (excluding the Colophon sidepanel itself)
+    if (!targetFrame) {
+      const frames = document.querySelectorAll('iframe[aria-hidden="true"]');
+      for (const frame of frames) {
+        if (frame.id?.includes('colophon') || frame.src?.includes('colophon') || frame.className?.includes('colophon')) {
+          continue;
+        }
         targetFrame = frame;
         break;
       }
     }
 
-    if (!targetElement) {
-      throw new Error("Could not find Google Docs input element to paste into.");
+    if (!targetFrame) {
+      throw new Error("Could not locate Google Docs text event target iframe.");
+    }
+
+    const doc = targetFrame.contentDocument || targetFrame.contentWindow?.document;
+    if (!doc) {
+      throw new Error("Could not access Google Docs input document inside iframe.");
+    }
+
+    // Target the active element (e.g. the focused div) or fallback to body
+    targetElement = doc.activeElement || doc.body;
+
+    // ── 2. Focus handling sequence ──
+    // Focus the outer editor container first to yield active browser focus back to the editor area
+    const editor = document.querySelector('.kix-appview-editor');
+    if (editor) {
+      editor.focus();
     }
 
     targetFrame.contentWindow.focus();
@@ -1191,6 +1215,7 @@ async function insertTextIntoDocs(textToInsert) {
     // 50 ms for the browser to settle focus before dispatching the paste event.
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    // ── 3. Paste Event Dispatch ──
     const dataTransfer = new DataTransfer();
     dataTransfer.setData('text/plain', textToInsert);
     dataTransfer.setData('application/x-colophon-ai', 'true');

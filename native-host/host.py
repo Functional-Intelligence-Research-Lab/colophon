@@ -91,6 +91,20 @@ def _llamafile_path():
 def _model_path():
     return COLOPHON_DIR / MODEL_FILENAME
 
+
+def find_free_port(base_port=8080, max_attempts=100):
+    """Find and return a free port starting from base_port."""
+    for port in range(base_port, base_port + max_attempts):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("127.0.0.1", port))
+            s.close()
+            return port
+        except OSError:
+            continue
+    raise RuntimeError("No free ports found in range")
+
+
 # ── Action handlers ────────────────────────────────────────────────────────────
 
 def handle_check_model():
@@ -188,25 +202,24 @@ def handle_launch_model():
     if platform.system() == "Windows":
         creation_flags = subprocess.CREATE_NO_WINDOW
 
+    # Find a free port starting from SERVER_PORT (8080)
+    try:
+        port = find_free_port(SERVER_PORT)
+    except Exception as exc:
+        send({"action": "ERROR", "message": f"Failed to find a free port: {exc}"})
+        return
+
     cmd = [
         str(lf),
         "--model", str(model),
         "--server",
-        "--port", str(SERVER_PORT),
+        "--port", str(port),
         "--host", "127.0.0.1",   # never expose outside localhost
         "--threads", "2",
         "--ctx-size", "1024",    # enough for paragraph-level suggestions
         "--batch-size", "256",
         "--nobrowser",
     ]
-
-    # Check if the port is already occupied before launching
-    try:
-        with socket.create_connection(("127.0.0.1", SERVER_PORT), timeout=0.5):
-            send({"action": "ERROR", "message": f"Port {SERVER_PORT} is already in use. Another process may be occupying it."})
-            return
-    except (ConnectionRefusedError, OSError):
-        pass  # Port is free — good
 
     stderr_log = COLOPHON_DIR / "llamafile-stderr.log"
     try:
@@ -226,7 +239,7 @@ def handle_launch_model():
         return
 
     # Poll /health until the server is ready (up to 30 s)
-    health_url = f"http://127.0.0.1:{SERVER_PORT}/health"
+    health_url = f"http://127.0.0.1:{port}/health"
     for _ in range(30):
         time.sleep(1)
         if _llamafile_proc.poll() is not None:
@@ -242,7 +255,7 @@ def handle_launch_model():
             return
         try:
             urllib.request.urlopen(health_url, timeout=2)
-            send({"action": "LAUNCHED", "port": SERVER_PORT, "pid": _llamafile_proc.pid})
+            send({"action": "LAUNCHED", "port": port, "pid": _llamafile_proc.pid})
             return
         except Exception:
             pass

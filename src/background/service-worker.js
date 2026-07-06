@@ -29,6 +29,7 @@ import { HOST_PY_B64 } from "../generated/host-py-b64.js";
 const NATIVE_HOST = 'com.colophon.llamahost';
 let _nativePort = null;
 let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'
+let _llamafilePort = 8080;
 let _lastSelection = { text: '' };
 let _lastDocContext = null;
 let _lastSnapshotTimestamp = 0;
@@ -79,6 +80,7 @@ function onNativeMessage(msg) {
       break;
     case 'LAUNCHED':
       _modelStatus = 'running';
+      _llamafilePort = msg.port;
       chrome.storage.local.set({ llamafilePort: msg.port }).catch(() => {});
       broadcastModelStatus({ port: msg.port });
       break;
@@ -109,6 +111,13 @@ function broadcastModelStatus(extra = {}) {
 getSession().then(session => {
   const ts = session?.metadata?.last_snapshot_timestamp;
   if (ts) _lastSnapshotTimestamp = ts;
+}).catch(() => {});
+
+// Restore in-memory llamafile port from storage on SW startup
+chrome.storage.local.get('llamafilePort').then(res => {
+  if (res.llamafilePort) {
+    _llamafilePort = res.llamafilePort;
+  }
 }).catch(() => {});
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -195,9 +204,21 @@ async function handleMessage(msg, _sender) {
       return { ok: true, ignored: true };
 
     case 'CHECK_MODEL_STATUS': {
+      try {
+        const healthUrl = `http://127.0.0.1:${_llamafilePort}/health`;
+        const resp = await fetch(healthUrl, { method: 'GET', signal: AbortSignal.timeout(1000) });
+        if (resp.ok) {
+          _modelStatus = 'running';
+          return { ok: true, status: 'running', port: _llamafilePort };
+        }
+      } catch (e) {
+        if (_modelStatus === 'running') {
+          _modelStatus = 'available';
+        }
+      }
       const port = getNativePort();
       if (port) port.postMessage({ action: 'CHECK_MODEL' });
-      return { ok: true, status: _modelStatus };
+      return { ok: true, status: _modelStatus, port: _llamafilePort };
     }
 
     case 'REQUEST_DOWNLOAD_MODEL': {
