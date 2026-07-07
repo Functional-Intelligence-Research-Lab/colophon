@@ -51,6 +51,18 @@ button {
   margin-bottom: 8px;
 }
 
+.brand-mark {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.brand-mark img {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
 .tooltip-container {
   position: relative;
   display: inline-block;

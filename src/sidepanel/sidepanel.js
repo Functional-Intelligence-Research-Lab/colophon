@@ -136,9 +136,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const logoEl = document.getElementById('colophon-logo');
   if (logoEl) logoEl.src = chrome.runtime.getURL('icons/green_doc.svg');
 
-  const settingsIcon = document.getElementById('settings-icon');
-  if (settingsIcon) settingsIcon.src = chrome.runtime.getURL('icons/settings-icon.svg');
-
   const settingsBtn = document.getElementById('settings-btn');
   if (settingsBtn) settingsBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
