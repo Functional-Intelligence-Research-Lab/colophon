@@ -64,10 +64,20 @@ let _isFetchingBaseline = false;
 let _lastSnapshotTime = 0;
 let _bufferStartTime = 0;
 let _geminiPanelActive = false;
+// Timestamp (ms) until which MutationObserver callbacks are suppressed.
+// Set to Date.now() + OBSERVER_SETTLE_MS whenever the observer attaches so
+// that the initial DOM-render burst on page load is not counted as edits.
+let _observerSettleUntil = 0;
+const OBSERVER_SETTLE_MS = 1500; // 1.5 s is enough for Docs to paint its canvas
 let _geminiObserver = null;
 // Snapshot taken the moment a Gemini suggestion appears (used as the
 // pre-change baseline when computing what the AI actually inserted).
 let _preSuggestionSnapshot = null;
+// True while pollForDocChange() is actively waiting for the export API to
+// reflect an accepted Gemini suggestion. During this window the keydown-
+// triggered baseline update is suppressed to avoid a race condition where the
+// rolling baseline would be overwritten with stale pre-acceptance content.
+let _pollActive = false;
 
 function extractTextFromModelChunks() {
   try {
@@ -361,6 +371,11 @@ function activate() {
     return
   }
   _active = true
+  // Set the settle window here — before any listeners are attached — so that
+  // ALL handlers (keydown, input, MutationObserver) ignore the initial burst
+  // of events that Google Docs fires when it paints the document canvas.
+  _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
+  console.log('[Colophon Content] DOM settle window active until', new Date(_observerSettleUntil).toISOString())
   attachInputListeners(document, 'top-document')
   watchTextEventIframe()
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
@@ -483,20 +498,25 @@ const AUTO_RECORD = true
 
 async function syncRecordingState() {
   try {
-    const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
-    console.log('[Colophon Content] sync recording state', {
-      hasSession: !!state?.session,
-      isRecording: !!state?.session?.isRecording,
-    })
-    if (state?.session?.isRecording) {
-      activate()
-      return
-    }
     if (AUTO_RECORD) {
-      // SW derives tab/url from the sender and won't clobber a live session.
+      // Always send AUTO_SESSION_START so the SW can reattach to the new tab
+      // context after a page reload. The startSession guard in the SW ensures
+      // that an already-recording session for this doc is never clobbered —
+      // it simply updates the tabId and re-sends ACTIVATE without adding any
+      // new events to the timeline.
       const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
       console.log('[Colophon Content] auto-record requested', res)
       if (res?.ok) activate()
+    } else {
+      // Manual mode: only activate if the SW says we're already recording.
+      const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
+      console.log('[Colophon Content] sync recording state', {
+        hasSession: !!state?.session,
+        isRecording: !!state?.session?.isRecording,
+      })
+      if (state?.session?.isRecording) {
+        activate()
+      }
     }
   } catch {
     // Popup activation remains the fallback path if the service worker is waking.
@@ -541,6 +561,8 @@ function isTargetingFormInput(target) {
 function onKeydown(e) {
   if (!isContextValid()) { detachInputListeners(); return; }
   if (!_active) return
+  // Ignore events during the initial DOM settle window
+  if (Date.now() < _observerSettleUntil) return
   if (isTargetingFormInput(e.target)) return;
   if (SKIP_KEYS.has(e.key)) {
     console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
@@ -574,11 +596,17 @@ function attachObserver(editor) {
     childList: true, subtree: true,
     characterData: true, characterDataOldValue: true,
   })
-  console.log('[Colophon Content] MutationObserver attached', { target: describeElement(editor) })
+  // Suppress the initial DOM-render burst — Docs re-inserts every paragraph
+  // node when the canvas first paints, which looks like a huge insertion.
+  _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
+  console.log('[Colophon Content] MutationObserver attached', { target: describeElement(editor), settleUntil: _observerSettleUntil })
 }
 
 function onMutation(mutations) {
   if (!_active) return
+  // Skip mutations that arrive during the settle window after the observer
+  // first attaches — these are just the initial DOM render, not real edits.
+  if (Date.now() < _observerSettleUntil) return
 
   // Ignore mutations that originate inside the Gemini sidebar / suggestion panel —
   // typing into the Gemini prompt box and the AI generating its response both
@@ -708,6 +736,8 @@ function onPaste(e) {
 
 function onInput(e) {
   if (!_active) return
+  // Ignore events during the initial DOM settle window
+  if (Date.now() < _observerSettleUntil) return
   if (isTargetingFormInput(e.target)) return;
   const inputType = e.inputType ?? ''
   const insertedLength = e.data?.length ?? 0
@@ -1137,22 +1167,46 @@ async function insertTextIntoDocs(textToInsert) {
     let targetElement = null;
     let targetFrame = null;
 
-    const frames = [
-      ...document.querySelectorAll('.docs-texteventtarget-iframe'),
-      ...document.querySelectorAll('iframe[aria-hidden="true"]'),
-    ];
+    // ── 1. Find the correct event target iframe ──
+    // Prioritize the specific Google Docs iframe class inside the editor container
+    targetFrame = document.querySelector('.kix-appview-editor iframe.docs-texteventtarget-iframe') ||
+                  document.querySelector('iframe.docs-texteventtarget-iframe') ||
+                  document.querySelector('.docs-texteventtarget-iframe');
 
-    for (const frame of frames) {
-      const doc = frame.contentDocument || frame.contentWindow?.document;
-      if (doc) {
-        targetElement = doc.body;
+    // Settle for any iframe inside the editor container if the class is not present
+    if (!targetFrame) {
+      targetFrame = document.querySelector('.kix-appview-editor iframe');
+    }
+
+    // Fallback: search for any aria-hidden iframe (excluding the Colophon sidepanel itself)
+    if (!targetFrame) {
+      const frames = document.querySelectorAll('iframe[aria-hidden="true"]');
+      for (const frame of frames) {
+        if (frame.id?.includes('colophon') || frame.src?.includes('colophon') || frame.className?.includes('colophon')) {
+          continue;
+        }
         targetFrame = frame;
         break;
       }
     }
 
-    if (!targetElement) {
-      throw new Error("Could not find Google Docs input element to paste into.");
+    if (!targetFrame) {
+      throw new Error("Could not locate Google Docs text event target iframe.");
+    }
+
+    const doc = targetFrame.contentDocument || targetFrame.contentWindow?.document;
+    if (!doc) {
+      throw new Error("Could not access Google Docs input document inside iframe.");
+    }
+
+    // Target the active element (e.g. the focused div) or fallback to body
+    targetElement = doc.activeElement || doc.body;
+
+    // ── 2. Focus handling sequence ──
+    // Focus the outer editor container first to yield active browser focus back to the editor area
+    const editor = document.querySelector('.kix-appview-editor');
+    if (editor) {
+      editor.focus();
     }
 
     targetFrame.contentWindow.focus();
@@ -1161,6 +1215,7 @@ async function insertTextIntoDocs(textToInsert) {
     // 50 ms for the browser to settle focus before dispatching the paste event.
     await new Promise(resolve => setTimeout(resolve, 50));
 
+    // ── 3. Paste Event Dispatch ──
     const dataTransfer = new DataTransfer();
     dataTransfer.setData('text/plain', textToInsert);
     dataTransfer.setData('application/x-colophon-ai', 'true');
@@ -1425,19 +1480,24 @@ async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) 
 
   const deadline = Date.now() + maxWaitMs;
   console.log('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
+  _pollActive = true;
 
-  while (Date.now() < deadline) {
-    await sleep(intervalMs);
-    try {
-      const newText = await getDocumentText();
-      if (newText && newText !== baseline) {
-        console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
-        return newText;
+  try {
+    while (Date.now() < deadline) {
+      await sleep(intervalMs);
+      try {
+        const newText = await getDocumentText();
+        if (newText && newText !== baseline) {
+          console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
+          return newText;
+        }
+        console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
+      } catch {
+        // transient fetch error — keep polling
       }
-      console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
-    } catch {
-      // transient fetch error — keep polling
     }
+  } finally {
+    _pollActive = false;
   }
 
   console.warn('[Colophon Content] pollForDocChange: timed out — export API did not reflect change within', maxWaitMs, 'ms');
@@ -1463,20 +1523,33 @@ function computeDocumentDiff(oldText, newText) {
   if (!oldText || !newText) return { addedText: '', removedText: '' };
   if (oldText === newText) return { addedText: '', removedText: '' };
 
-  let start = 0;
-  while (start < oldText.length && start < newText.length && oldText[start] === newText[start]) {
-    start++;
+  // ── Step 1: find length of shared prefix ──────────────────────────────────
+  let prefixLen = 0;
+  const minLen = Math.min(oldText.length, newText.length);
+  while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) {
+    prefixLen++;
   }
 
-  let oldEnd = oldText.length - 1;
-  let newEnd = newText.length - 1;
-  while (oldEnd >= start && newEnd >= start && oldText[oldEnd] === newText[newEnd]) {
-    oldEnd--;
-    newEnd--;
+  // ── Step 2: find length of shared suffix (from respective ends) ────────────
+  // IMPORTANT: the suffix search must not overlap the already-matched prefix.
+  let oldSuffixLen = 0;
+  let newSuffixLen = 0;
+  let oi = oldText.length - 1;
+  let ni = newText.length - 1;
+  while (
+    oi >= prefixLen &&
+    ni >= prefixLen &&
+    oldText[oi] === newText[ni]
+  ) {
+    oi--;
+    ni--;
+    oldSuffixLen++;
+    newSuffixLen++;
   }
 
-  const removedText = oldText.slice(start, oldEnd + 1).trim();
-  const addedText = newText.slice(start, newEnd + 1).trim();
+  // ── Step 3: extract the changed middle regions ─────────────────────────────
+  const removedText = oldText.slice(prefixLen, oldText.length - oldSuffixLen).trim();
+  const addedText   = newText.slice(prefixLen, newText.length - newSuffixLen).trim();
 
   return { addedText, removedText };
 }
@@ -1523,6 +1596,8 @@ document.addEventListener('keydown', (e) => {
   if (!isContextValid()) return;
   // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
+  // Don't race against an active Gemini acceptance poll
+  if (_pollActive) return;
 
   clearTimeout(_baselineTimer);
   

@@ -166,6 +166,20 @@ export function findSuggestionContainer(root = document) {
  */
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
+
+  // To avoid false positives from empty prompt boxes, settings dialogs, or 
+  // the initial "Refine" options menu, the container must have an "accept" button 
+  // (e.g. Insert, Replace, Accept, or checkmark) indicating a suggestion is ready to be applied.
+  const buttons = container.querySelectorAll?.('button, [role="button"], .docosAiPreviewDiffVisibleSuggestionViewAcceptButton, .appsElementsSidekickResponseOptionsActionBarButtonPrimary') ?? []
+  let hasAccept = false
+  for (const b of buttons) {
+    if (classifyAction(b) === 'accept') {
+      hasAccept = true
+      break
+    }
+  }
+  if (!hasAccept) return false
+
   if (container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
       container.classList?.contains('docos-anchoreddocoview') ||
       container.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewContent') ||
@@ -177,7 +191,6 @@ export function looksLikeGeminiSuggestion(container) {
   }
   const name = accessibleName(container)
   if (name.includes('help me write')) return true
-  const buttons = container.querySelectorAll?.('button, [role="button"]') ?? []
   for (const b of buttons) {
     const bn = accessibleName(b)
     if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS) || bn.startsWith('accept') || bn.startsWith('reject')) return true

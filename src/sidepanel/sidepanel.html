@@ -24,40 +24,46 @@
       </div>
     </header>
 
-    <div id="model-banner" class="model-banner" style="display:none"></div>
+    <div id="model-banner" class="model-banner" style="display:none"><button class="banner-dismiss" id="banner-dismiss-btn" title="Dismiss" aria-label="Dismiss banner">✕</button></div>
     <div id="selection-banner" class="selection-banner" style="display:none"></div>
+
 
     <!-- Always-visible sticky pane -->
     <div class="sticky-pane">
-      <div class="project-context">
-        <div class="context-card">
+      <div class="project-context" id="project-context-section">
+        <div class="context-card" id="assignment-context-toggle" title="Click to collapse">
           <p id="assignment-brief-text">Add assignment question or context for the AI…</p>
-          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6" /></svg>
+          <svg class="chevron" id="context-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6" /></svg>
         </div>
-        <div class="doc-context-row">
+        <div class="doc-context-row collapsible-body" id="context-body">
           <div id="doc-context-indicator">📄 No document context yet</div>
         </div>
       </div>
 
       <!-- At-a-glance status -->
-      <div id="status-header" class="status-header">
-        <div id="status-icon" class="status-icon status-ok">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+      <div id="sticky-review-section" class="sticky-review-section">
+        <div id="status-header" class="status-header" id="status-header">
+          <div id="status-icon" class="status-icon status-ok">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          </div>
+          <div class="status-body">
+            <strong id="status-title">All good</strong>
+            <p id="status-subtitle">We'll let you know if anything needs attention.</p>
+          </div>
+          <button class="collapse-toggle" id="review-collapse-btn" title="Collapse" aria-label="Collapse review section">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
         </div>
-        <div class="status-body">
-          <strong id="status-title">All good</strong>
-          <p id="status-subtitle">We'll let you know if anything needs attention.</p>
-        </div>
-      </div>
 
-      <!-- Suggestions (one at a time) -->
-      <div id="suggestions-section" class="suggestions-section" hidden>
-        <div class="section-header">
-          <span>Suggestions</span>
-          <span id="suggestion-count-badge" class="count-badge">1</span>
-          <button id="next-suggestion-btn" title="Next suggestion">›</button>
+        <!-- Suggestions (one at a time) -->
+        <div id="suggestions-section" class="suggestions-section collapsible-body" hidden>
+          <div class="section-header">
+            <span>Suggestions</span>
+            <span id="suggestion-count-badge" class="count-badge">1</span>
+            <button id="next-suggestion-btn" title="Next suggestion">›</button>
+          </div>
+          <div id="active-suggestion-card"></div>
         </div>
-        <div id="active-suggestion-card"></div>
       </div>
     </div>
 
