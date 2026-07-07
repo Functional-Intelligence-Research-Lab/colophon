@@ -25,6 +25,7 @@ async function build() {
   await mkdir('dist/sidepanel',   { recursive: true })
   await mkdir('dist/viewer',      { recursive: true })
   await mkdir('dist/icons',       { recursive: true })
+  await mkdir('dist/shared',      { recursive: true })
 
   const ctx = await esbuild.context({
     entryPoints: {
@@ -57,6 +58,7 @@ async function build() {
   await copyFile('src/sidepanel/sidepanel.css', 'dist/sidepanel/sidepanel.css')
   await copyFile('src/viewer/viewer.html',      'dist/viewer/viewer.html')
   await copyFile('src/viewer/viewer.css',       'dist/viewer/viewer.css')
+  await copyFile('src/shared/theme.css',        'dist/shared/theme.css')
 
   if (await exists('icons')) {
     await cp('icons', 'dist/icons', { recursive: true })
