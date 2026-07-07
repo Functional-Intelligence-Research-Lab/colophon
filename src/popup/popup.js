@@ -177,6 +177,7 @@ function renderScores(session) {
     (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_modified' || event.meta?.acceptance === 'modified')
   ).length
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
+  const hasData = editCount + aiCount + sourceCount > 0
   const total = Math.max(1, editCount + aiCount + sourceCount)
 
   const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 0
@@ -186,6 +187,46 @@ function renderScores(session) {
   setScore('own', own)
   setScore('ai', ai)
   setScore('source', source)
+  renderVerdict(hasData ? ai : null)
+}
+
+// Icon paths for the two verdict states. Both are single filled paths (not
+// stroke-based) since .leaf-mark svg forces fill:currentColor; stroke:none.
+const LEAF_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
+const WARN_ICON_PATH = '<path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/>'
+
+// Turns the raw own/AI/source split into a verdict banner — this was
+// previously a single hardcoded state ("mostly original") regardless of the
+// actual session data; now it reflects it, with a distinct warn state once
+// AI involvement is the majority of the document.
+function renderVerdict(aiPercent) {
+  const banner = $('summary-banner')
+  const icon = $('verdict-icon')
+  const title = $('summary-title')
+  if (!banner || !icon || !title) return
+
+  banner.classList.remove('summary--good', 'summary--neutral', 'summary--warn')
+
+  if (aiPercent === null) {
+    title.innerHTML = 'Nothing recorded <strong>yet</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--neutral')
+    return
+  }
+
+  if (aiPercent <= 20) {
+    title.innerHTML = 'Your writing is <strong>mostly original</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--good')
+  } else if (aiPercent <= 50) {
+    title.innerHTML = 'Your writing is <strong>a mix of you and AI</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--neutral')
+  } else {
+    title.innerHTML = 'Your writing is <strong>mostly AI-assisted</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${WARN_ICON_PATH}</svg>`
+    banner.classList.add('summary--warn')
+  }
 }
 
 function setScore(id, value) {
