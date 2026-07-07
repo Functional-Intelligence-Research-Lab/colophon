@@ -92,9 +92,11 @@ export function analyzeText(text) {
       );
     }
 
-    // 5. Weak/filler words
+    // 5. Weak/filler words — word-boundary match, not substring: a plain
+    // `.includes()` check flags "every" as containing "very" and "adjust"/
+    // "justice"/"justify" as containing "just".
     const lowerPara = trimmed.toLowerCase();
-    const foundWeak = [...WEAK_WORDS].filter(w => lowerPara.includes(w));
+    const foundWeak = [...WEAK_WORDS].filter(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lowerPara));
     if (foundWeak.length >= 2) {
       add(
         'filler_words',
