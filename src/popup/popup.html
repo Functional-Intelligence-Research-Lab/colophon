@@ -90,8 +90,22 @@
         </svg>
         <span>Private and local</span>
       </div>
-      <button id="btn-export" class="export-link" type="button" title="Download TWFF file">TWFF</button>
-      <button id="btn-viewer" class="export-link" type="button" title="Open TWFF viewer">View</button>
+      <button id="btn-export" class="export-link" type="button" title="Download this session as a .twff file">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span class="btn-label">Export</span>
+      </button>
+      <button id="btn-viewer" class="export-link" type="button" title="Open this session in the TWFF viewer">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+        <span class="btn-label">Viewer</span>
+      </button>
       <button id="btn-floating" class="external-button" type="button" title="Float panel" aria-label="Float panel">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M14 5h5v5M13 11l6-6M19 14v5H5V5h5"/>

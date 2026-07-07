@@ -81,21 +81,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const exportButton = $('btn-export')
   if (exportButton) {
+    const exportLabel = exportButton.querySelector('.btn-label')
     exportButton.addEventListener('click', async () => {
-      const originalText = exportButton.textContent;
-      exportButton.textContent = 'Exporting…';
+      const originalText = exportLabel.textContent;
+      exportLabel.textContent = 'Exporting…';
       exportButton.disabled = true;
       try {
         const result = await exportTwff()
-        exportButton.textContent = 'Exported ✓';
+        exportLabel.textContent = 'Exported ✓';
         showNotice(`Exported ${result.filename}`, false)
         setTimeout(() => {
-          exportButton.textContent = originalText;
+          exportLabel.textContent = originalText;
           exportButton.disabled = false;
         }, 2000);
       } catch (err) {
         console.error('[Colophon] Export failed:', err.message)
-        exportButton.textContent = originalText;
+        exportLabel.textContent = originalText;
         exportButton.disabled = false;
         showNotice('Start recording before exporting.')
       }
