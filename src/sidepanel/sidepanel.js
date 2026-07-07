@@ -228,11 +228,88 @@ document.addEventListener('DOMContentLoaded', async () => {
   SuggestionsManager.init();
   // Init quick actions bar
   QuickActions.init();
+  // Wire collapse/dismiss for sticky pane sections
+  initCollapsibleSections();
   // Seed scanning dot from initial session state
   chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
     _updateScanningDot(res?.session?.isRecording ?? false);
   });
 });
+
+
+// ── Collapsible / Dismissible Sections ────────────────────────────────────────
+function initCollapsibleSections() {
+
+  // \u2500\u2500 1. Model banner dismiss (\u2715) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  document.getElementById('banner-dismiss-btn')?.addEventListener('click', () => {
+    const banner = document.getElementById('model-banner');
+    if (!banner) return;
+    banner.style.transition = 'opacity 0.2s ease, max-height 0.25s ease';
+    banner.style.opacity = '0';
+    banner.style.overflow = 'hidden';
+    banner.style.maxHeight = banner.scrollHeight + 'px';
+    requestAnimationFrame(() => {
+      banner.style.maxHeight = '0';
+    });
+    setTimeout(() => { banner.style.display = 'none'; }, 280);
+    sessionStorage.setItem('colophon_banner_dismissed', '1');
+  });
+  // Re-apply dismissed state if needed (e.g. sidepanel re-opened)
+  if (sessionStorage.getItem('colophon_banner_dismissed') === '1') {
+    const banner = document.getElementById('model-banner');
+    if (banner) banner.style.display = 'none';
+  }
+
+  // \u2500\u2500 2. Project context collapse \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const contextSection = document.getElementById('project-context-section');
+  const contextBody = document.getElementById('context-body');
+  const contextToggle = document.getElementById('assignment-context-toggle');
+
+  if (contextSection && contextBody && contextToggle) {
+    const CONTEXT_KEY = 'colophon_context_collapsed';
+    const applyContextState = (collapsed, animate = false) => {
+      if (!animate) contextBody.style.transition = 'none';
+      contextSection.classList.toggle('is-collapsed', collapsed);
+      contextBody.classList.toggle('collapsed', collapsed);
+      if (!animate) requestAnimationFrame(() => { contextBody.style.transition = ''; });
+    };
+
+    // Restore saved state
+    applyContextState(sessionStorage.getItem(CONTEXT_KEY) === '1', false);
+
+    contextToggle.addEventListener('click', () => {
+      const isNowCollapsed = !contextSection.classList.contains('is-collapsed');
+      applyContextState(isNowCollapsed, true);
+      sessionStorage.setItem(CONTEXT_KEY, isNowCollapsed ? '1' : '0');
+    });
+  }
+
+  // \u2500\u2500 3. Review/Suggestions section collapse \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const reviewCollapseBtn = document.getElementById('review-collapse-btn');
+  const suggestionsSection = document.getElementById('suggestions-section');
+
+  if (reviewCollapseBtn && suggestionsSection) {
+    const REVIEW_KEY = 'colophon_review_collapsed';
+
+    const applyReviewState = (collapsed, animate = false) => {
+      if (!animate) suggestionsSection.style.transition = 'none';
+      reviewCollapseBtn.classList.toggle('is-collapsed', collapsed);
+      suggestionsSection.classList.toggle('collapsed', collapsed);
+      if (!animate) requestAnimationFrame(() => { suggestionsSection.style.transition = ''; });
+    };
+
+    // Restore saved state
+    applyReviewState(sessionStorage.getItem(REVIEW_KEY) === '1', false);
+
+    reviewCollapseBtn.addEventListener('click', () => {
+      const isNowCollapsed = !reviewCollapseBtn.classList.contains('is-collapsed');
+      applyReviewState(isNowCollapsed, true);
+      sessionStorage.setItem(REVIEW_KEY, isNowCollapsed ? '1' : '0');
+    });
+  }
+}
+
+
 
 
 // ── Status Header ─────────────────────────────────────────────────────────────
@@ -613,9 +690,12 @@ const TimelineRenderer = {
 
   // ── Event Router ──
   buildEventCard(evt, totalEventsCount) {
-    // Use compact icon cards for key event types
-    const COMPACT_TYPES = ['paste', 'ai_interaction', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
-    if (COMPACT_TYPES.includes(evt.type)) {
+    // Use compact icon cards for key event types.
+    // ai_interaction that is fully_accepted is excluded here so it gets the
+    // full diff card (with before/after blocks and "View diff" toggle) instead.
+    const COMPACT_TYPES = ['paste', 'heuristic_suggestion', 'gemini_suggestion', 'session_start'];
+    const isCompactAiInteraction = evt.type === 'ai_interaction' && evt.meta?.acceptance !== 'fully_accepted';
+    if (COMPACT_TYPES.includes(evt.type) || isCompactAiInteraction) {
       return this._buildCompactCard(evt);
     }
 
@@ -711,25 +791,35 @@ const TimelineRenderer = {
 
       if (isAccepted) {
         typeClass = 'user-action';
-        authorLabel = 'You • Accepted';
+        const isGeminiModel = evt.meta?.model === 'google/gemini';
+        authorLabel = isGeminiModel ? 'You • Accepted Gemini' : 'You • Accepted';
         nodeHTML = `<div class="node solid"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg></div>`;
 
-        const beforeText = evt.meta.content_before || "...";
-        const afterText = evt.meta.content_after || "...";
+        const beforeText = evt.meta.content_before || '';
+        const afterText = evt.meta.content_after || '';
+        const hasBefore = beforeText.trim().length > 0;
+        const hasAfter = afterText.trim().length > 0;
+
+        // Show the "View diff" toggle only when there is both removed and added
+        // text to compare. Pure insertions (no replaced content) surface the
+        // added block immediately so the user sees what was inserted at a glance.
+        const footerHTML = hasBefore
+          ? `<a href="#" class="link toggle-diff-btn">View diff</a>`
+          : `<span style="font-size:0.75rem;color:var(--text-secondary);">Inserted text</span>`;
 
         contentHTML = `
           <div class="card diff-card">
-            <div class="diff-block removed" style="display: none;">
+            <div class="diff-block removed" style="display: ${hasBefore ? 'none' : 'none'};">
               <div class="indicator"></div>
-              <p>${beforeText}</p>
+              <p>${beforeText || '—'}</p>
             </div>
             <div class="diff-arrow" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
             <div class="diff-block added">
               <div class="indicator"></div>
-              <p>${afterText}</p>
+              <p>${hasAfter ? afterText : '(no preview available)'}</p>
             </div>
             <div class="card-footer">
-              <a href="#" class="link toggle-diff-btn">View diff</a>
+              ${footerHTML}
               <button class="icon-btn small"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
             </div>
           </div>
@@ -1354,7 +1444,7 @@ const ModelStatus = {
       }
       // Status may already be known if SW was already running
       if (res?.status && res.status !== 'unknown') {
-        this._update(res.status);
+        this._update(res.status, res);
       }
     });
 
@@ -1371,6 +1461,10 @@ const ModelStatus = {
       case 'running':
         this._setFooter('connected', 'Local AI ready');
         this._hideBanner();
+        if (data.port) {
+          ChatInput._endpoint = `http://127.0.0.1:${data.port}`;
+          console.log('[Colophon] Local AI endpoint set to:', ChatInput._endpoint);
+        }
         break;
       case 'available':
         this._setFooter('available', 'Model ready');
@@ -1419,7 +1513,16 @@ const ModelStatus = {
       launch: {
         text: 'Model downloaded.',
         actionLabel: 'Start AI',
-        actionFn: () => chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {}),
+        actionFn: (e) => {
+          const btn = e.target;
+          if (btn) {
+            btn.textContent = 'Starting AI...';
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'not-allowed';
+          }
+          chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {});
+        },
       },
     };
 

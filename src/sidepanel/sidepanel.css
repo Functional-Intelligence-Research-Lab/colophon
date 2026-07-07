@@ -101,6 +101,82 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* ─── Collapsible body animation ─── */
+.collapsible-body {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+.collapsible-body.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ─── Collapse toggle button (chevron in status bar) ─── */
+.collapse-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.collapse-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+.collapse-toggle svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.25s ease;
+}
+.collapse-toggle.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+/* ─── Banner dismiss (✕) button ─── */
+.banner-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  align-self: flex-start;
+}
+.banner-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.06);
+}
+
+/* ─── Context chevron rotation ─── */
+.context-card .chevron {
+  transition: transform 0.25s ease;
+}
+.project-context.is-collapsed .context-card .chevron {
+  transform: rotate(180deg);
+}
+
+/* ─── sticky-review-section wrapper ─── */
+.sticky-review-section {
+  border-top: 1px solid var(--border-color);
+}
+.sticky-review-section .status-header {
+  border-top: none;
+}
+
 /* ─── Events pane (scrollable, max ~4 cards) ─── */
 .events-pane {
   flex: 1;
@@ -741,7 +817,6 @@ body {
   align-items: center;
   gap: 12px;
   padding: 8px 0 8px;
-  border-top: 1px solid var(--border-color);
 }
 
 .status-icon {
