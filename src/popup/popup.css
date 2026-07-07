@@ -167,6 +167,9 @@ svg {
   margin-bottom: 0px;
 }
 
+/* Verdict banner — the exact wording/icon/color is set dynamically in
+   popup.js's renderVerdict() based on the session's real own/AI/source
+   split; these classes just define what each verdict tier looks like. */
 .summary {
   display: grid;
   grid-template-columns: 46px 1fr;
@@ -174,8 +177,10 @@ svg {
   align-items: center;
   min-height: 68px;
   padding: 15px 18px;
-  background: var(--status-good-bg);
+  background: var(--bg-secondary);
 }
+.summary.summary--good { background: var(--status-good-bg); }
+.summary.summary--warn { background: var(--status-warn-bg); }
 
 .leaf-mark {
   width: 38px;
@@ -184,8 +189,10 @@ svg {
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.52);
-  color: var(--status-good-ico);
+  color: var(--text-secondary);
 }
+.summary--good .leaf-mark { color: var(--status-good-ico); }
+.summary--warn .leaf-mark { color: var(--status-warn-ico); }
 
 .leaf-mark svg {
   width: 22px;
@@ -200,8 +207,10 @@ svg {
 }
 
 .summary-title strong {
-  color: var(--status-good-fg);
+  color: var(--text-primary);
 }
+.summary--good .summary-title strong { color: var(--status-good-fg); }
+.summary--warn .summary-title strong { color: var(--status-warn-fg); }
 
 .summary-subtitle {
   margin: 0;
