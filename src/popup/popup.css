@@ -440,12 +440,23 @@ svg {
 }
 
 .export-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 0;
   background: transparent;
   color: var(--ai-color);
-  font-weight: 800;
+  font-weight: 700;
+  font-size: 12px;
   cursor: pointer;
   padding: 6px 4px;
+  white-space: nowrap;
+}
+
+.export-link svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .export-link:hover {
@@ -453,7 +464,7 @@ svg {
 }
 
 .export-link:disabled {
-  color: #aaa7bd;
+  color: color-mix(in srgb, var(--ai-color) 40%, white);
   cursor: default;
 }
 
