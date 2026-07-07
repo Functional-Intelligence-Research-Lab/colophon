@@ -358,6 +358,9 @@ const SuggestionsManager = {
       this._render();
     });
 
+    const dismissAllBtn = document.getElementById('dismiss-all-suggestions-btn');
+    if (dismissAllBtn) dismissAllBtn.addEventListener('click', () => this._dismissAll());
+
     document.getElementById('active-suggestion-card')?.addEventListener('click', (e) => {
       if (e.target.classList.contains('btn-ignore')) this._dismiss();
       if (e.target.classList.contains('btn-apply'))  this._apply();
@@ -396,6 +399,36 @@ const SuggestionsManager = {
     this._pointer = Math.max(0, Math.min(this._pointer, this._queue.length - 1));
     this._render();
     updateStatusHeader();
+  },
+
+  // Clears the whole queue at once, so a backlog of suggestions never has to
+  // be worked through one-by-one via "Next" — each is still marked dismissed
+  // individually in the service worker, same as a normal single dismiss.
+  _dismissAll() {
+    if (!this._queue.length) return;
+    for (const item of this._queue) {
+      this._dismissedKeys.add(item.key);
+      chrome.runtime.sendMessage({
+        action: 'UPDATE_EVENT_STATE',
+        payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+      }).catch(() => {});
+    }
+    this._queue = [];
+    this._pointer = 0;
+    this._render();
+    updateStatusHeader();
+  },
+
+  // Jumps the active card to a specific queued suggestion by its event
+  // timestamp — used by the "Review" button on a compact timeline card, so
+  // clicking it actually shows that suggestion instead of whatever happens
+  // to be at the current queue position.
+  focusByTimestamp(ts) {
+    const idx = this._queue.findIndex(q => q.event.timestamp === ts);
+    if (idx === -1) return false;
+    this._pointer = idx;
+    this._render();
+    return true;
   },
 
   _apply() {
@@ -946,6 +979,7 @@ const TimelineRenderer = {
       // Review button on compact heuristic suggestion cards
       if (e.target.classList.contains('ecc-btn-review')) {
         const section = document.getElementById('suggestions-section');
+        SuggestionsManager.focusByTimestamp(e.target.dataset.ts);
         if (section) {
           section.hidden = false;
           section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

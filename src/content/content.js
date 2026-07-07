@@ -54,6 +54,10 @@ let _pendingPaste = null
 let _listenerTargets = []
 let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
 let _heuristicDebounce = null
+// Tracks rule+excerpt pairs already emitted this session so an issue that's
+// still present in the document isn't re-logged as a brand-new event on
+// every subsequent scan (analyzeText's own dedup is scoped to a single call).
+const _flaggedHeuristics = new Set()
 let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
@@ -418,6 +422,9 @@ function runHeuristics() {
   if (!text || text.trim().length < 30) return
   const tips = analyzeText(text)
   for (const tip of tips) {
+    const key = `${tip.rule}::${tip.excerpt}`
+    if (_flaggedHeuristics.has(key)) continue
+    _flaggedHeuristics.add(key)
     chrome.runtime.sendMessage({
       action: 'LOG_EVENT',
       payload: {
