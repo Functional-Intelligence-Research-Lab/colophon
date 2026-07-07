@@ -167,9 +167,6 @@ export function findSuggestionContainer(root = document) {
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
 
-  // To avoid false positives from empty prompt boxes, settings dialogs, or 
-  // the initial "Refine" options menu, the container must have an "accept" button 
-  // (e.g. Insert, Replace, Accept, or checkmark) indicating a suggestion is ready to be applied.
   const buttons = container.querySelectorAll?.('button, [role="button"], .docosAiPreviewDiffVisibleSuggestionViewAcceptButton, .appsElementsSidekickResponseOptionsActionBarButtonPrimary') ?? []
   let hasAccept = false
   for (const b of buttons) {
@@ -178,19 +175,28 @@ export function looksLikeGeminiSuggestion(container) {
       break
     }
   }
-  if (!hasAccept) return false
 
-  if (container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
+  // The generic sidekick/canvas classList signals also match the initial
+  // "Refine" options menu before any suggestion is ready to apply — only
+  // trust them once an accept affordance (Insert, Replace, checkmark, etc.)
+  // is actually present, to avoid false positives from empty prompt boxes,
+  // settings dialogs, or that options menu.
+  if (hasAccept && (
+      container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
       container.classList?.contains('docos-anchoreddocoview') ||
       container.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewContent') ||
       container.querySelector?.('.docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ||
-      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) {
+      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer'))) {
     return true
   }
+
+  // "help me write" is a specific-enough feature label to trust on its own,
+  // even before an accept button has rendered for that prompt yet.
   const name = accessibleName(container)
   if (name.includes('help me write')) return true
+
   for (const b of buttons) {
     const bn = accessibleName(b)
     if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS) || bn.startsWith('accept') || bn.startsWith('reject')) return true
