@@ -68,6 +68,12 @@ async function build() {
     filter: (src) => !src.includes(`native-host${path.sep}build`),
   })
 
+  for (const os of ['win', 'mac', 'linux']) {
+    if (!await exists(`native-host/bin/${os}/colophon-host.zip`)) {
+      console.warn(`[colophon] WARNING: native-host/bin/${os}/colophon-host.zip missing — ${os} users cannot install the local AI.`);
+    }
+  }
+
   if (watch) {
     await ctx.watch()
     console.log('[colophon] Watching for changes…')

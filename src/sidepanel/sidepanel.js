@@ -302,15 +302,15 @@ const SuggestionsManager = {
   _dismissedKeys: new Set(), // rule::excerpt keys the user explicitly dismissed
 
   _TAG_MAP: {
-    readability:        'Coherence',
+    // readability:     'Coherence',  // rule removed from heuristics.js
     adverb_density:     'Style',
     long_paragraph:     'Structure',
-    passive_voice:      'Clarity',
+    // passive_voice:   'Clarity',   // temporarily disabled
     filler_words:       'Style',
-    wordy_phrase:       'Clarity',
+    // wordy_phrase:    'Clarity',   // temporarily disabled
     long_sentence:      'Structure',
     repeated_starts:    'Style',
-    word_repetition:    'Clarity',
+    // word_repetition: 'Clarity',   // temporarily disabled
   },
 
   init() {
@@ -353,10 +353,12 @@ const SuggestionsManager = {
     const item = this._queue[this._pointer];
     this._dismissedKeys.add(item.key);
     // Mark dismissed in service worker
-    chrome.runtime.sendMessage({
-      action: 'UPDATE_EVENT_STATE',
-      payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
-    }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage({
+        action: 'UPDATE_EVENT_STATE',
+        payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+      }).catch(() => {});
+    } catch {}
     this._queue.splice(this._pointer, 1);
     this._pointer = Math.max(0, Math.min(this._pointer, this._queue.length - 1));
     this._render();
@@ -370,10 +372,12 @@ const SuggestionsManager = {
     if (!this._queue.length) return;
     for (const item of this._queue) {
       this._dismissedKeys.add(item.key);
-      chrome.runtime.sendMessage({
-        action: 'UPDATE_EVENT_STATE',
-        payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
-      }).catch(() => {});
+      try {
+        chrome.runtime.sendMessage({
+          action: 'UPDATE_EVENT_STATE',
+          payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+        }).catch(() => {});
+      } catch {}
     }
     this._queue = [];
     this._pointer = 0;

@@ -41,10 +41,12 @@ SERVER_PORT = 8080
 
 # Llamafile 0.8.14 — update URL + verify hash when upgrading
 LLAMAFILE_VERSION = "0.8.14"
-LLAMAFILE_URL = (
+_LLAMAFILE_BASE = (
     f"https://github.com/Mozilla-Ocho/llamafile/releases/download/"
     f"{LLAMAFILE_VERSION}/llamafile-{LLAMAFILE_VERSION}"
 )
+# Windows ships a separate .exe build; POSIX uses the APE binary (no extension)
+LLAMAFILE_URL = _LLAMAFILE_BASE + (".exe" if platform.system() == "Windows" else "")
 
 # Llama 3.2 1B Instruct Q4_K_M (~670 MB) — fast, good at writing tasks
 MODEL_FILENAME = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
