@@ -1334,7 +1334,9 @@ async function checkAndInjectStartToast() {
 
   const dismissBtn = document.createElement('button');
   dismissBtn.setAttribute('aria-label', 'Dismiss');
-  dismissBtn.textContent = '✕';
+  dismissBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  dismissBtn.style.display = 'inline-flex';
+  dismissBtn.style.alignItems = 'center';
   dismissBtn.style.cssText = `
     background: none;
     border: none;
