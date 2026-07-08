@@ -1,19 +1,6 @@
-:root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f7f7f9;
-  --text-primary: #1a1a1a;
-  --text-secondary: #6b6b70;
-  --border-color: #e5e5e5;
-
-  --ai-color: #5c3ce6;
-  --ai-bg: #f2effc;
-
-  --user-color: #2b8a5d;
-  --user-bg: #e8f4ec;
-
-  --diff-red: #e04a4a;
-  --diff-green: #2b8a5d;
-}
+/* Color tokens (--bg-*, --text-*, --border-color, --ai-color, --user-color,
+   --diff-*, --paste-color, --gemini-color, etc.) come from ../shared/theme.css,
+   loaded before this file — one palette shared with the popup and viewer. */
 
 * {
   box-sizing: border-box;
@@ -91,55 +78,122 @@ body {
   color: var(--text-primary);
 }
 
-/* ─── Scrollable Main Content ─────────────── */
-.scroll-container {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 0 20px 20px 20px;
+/* ─── Sticky pane (always visible: context, status, suggestions) ─── */
+.sticky-pane {
+  flex-shrink: 0;
+  padding: 0 20px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* ─── Collapsible body animation ─── */
+.collapsible-body {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+.collapsible-body.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ─── Collapse toggle button (chevron in status bar) ─── */
+.collapse-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 2px 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.collapse-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+.collapse-toggle svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.25s ease;
+}
+.collapse-toggle.is-collapsed svg {
+  transform: rotate(-90deg);
+}
+
+/* ─── Banner dismiss (✕) button ─── */
+.banner-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  align-self: flex-start;
+}
+.banner-dismiss svg { width: 13px; height: 13px; }
+.banner-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.06);
+}
+
+/* ─── Context chevron rotation ─── */
+.context-card .chevron {
+  transition: transform 0.25s ease;
+}
+.project-context.is-collapsed .context-card .chevron {
+  transform: rotate(180deg);
+}
+
+/* ─── sticky-review-section wrapper ─── */
+.sticky-review-section {
+  border-top: 1px solid var(--border-color);
+}
+.sticky-review-section .status-header {
+  border-top: none;
+}
+
+/* ─── Events pane (scrollable, max ~4 cards) ─── */
+.events-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px 8px 20px;
+  min-height: 0;
 }
 
 /* ──── Project Context Header ─────────────── */
 .project-context {
-  margin-top: 8px;
-}
-
-.context-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.context-header svg {
-  width: 16px;
-  height: 16px;
+  padding: 10px 0 6px;
 }
 
 .context-card {
-  background-color: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 16px;
+  background-color: transparent;
+  border-radius: 0;
+  padding: 4px 0;
+  padding-right: 24px;
   position: relative;
   cursor: pointer;
-  border: 1px solid var(--border-color);
-}
-
-.context-card h3 {
-  font-size: 0.95rem;
-  margin-bottom: 6px;
-  padding-right: 24px;
+  border: none;
 }
 
 .context-card p {
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   color: var(--text-secondary);
   line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .context-card .chevron {
@@ -155,7 +209,7 @@ body {
 .timeline {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 0;
   position: relative;
   padding-left: 36px;
 }
@@ -266,23 +320,35 @@ body {
 }
 
 /* ──── Card Style ───────────────*/
+/* One clean card treatment shared by every card type below — a full subtle
+   border and rounded corners, not a colored left-border spine. Identity
+   (own/AI/gemini/etc.) is already carried by the timeline node icon that
+   sits to the card's left, so the card itself stays neutral. */
 .card {
-  border: none;
-  border-left: 3px solid var(--border-color); 
-  border-radius: 0;
-  padding: 8px 0 8px 16px;
-  margin-top: 4px;
-  background-color: transparent;
-}
-
-.suggestion-card {
-  border-left-color: var(--ai-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  background-color: var(--bg-secondary);
 }
 
 .suggestion-card p {
   font-size: 0.9rem;
   margin-bottom: 12px;
   line-height: 1.5;
+}
+
+/* Native Gemini suggestions are a read-only record (accepted/rejected in
+   Google's own UI), so there are no action buttons and no bottom margin. */
+.suggestion-card--readonly p {
+  margin-bottom: 0;
+}
+
+.suggestion-warning {
+  font-size: 0.78rem;
+  color: var(--status-warn-fg);
+  margin-bottom: 8px;
+  margin-top: -4px;
 }
 
 .actions {
@@ -325,10 +391,6 @@ body {
 
 .btn-dismiss:hover {
   background-color: var(--bg-secondary);
-}
-
-.diff-card {
-  border-left-color: var(--ai-color);
 }
 
 .diff-block {
@@ -390,9 +452,10 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  background-color: transparent;
-  border-left: 3px solid var(--border-color);
-  padding: 8px 0 8px 16px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
   position: relative;
   cursor: pointer;
 }
@@ -418,9 +481,11 @@ body {
 }
 
 .image-card {
-  margin-top: 4px;
-  padding-left: 16px;
-  border-left: 3px solid var(--user-color);
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-secondary);
 }
 .img-placeholder {
   background-color: #e5e5e5;
@@ -557,4 +622,667 @@ body {
 
 .app-footer .status .dot.disconnected {
   background-color: var(--text-secondary, #888);
+}
+
+.app-footer .status .dot.available {
+  background-color: var(--status-warn-ico);
+}
+
+/* ───── Model status banner ─────────────── */
+.model-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.model-banner.download,
+.model-banner.launch {
+  border-color: var(--ai-color);
+  background: var(--ai-bg);
+}
+
+.model-banner .banner-text {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.model-banner .banner-text.error {
+  color: var(--diff-red);
+}
+
+.model-banner .banner-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--ai-color);
+  background: var(--ai-color);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.model-banner .banner-btn:hover {
+  opacity: 0.85;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--ai-color);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ───── Selection context banner ─────────────── */
+.selection-banner {
+  margin: 0 20px 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fff8ee;
+  border: 1px solid #f0c060;
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sel-quote {
+  color: var(--text-primary);
+  font-style: italic;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sel-input {
+  flex: 1;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  outline: none;
+  font-size: 0.8rem;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 2px 0;
+}
+
+.sel-input::placeholder {
+  color: #b0a080;
+}
+
+.sel-ask {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #c08020;
+  background: #c08020;
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sel-ask:hover {
+  opacity: 0.85;
+}
+
+.sel-ask:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sel-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.sel-dismiss svg { width: 14px; height: 14px; }
+
+.sel-dismiss:hover {
+  color: var(--text-primary);
+}
+
+/* ── Gemini event type ─────────────── */
+/* --gemini-color / --gemini-bg now come from ../shared/theme.css. */
+
+.timeline-event.gemini .node { color: var(--gemini-color); }
+.timeline-event.gemini .author {
+  color: var(--gemini-color);
+  border-color: #a8c7fa;
+  background: var(--gemini-bg);
+}
+/* ── Doc context row ─────────────── */
+.doc-context-row {
+  padding: 3px 0 6px;
+}
+
+#doc-context-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  opacity: 0.7;
+  color: var(--text-secondary);
+}
+#doc-context-indicator svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── At-a-glance status header ─────────────── */
+.status-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0 8px;
+}
+
+.status-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.status-icon.status-ok  { background: var(--user-bg); color: var(--user-color); }
+.status-icon.status-warn { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+.status-icon svg { width: 18px; height: 18px; }
+
+.status-body strong {
+  font-size: 0.9rem;
+  display: block;
+}
+.status-body p {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.3;
+}
+
+/* ── Section headers ─────────────── */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0 6px;
+}
+.section-header > span:first-child {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+.section-header button {
+  background: none;
+  border: none;
+  color: var(--ai-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.section-header button:hover { text-decoration: underline; }
+
+.count-badge {
+  background: var(--ai-color);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* ── Suggestions section ─────────────── */
+.suggestions-section {
+  margin-bottom: 4px;
+}
+
+/* No colored left-border spine — the .suggestion-tag label above already
+   carries the category color, so a second accent on the card itself would
+   just repeat the same signal. */
+.suggestion-card-new {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 4px;
+}
+
+.suggestion-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ai-color);
+  letter-spacing: 0.3px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.suggestion-card-new p {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.suggestion-context {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-preview-text {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+  display: none;
+}
+.suggestion-preview-text.visible { display: block; }
+
+.suggestion-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-preview {
+  background: none;
+  border: none;
+  color: var(--ai-color);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+.btn-preview:hover { text-decoration: underline; }
+
+.btn-apply {
+  background: var(--ai-color);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.btn-apply:hover { opacity: 0.85; }
+
+.btn-ignore {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+}
+.btn-ignore:hover { color: var(--text-primary); }
+
+/* ── Quick actions bar ─────────────── */
+.quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 10px 20px 6px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-color);
+}
+
+.qa-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.68rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s;
+}
+.qa-btn svg { width: 16px; height: 16px; }
+.qa-btn:hover:not(:disabled) {
+  background: var(--ai-bg);
+  border-color: var(--ai-color);
+  color: var(--ai-color);
+}
+.qa-btn.qa-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Footer update ─────────────── */
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 20px 16px;
+  background: var(--bg-primary);
+}
+
+.footer-scan {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scanning-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--user-color);
+  display: inline-block;
+}
+.scanning-dot.active {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ── Scan button in footer ─────────────── */
+#scan-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 4px;
+  transition: color 0.2s;
+  margin-left: 2px;
+}
+#scan-btn svg { width: 13px; height: 13px; }
+#scan-btn:hover { color: var(--user-color); }
+#scan-btn.scanning svg { animation: spin 0.8s linear infinite; }
+
+#last-scan-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+/* ── Compact event cards ─────────────── */
+.timeline-event-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.timeline-event-compact:last-child { border-bottom: none; }
+
+.ecc-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.ecc-icon svg { width: 15px; height: 15px; }
+
+.ecc-user  { background: var(--user-bg);  color: var(--user-color); }
+.ecc-ai    { background: var(--ai-bg);    color: var(--ai-color); }
+.ecc-gemini { background: var(--gemini-bg, #e8f0fe); color: var(--gemini-color, #1a73e8); }
+.ecc-warn  { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+
+.ecc-body {
+  flex: 1;
+  min-width: 0;
+}
+.ecc-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ecc-meta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ecc-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ecc-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.ecc-btn:hover {
+  border-color: var(--ai-color);
+  color: var(--ai-color);
+}
+
+.ecc-check {
+  color: var(--user-color);
+  display: flex;
+  align-items: center;
+}
+.ecc-check svg { width: 16px; height: 16px; }
+
+/* ── Paraphrase card ─────────────── */
+/* No colored left-border spine — the .suggestion-tag label in the header
+   already carries the category color. */
+.paraphrase-card {
+  margin: 0 20px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.paraphrase-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.btn-paraphrase-dismiss {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.btn-paraphrase-dismiss svg { width: 13px; height: 13px; }
+.btn-paraphrase-dismiss:hover { color: var(--text-primary); }
+
+.paraphrase-card textarea {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  resize: vertical;
+  outline: none;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+.paraphrase-card textarea:focus {
+  border-color: var(--ai-color);
+}
+
+/* ── Panel tabs ─────────────────────────────── */
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.panel-tab {
+  padding: 7px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.15s;
+}
+.panel-tab.active {
+  color: var(--ai-color);
+  border-bottom-color: var(--ai-color);
+}
+.panel-tab[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.soon-badge {
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--border-color);
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.panel-body {
+  flex-shrink: 0;
+}
+
+/* ── Coming-soon chat panel ─────────────────── */
+.coming-soon-panel {
+  padding: 18px 20px 10px;
+  text-align: center;
+}
+.coming-soon-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.coming-soon-sub {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── Brainstorm format toggle ───────────────── */
+.brainstorm-format {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.fmt-btn {
+  flex: 1;
+  padding: 4px 0;
+  font-size: 0.74rem;
+  font-family: "Atkinson Hyperlegible", sans-serif;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.fmt-btn.active {
+  background: var(--ai-color);
+  color: #fff;
+  border-color: var(--ai-color);
+}
+.fmt-btn:not(.active):hover {
+  border-color: var(--ai-color);
+  color: var(--ai-color);
+}
+
+/* ── Scan time label ────────────────────────── */
+.scan-time-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+/* ── events-pane section header ─────────────── */
+.events-header {
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  z-index: 2;
+  padding-top: 8px;
 }

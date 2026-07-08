@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild'
 import { cp, mkdir, copyFile, access } from 'node:fs/promises'
+import path from 'node:path'
 
 const watch = process.argv.includes('--watch')
 
@@ -14,7 +15,9 @@ async function build() {
   await mkdir('dist/options',     { recursive: true })
   await mkdir('dist/status',      { recursive: true })
   await mkdir('dist/sidepanel',   { recursive: true })
+  await mkdir('dist/viewer',      { recursive: true })
   await mkdir('dist/icons',       { recursive: true })
+  await mkdir('dist/shared',      { recursive: true })
 
   const ctx = await esbuild.context({
     entryPoints: {
@@ -24,6 +27,7 @@ async function build() {
       'options/options':           'src/options/options.js',
       'status/status':             'src/status/status.js',
       'sidepanel/sidepanel':       'src/sidepanel/sidepanel.js',
+      'viewer/viewer':             'src/viewer/viewer.js',
     },
     bundle:    true,
     outdir:    'dist',
@@ -44,10 +48,25 @@ async function build() {
   await copyFile('src/status/status.css',      'dist/status/status.css')
   await copyFile('src/sidepanel/sidepanel.html', 'dist/sidepanel/sidepanel.html')
   await copyFile('src/sidepanel/sidepanel.css', 'dist/sidepanel/sidepanel.css')
+  await copyFile('src/viewer/viewer.html',      'dist/viewer/viewer.html')
+  await copyFile('src/viewer/viewer.css',       'dist/viewer/viewer.css')
+  await copyFile('src/shared/theme.css',        'dist/shared/theme.css')
 
   if (await exists('icons')) {
     await cp('icons', 'dist/icons', { recursive: true })
   }
+
+  if (await exists('src/assets')) {
+    await cp('src/assets', 'dist/assets', { recursive: true })
+  }
+
+  // Ship host.py source (for auditability) and the prebuilt platform binaries
+  // (bin/) — skip build/, Nuitka's local scratch output, which isn't part of
+  // the distributable package.
+  await cp('native-host', 'dist/native-host', {
+    recursive: true,
+    filter: (src) => !src.includes(`native-host${path.sep}build`),
+  })
 
   if (watch) {
     await ctx.watch()

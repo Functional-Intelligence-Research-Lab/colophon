@@ -37,6 +37,78 @@ export async function clearSession() {
   await chrome.storage.local.remove('session')
 }
 
+export async function getSessionByDocId(docId) {
+  const data = await chrome.storage.local.get('sessions')
+  return (data.sessions ?? {})[docId] ?? null
+}
+
+export async function saveSessionByDocId(docId, session) {
+  const data = await chrome.storage.local.get('sessions')
+  const sessions = data.sessions ?? {}
+  sessions[docId] = session
+  await chrome.storage.local.set({ sessions })
+}
+
+/**
+ * Collapses consecutive runs (length >= 2) of plain `edit` events that fall
+ * before the most recent `checkpoint` into a single `edit_summary` roll-up
+ * each. `edit` events carry no text snapshot at all (only position/char-delta
+ * bookkeeping — see flushEdit() in content/content.js), so this loses no
+ * reconstructable information; every event with acceptance/provenance value
+ * (ai_interaction, ai_suggestion, gemini_suggestion, paste, checkpoint,
+ * heuristic_suggestion) is passed through untouched. Everything from the
+ * most recent checkpoint onward is left alone (still "live").
+ * Pure function — no chrome.* dependency — used by the service worker's
+ * storage-quota auto-export/trim cycle.
+ */
+export function aggregateOldEditEvents(events) {
+  let lastCheckpointIdx = -1
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'checkpoint') { lastCheckpointIdx = i; break }
+  }
+  if (lastCheckpointIdx <= 0) return { events, changed: false }
+
+  const result = []
+  let changed = false
+  let run = []
+
+  const flushRun = () => {
+    if (run.length >= 2) {
+      const charDeltaSum = run.reduce((s, e) => s + (e.meta?.char_delta ?? 0), 0)
+      const charCountSum = run.reduce((s, e) => s + (e.meta?.char_count ?? 0), 0)
+      result.push({
+        timestamp: run[run.length - 1].timestamp,
+        type: 'edit_summary',
+        meta: {
+          char_delta_sum: charDeltaSum,
+          char_count_sum: charCountSum,
+          source_event_count: run.length,
+          first_ts: run[0].timestamp,
+          last_ts: run[run.length - 1].timestamp,
+          aggregated: true,
+        },
+      })
+      changed = true
+    } else {
+      result.push(...run)
+    }
+    run = []
+  }
+
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]
+    if (i < lastCheckpointIdx && e.type === 'edit') {
+      run.push(e)
+    } else {
+      flushRun()
+      result.push(e)
+    }
+  }
+  flushRun()
+
+  return { events: result, changed }
+}
+
 /** Returns the persisted anonymous user ID, generating one if missing. */
 export async function ensureUserId() {
   const settings = await getSettings()

@@ -1,14 +1,14 @@
 export default [
   {
     // Skip vendored third-party libraries (e.g. JSZip)
-    ignores: ['src/lib/jszip.js', 'src/lib/jszip.min.js', 'node_modules/**', 'dist/**'],
+    ignores: ['src/lib/jszip.js', 'node_modules/**', 'dist/**'],
   },
   {
     files: ['src/**/*.js'],
     rules: {
       'no-unused-vars':    ['warn', { argsIgnorePattern: '^_' }],
       'no-console':        'off',
-      'eqeqeq':            ['error', 'always'],
+      'eqeqeq':            ['error', 'always', { null: 'ignore' }],
       'no-var':            'error',
       'prefer-const':      'error',
       'no-implicit-globals': 'error',

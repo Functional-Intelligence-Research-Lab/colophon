@@ -1,13 +1,10 @@
 /**
- * popup.js — Colophon popup (issue #30: 5 states)
+ * popup.js — Colophon popup
  *
- * Visual layout matches the approved Sprint 1 design:
- *   - Header: doc title + settings gear
- *   - Originality verdict banner (good / warn / bad)
- *   - Breakdown card: Own writing / AI Paraphrase / External Source bars
- *   - Recent Activity timeline (3 most recent events)
- *   - Start/Stop, View full log, Export
- *   - Footer: "Private and local" + TWFF link
+ * Layout: header (doc title + settings gear), originality verdict banner
+ * (good / warn / bad), breakdown card (Own writing / AI Paraphrase /
+ * External Source bars), Recent Activity timeline (3 most recent events),
+ * Start/Stop, View full log, Export, footer ("Private and local" + TWFF link).
  *
  * Five rendered states:
  *   1. No session                — verdict hidden, breakdown empty, timeline empty
@@ -24,8 +21,6 @@ const $ = id => document.getElementById(id)
 const ACTIVITY_FALLBACK = [
   { type: 'info', title: 'No activity yet', meta: ['Start recording in Google Docs to watch events.'] },
 ]
-
-const TWFF_REPO = 'https://github.com/Functional-Intelligence-Research-Lab/twff'
 
 // Keep popup data live while open
 let _refreshTimer = null
@@ -81,14 +76,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const exportButton = $('btn-export')
   if (exportButton) {
+    const exportLabel = exportButton.querySelector('.btn-label')
     exportButton.addEventListener('click', async () => {
+      const originalText = exportLabel.textContent;
+      exportLabel.textContent = 'Exporting…';
+      exportButton.disabled = true;
       try {
         const result = await exportTwff()
+        exportLabel.textContent = 'Exported ✓';
         showNotice(`Exported ${result.filename}`, false)
+        setTimeout(() => {
+          exportLabel.textContent = originalText;
+          exportButton.disabled = false;
+        }, 2000);
       } catch (err) {
         console.error('[Colophon] Export failed:', err.message)
+        exportLabel.textContent = originalText;
+        exportButton.disabled = false;
         showNotice('Start recording before exporting.')
       }
+    })
+  }
+
+  const viewerButton = $('btn-viewer')
+  if (viewerButton) {
+    viewerButton.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('viewer/viewer.html') + '?live=1' })
+      window.close()
     })
   }
 
@@ -154,8 +168,12 @@ function renderRecordButton(session, tab) {
 function renderScores(session) {
   const events = session?.events ?? []
   const editCount = events.filter(event => event.type === 'edit').length
-  const aiCount = events.filter(event => event.type === 'ai_interaction').length
+  const aiCount = events.filter(
+    event => event.type === 'ai_interaction' &&
+    (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_modified' || event.meta?.acceptance === 'modified')
+  ).length
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
+  const hasData = editCount + aiCount + sourceCount > 0
   const total = Math.max(1, editCount + aiCount + sourceCount)
 
   const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 0
@@ -165,6 +183,44 @@ function renderScores(session) {
   setScore('own', own)
   setScore('ai', ai)
   setScore('source', source)
+  renderVerdict(hasData ? ai : null)
+}
+
+// Icon paths for the two verdict states. Both are single filled paths (not
+// stroke-based) since .leaf-mark svg forces fill:currentColor; stroke:none.
+const LEAF_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
+const WARN_ICON_PATH = '<path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/>'
+
+// Turns the raw own/AI/source split into a verdict banner, with a distinct
+// warn state once AI involvement is the majority of the document.
+function renderVerdict(aiPercent) {
+  const banner = $('summary-banner')
+  const icon = $('verdict-icon')
+  const title = $('summary-title')
+  if (!banner || !icon || !title) return
+
+  banner.classList.remove('summary--good', 'summary--neutral', 'summary--warn')
+
+  if (aiPercent === null) {
+    title.innerHTML = 'Nothing recorded <strong>yet</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--neutral')
+    return
+  }
+
+  if (aiPercent <= 20) {
+    title.innerHTML = 'Your writing is <strong>mostly original</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--good')
+  } else if (aiPercent <= 50) {
+    title.innerHTML = 'Your writing is <strong>a mix of you and AI</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
+    banner.classList.add('summary--neutral')
+  } else {
+    title.innerHTML = 'Your writing is <strong>mostly AI-assisted</strong>'
+    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${WARN_ICON_PATH}</svg>`
+    banner.classList.add('summary--warn')
+  }
 }
 
 function setScore(id, value) {
@@ -185,7 +241,7 @@ function activityFromSession(session) {
   const events = session?.events ?? []
   const mapped = events
     .filter(event => !['session_start', 'session_end', 'focus_change'].includes(event.type))
-    .slice(-4)
+    .slice(-3)
     .reverse()
     .map(eventToActivity)
 
@@ -284,5 +340,3 @@ function showNotice(message, isError = true) {
   }, 2600)
 }
 
-refresh()
-setInterval(refresh, 1200)
