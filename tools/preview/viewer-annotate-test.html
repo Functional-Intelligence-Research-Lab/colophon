@@ -70,6 +70,35 @@
         log('Unlocated section: ' + (unlocatedMatch ? unlocatedMatch[0] : 'none'));
         log('AI coverage: ' + (aiCoverageMatch ? aiCoverageMatch[1] + '%' : 'n/a'));
         log('Paste coverage: ' + (pasteCoverageMatch ? pasteCoverageMatch[1] + '%' : 'n/a'));
+
+        // Static check: no dangerous markup should survive into the report HTML.
+        const hasScript = /<script/i.test(reportHtml);
+        const hasOnError = /onerror\s*=/i.test(reportHtml);
+        const hasJsUrl = /javascript:/i.test(reportHtml);
+        log('Contains <script>? ' + hasScript);
+        log('Contains onerror=? ' + hasOnError);
+        log('Contains javascript: URL? ' + hasJsUrl);
+
+        // Dynamic check: actually NAVIGATE to the report blob URL (a real
+        // top-level parse, unlike innerHTML — this is what makes <script>/
+        // onerror= actually execute) and check whether the payload fired.
+        const xssFrame = document.createElement('iframe');
+        xssFrame.style.width = '10px';
+        xssFrame.style.height = '10px';
+        document.body.appendChild(xssFrame);
+        await new Promise((resolve) => {
+          xssFrame.addEventListener('load', resolve, { once: true });
+          xssFrame.src = win.__capturedReportUrl;
+        });
+        await new Promise((r) => setTimeout(r, 300)); // let onerror handlers fire
+        const xssFired = xssFrame.contentWindow.__xss_fired === true;
+        log('XSS payload executed on navigation? ' + xssFired);
+
+        if (hasScript || hasOnError || hasJsUrl || xssFired) {
+          log('FAIL: malicious content survived sanitization');
+        } else {
+          log('PASS: malicious content was neutralized');
+        }
         log('DONE');
       } catch (err) {
         log('ERROR: ' + err.message + '\n' + err.stack);

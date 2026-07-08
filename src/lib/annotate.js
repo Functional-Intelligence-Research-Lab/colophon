@@ -21,6 +21,8 @@
  *    step, which mutates a detached document fragment (never the live page).
  */
 
+import DOMPurify from 'dompurify';
+
 const KNOWN_TYPES = new Set([
   'session_start', 'session_end', 'session_resume',
   'edit_block', 'edit',
@@ -311,6 +313,12 @@ export function cssClassFor(key) {
 // ── 8. Top-level orchestration ────────────────────────────────────────────
 export function computeAnnotations(xhtmlStr, log) {
   const dom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
+  // xhtmlStr is untrusted (a .twff file's content/document.xhtml can be
+  // hand-crafted by anyone — this is a user-facing file-load feature, not a
+  // Google-Docs-only path) — sanitize before any offset math runs, so every
+  // downstream consumer (oplog, verify, fuzzyLocate, wrapRange) only ever
+  // sees cleaned content. A no-op for real Google-Docs-exported XHTML.
+  DOMPurify.sanitize(dom.body, { IN_PLACE: true });
   const { text: finalText, nodes, offsets } = linearizeDom(dom.body);
   const docLength = finalText.length;
 
