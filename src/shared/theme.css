@@ -1,0 +1,52 @@
+/**
+ * theme.css — shared design tokens for the popup, side panel, and viewer.
+ *
+ * The categorical colors match the palette already validated (accessibility/
+ * contrast) and live on colophon.firl.nl/pricing, so the extension and the
+ * web app read as one product instead of each surface inventing its own
+ * colors. Load this before each surface's own stylesheet.
+ */
+:root {
+  /* Neutral surface tokens */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f9;
+  --bg-card: #f9fafb;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6b70;
+  --text-muted: #9ca3af;
+  --border-color: #e5e5e5;
+
+  /* Categorical provenance palette (own / AI / pasted / AI-paraphrased) */
+  --own-color: #008300;
+  --own-bg: #e3f2e3;
+  --ai-color: #4a3aa7;
+  --ai-bg: #f2effc;
+  --paste-color: #c98500;
+  --paste-bg: #fdf0d9;
+  --paraphrase-color: #c2185b;
+  --paraphrase-bg: #fce4ec;
+
+  /* Existing call sites across the extension refer to "user" for own-writing
+     — kept as an alias rather than renaming every usage. */
+  --user-color: var(--own-color);
+  --user-bg: var(--own-bg);
+
+  /* Status (verdict banners, warnings) */
+  --status-good-bg: #dcfce7;
+  --status-good-fg: #166534;
+  --status-good-ico: var(--own-color);
+  --status-warn-bg: #fef3c7;
+  --status-warn-fg: #92400e;
+  --status-warn-ico: #d97706;
+  --status-bad-bg: #fee2e2;
+  --status-bad-fg: #991b1b;
+  --status-bad-ico: #dc2626;
+
+  --diff-red: #dc2626;
+  --diff-green: var(--own-color);
+
+  /* Gemini/third-party integration accent — deliberately distinct from the
+     categorical palette so it never impersonates a provenance category. */
+  --gemini-color: #1a73e8;
+  --gemini-bg: #e8f0fe;
+}

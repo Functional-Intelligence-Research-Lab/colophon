@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colophon Viewer</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <header class="viewer-header">
+    <div class="brand">
+      <img class="logo" src="../icons/green_doc.svg" alt="" width="24" height="24">
+      <span class="brand-name">Colophon Viewer</span>
+    </div>
+    <label class="open-btn" for="file-input">Open .twff file</label>
+    <input id="file-input" type="file" accept=".twff">
+    <button id="btn-annotated-pdf" class="open-btn" disabled title="Load a .twff file to enable">Export Annotated PDF</button>
+  </header>
+
+  <div id="drop-zone" class="drop-zone">
+    <div class="drop-content">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="12" y1="18" x2="12" y2="12"/>
+        <polyline points="9 15 12 12 15 15"/>
+      </svg>
+      <p class="drop-label">Drag a <strong>.twff</strong> file here</p>
+      <p class="drop-sub">or click <strong>Open .twff file</strong> above</p>
+    </div>
+  </div>
+
+  <div id="viewer-content" class="viewer-content" hidden>
+    <div class="session-bar" id="session-bar"></div>
+    <div class="stats-row" id="stats-row"></div>
+    <div class="timeline-wrap">
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </div>
+
+  <div id="error-banner" class="error-banner" hidden></div>
+
+  <script type="module" src="./viewer.js"></script>
+</body>
+</html>
