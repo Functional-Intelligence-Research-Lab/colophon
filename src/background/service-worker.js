@@ -22,6 +22,7 @@ import {
   aggregateOldEditEvents,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
+import { debugLog } from "../shared/debug.js";
 
 // ── Native Messaging (llamafile host) ─────────────────────────────────────────
 
@@ -41,7 +42,7 @@ function getNativePort() {
     _nativePort.onMessage.addListener(onNativeMessage);
     _nativePort.onDisconnect.addListener(() => {
       const err = chrome.runtime.lastError?.message || '';
-      console.log('[Colophon] Native host disconnected:', err);
+      debugLog('[Colophon] Native host disconnected:', err);
       _nativePort = null;
       const notFound = err.toLowerCase().includes('not found') ||
                        err.toLowerCase().includes('specified native') ||
@@ -51,7 +52,7 @@ function getNativePort() {
     });
     return _nativePort;
   } catch (e) {
-    console.log('[Colophon] Cannot connect to native host:', e.message);
+    debugLog('[Colophon] Cannot connect to native host:', e.message);
     _nativePort = null;
     _modelStatus = 'host_not_installed';
     broadcastModelStatus();
@@ -60,7 +61,7 @@ function getNativePort() {
 }
 
 function onNativeMessage(msg) {
-  console.log('[Colophon] Native msg:', msg.action, msg);
+  debugLog('[Colophon] Native msg:', msg.action, msg);
   switch (msg.action) {
     case 'MODEL_STATUS':
       _modelStatus = msg.found ? 'available' : 'no_model';
@@ -120,7 +121,7 @@ chrome.storage.local.get('llamafilePort').then(res => {
 }).catch(() => {});
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("[Colophon] Installed.");
+  debugLog("[Colophon] Installed.");
   chrome.contextMenus.create({
     id: 'colophon-paraphrase',
     title: 'Paraphrase with Colophon',
@@ -342,7 +343,7 @@ async function startSession({ tabId, docUrl } = {}) {
   // so checking getSessionByDocId() alone is insufficient.
   const activeSession = await getSession();
   if (activeSession?.isRecording && activeSession.docId === docId) {
-    console.log("[Colophon SW] startSession: already recording for this doc — reattaching only", { docId });
+    debugLog("[Colophon SW] startSession: already recording for this doc — reattaching only", { docId });
     if (tabId) {
       activeSession.tabId = tabId;
       await saveSession(activeSession);
@@ -364,7 +365,7 @@ async function startSession({ tabId, docUrl } = {}) {
     session.tabId = tabId ?? null;
     session.googleDocId = googleDocId ?? session.googleDocId ?? null;
     session.events.push({ timestamp: now, type: "session_resume", meta: {} });
-    console.log("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
+    debugLog("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
   } else {
     const userId = await ensureUserId();
     session = {
@@ -381,7 +382,7 @@ async function startSession({ tabId, docUrl } = {}) {
       }
     };
     session.events.push({ timestamp: now, type: "session_start", meta: {} });
-    console.log("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
+    debugLog("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
   }
   await saveSession(session);
 
@@ -424,7 +425,7 @@ async function autoStartSession(sender) {
   }
   const tabId = sender?.tab?.id ?? null;
   const docUrl = sender?.tab?.url ?? "";
-  console.log("[Colophon SW] auto session_start", { tabId, hasUrl: !!docUrl });
+  debugLog("[Colophon SW] auto session_start", { tabId, hasUrl: !!docUrl });
   return startSession({ tabId, docUrl });
 }
 
@@ -438,7 +439,7 @@ async function stopSession() {
     type: "session_end",
     meta: {},
   });
-  console.log("[Colophon SW] session_stop", {
+  debugLog("[Colophon SW] session_stop", {
     eventCount: session.events.length,
   });
   await saveSession(session);
@@ -456,14 +457,14 @@ async function stopSession() {
 async function appendEvent(event) {
   const session = await getSession();
   if (!session?.isRecording) {
-    console.log("[Colophon SW] LOG_EVENT rejected", {
+    debugLog("[Colophon SW] LOG_EVENT rejected", {
       type: event?.type ?? "unknown",
       reason: "not recording",
     });
     return { ok: false };
   }
   if (isNoOpEditEvent(event)) {
-    console.log("[Colophon SW] LOG_EVENT ignored", {
+    debugLog("[Colophon SW] LOG_EVENT ignored", {
       type: event?.type ?? "unknown",
       reason: "zero edit",
       meta: event?.meta,
@@ -472,7 +473,7 @@ async function appendEvent(event) {
   }
   const userId = await ensureUserId();
   session.events.push({ author_id: userId, ...event });
-  console.log("[Colophon SW] LOG_EVENT stored", {
+  debugLog("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
     meta: event.meta,
   });
@@ -536,7 +537,7 @@ async function maybeAutoExportAndTrim() {
       chrome.runtime.sendMessage({ action: 'SYNC_TIMELINE', events: fresh.events }).catch(() => {});
     }
     chrome.runtime.sendMessage({ action: 'AUTO_EXPORT_LIGHTENED' }).catch(() => {});
-    console.log("[Colophon SW] auto-export + trim complete", {
+    debugLog("[Colophon SW] auto-export + trim complete", {
       eventsBefore: session.events.length,
       eventsAfter: trimmed.events.length,
     });
@@ -622,13 +623,13 @@ async function hashDocUrl(url) {
 }
 
 async function activateContentScript(tabId) {
-  console.log("[Colophon SW] activate content script", { tabId });
+  debugLog("[Colophon SW] activate content script", { tabId });
   try {
     await chrome.tabs.sendMessage(tabId, { type: "ACTIVATE" });
-    console.log("[Colophon SW] content script activated by message", { tabId });
+    debugLog("[Colophon SW] content script activated by message", { tabId });
     return;
   } catch {
-    console.log("[Colophon SW] content script message failed; injecting", {
+    debugLog("[Colophon SW] content script message failed; injecting", {
       tabId,
     });
     // Already-open Docs tabs may not have the content script after extension reload.
@@ -639,9 +640,9 @@ async function activateContentScript(tabId) {
       target: { tabId },
       files: ["content/content.js"],
     });
-    console.log("[Colophon SW] content script injected", { tabId });
+    debugLog("[Colophon SW] content script injected", { tabId });
     await chrome.tabs.sendMessage(tabId, { type: "ACTIVATE" });
-    console.log("[Colophon SW] content script activated after inject", {
+    debugLog("[Colophon SW] content script activated after inject", {
       tabId,
     });
   } catch (err) {
@@ -663,7 +664,7 @@ async function updateMetadata({ key, value }) {
   }
 
   session.metadata[key] = value;
-  console.log(`[Colophon BG] Metadata updated: ${key} =`, value);
+  debugLog(`[Colophon BG] Metadata updated: ${key} =`, value);
   
   await saveSession(session);
 

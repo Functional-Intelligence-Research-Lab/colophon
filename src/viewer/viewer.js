@@ -425,7 +425,7 @@ function _buildAnnotatedPageHTML({
     <div class="page appendix-page">
       <div class="appendix-banner unlocated-banner">
         <h2 class="appendix-title">Unlocated events (${unlocatedList.length})</h2>
-        <p class="appendix-note">These could not be matched to the final document text with confidence — the recorded text may have been edited beyond recognition, or too little context was captured to search for it. This indicates positional drift.</p>
+        <p class="appendix-note">These couldn't be matched to the final document text with confidence — likely edited beyond recognition, or with too little surrounding context to search for.</p>
       </div>
       <ul>
         ${unlocatedList.map((u) => `<li><span class="pill unlocated">${esc(u.event.type)}</span> ${esc(u.reason)}</li>`).join('')}
