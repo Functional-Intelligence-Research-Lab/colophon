@@ -345,5 +345,3 @@ function showNotice(message, isError = true) {
   }, 2600)
 }
 
-refresh()
-setInterval(refresh, 1200)

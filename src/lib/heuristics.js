@@ -123,7 +123,7 @@ export function analyzeText(text) {
     // 7. Long sentences
     for (const s of sentences) {
       const wc = s.split(/\s+/).length;
-      if (wc > 30) {
+      if (wc > 40) {
         add(
           'long_sentence',
           `Long sentence (${wc} words). Consider splitting it for clarity.`,
@@ -158,7 +158,7 @@ export function analyzeText(text) {
     const freq = /** @type {Record<string,number>} */ ({});
     for (const w of contentWords) freq[w] = (freq[w] ?? 0) + 1;
     for (const [w, n] of Object.entries(freq)) {
-      if (n >= 3) {
+      if (n >= 4) {
         add(
           'word_repetition',
           `"${w}" appears ${n} times in this paragraph. Consider varying your word choice.`,

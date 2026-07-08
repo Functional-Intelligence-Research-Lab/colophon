@@ -232,13 +232,21 @@ export class ProcessLog {
      * Images are inlined as base64 data URIs so they survive in the TWFF container.
      * @returns {Promise<string>} XHTML string with inlined images.
      */
-    async getXhtmlContentEpub(){
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab || !tab.url) throw new Error("Could not find active tab.");
+    async getXhtmlContentEpub(docId = null){
+        // A real docId (the Google Docs id, not this project's opaque session
+        // docId hash) lets a background-triggered export — e.g. the
+        // storage-quota auto-export, which can't assume the Docs tab is
+        // focused — skip the active-tab lookup entirely. The underlying
+        // request is a credentialed fetch via the docs.google.com host
+        // permission, so it never actually needed an open tab, only the id.
+        if (!docId) {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab || !tab.url) throw new Error("Could not find active tab.");
 
-        const docIdMatch = tab.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-        if (!docIdMatch) throw new Error("Not a valid Google Doc URL");
-        const docId = docIdMatch[1];
+            const docIdMatch = tab.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+            if (!docIdMatch) throw new Error("Not a valid Google Doc URL");
+            docId = docIdMatch[1];
+        }
 
         const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=epub`;
         const response = await fetch(exportUrl);
@@ -383,10 +391,10 @@ export class ProcessLog {
      * and JSZip generation are asynchronous. 
      * @returns {Promise<Blob>} A Blob representing the ZIP file.
      */
-    async export() {
+    async export(docId = null) {
         //const endTime = this.endSession();
         const processLogDict = this.toDict();
-        const xhtmlContent = await this.getXhtmlContentEpub()
+        const xhtmlContent = await this.getXhtmlContentEpub(docId)
         //const xhtmlContent = await this.getHtml()
         const metaData = await this.buildMetadata()
 
