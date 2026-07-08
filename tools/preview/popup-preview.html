@@ -60,7 +60,7 @@
       // Inject mock as the first <script> right after <head>
       const patched = html.replace(
         /<head([^>]*)>/i,
-        `<head$1><script>${mock}</script><base href="../../src/popup/">`,
+        `<head$1><script>${mock}<\/script><base href="../../src/popup/">`,
       )
       const frame = document.getElementById('popup-frame')
       frame.srcdoc = patched

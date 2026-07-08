@@ -15,15 +15,17 @@ let _docContext = null;
 let _lastScanTime = 0;
 let _scanLabelInterval = null;
 
+const _DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
 function _updateContextIndicator() {
   const el = document.getElementById('doc-context-indicator');
   if (!el) return;
   const words = _docContext?.text?.trim().split(/\s+/).filter(Boolean).length ?? 0;
   if (words > 0) {
-    el.textContent = `\u{1F4C4} ${words.toLocaleString()} words in context`;
+    el.innerHTML = `${_DOC_ICON}<span>${words.toLocaleString()} words in context</span>`;
     el.style.color = 'var(--user-color, #5c3ce6)';
   } else {
-    el.textContent = '\u{1F4C4} No document context yet';
+    el.innerHTML = `${_DOC_ICON}<span>No document context yet</span>`;
     el.style.color = 'var(--text-secondary, #999)';
   }
 }
@@ -337,15 +339,15 @@ const SuggestionsManager = {
   _dismissedKeys: new Set(), // rule::excerpt keys the user explicitly dismissed
 
   _TAG_MAP: {
-    readability:        '✦ Coherence',
-    adverb_density:     '✦ Style',
-    long_paragraph:     '✦ Structure',
-    passive_voice:      '✦ Clarity',
-    filler_words:       '✦ Style',
-    wordy_phrase:       '✦ Clarity',
-    long_sentence:      '✦ Structure',
-    repeated_starts:    '✦ Style',
-    word_repetition:    '✦ Clarity',
+    readability:        'Coherence',
+    adverb_density:     'Style',
+    long_paragraph:     'Structure',
+    passive_voice:      'Clarity',
+    filler_words:       'Style',
+    wordy_phrase:       'Clarity',
+    long_sentence:      'Structure',
+    repeated_starts:    'Style',
+    word_repetition:    'Clarity',
   },
 
   init() {
@@ -455,7 +457,7 @@ const SuggestionsManager = {
     if (badge) badge.textContent = this._queue.length;
 
     const { event } = this._queue[this._pointer] ?? this._queue[0];
-    const tag = this._TAG_MAP[event.meta?.rule] ?? '✦ Writing tip';
+    const tag = this._TAG_MAP[event.meta?.rule] ?? 'Writing tip';
     const message = event.meta?.text || '';
     const excerpt = event.meta?.excerpt || '';
 
@@ -778,7 +780,7 @@ const TimelineRenderer = {
 
     else if (evt.type === 'heuristic_suggestion') {
       typeClass = 'ai';
-      authorLabel = '✦ Writing tip';
+      authorLabel = 'Writing tip';
       const tipText = evt.meta.text || '';
       const excerpt = evt.meta.excerpt ? `<div class="text-only" style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;font-style:italic;">"${evt.meta.excerpt}"</div>` : '';
       contentHTML = `
@@ -797,7 +799,7 @@ const TimelineRenderer = {
       // Distinguish native Gemini (drives the real Insert button) from local AI
       // (pastes text via the clipboard path).
       const isGemini = evt.meta.model === 'google/gemini';
-      authorLabel = isGemini ? '✦ Gemini • Suggestion' : 'AI • Suggestion';
+      authorLabel = isGemini ? 'Gemini • Suggestion' : 'AI • Suggestion';
       const fullText = evt.meta.text || 'No preview available.';
       const isLong = fullText.length > 100;
       const preview = isLong
@@ -1441,7 +1443,7 @@ const ChatInput = {
         </div>
         <div class="ecc-action" style="gap:4px;display:flex;">
           ${(isTimeout || isNetworkErr) ? '<button class="ecc-btn ecc-btn-retry-ai">Retry</button>' : ''}
-          <button class="ecc-btn-close-err" title="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;">✕</button>
+          <button class="ecc-btn-close-err" title="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
         </div>
       `;
       errCard.querySelector('.ecc-btn-close-err')?.addEventListener('click', () => errCard.remove());
@@ -1682,7 +1684,7 @@ const SelectionContext = {
       <div class="sel-row">
         <input class="sel-input" placeholder="Ask something about this…" type="text">
         <button class="sel-ask banner-btn">Ask AI</button>
-        <button class="sel-dismiss" aria-label="Dismiss">✕</button>
+        <button class="sel-dismiss" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
     `;
 
