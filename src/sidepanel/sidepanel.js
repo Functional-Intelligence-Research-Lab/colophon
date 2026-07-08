@@ -1,4 +1,5 @@
 import { complete } from '../lib/ai/ollama-client.js';
+import { esc } from '../shared/esc.js';
 
 // ── Utility: Debounce Function ───────────────────────────────────────────────
 function debounce(func, wait) {
@@ -260,8 +261,9 @@ function initCollapsibleSections() {
       if (!animate) requestAnimationFrame(() => { suggestionsSection.style.transition = ''; });
     };
 
-    // Restore saved state
-    applyReviewState(sessionStorage.getItem(REVIEW_KEY) === '1', false);
+    // Restore saved state — collapsed by default when no preference is
+    // stored yet (heuristics are a lighter-weight, secondary feature now).
+    applyReviewState(sessionStorage.getItem(REVIEW_KEY) !== '0', false);
 
     reviewCollapseBtn.addEventListener('click', () => {
       const isNowCollapsed = !reviewCollapseBtn.classList.contains('is-collapsed');
@@ -424,13 +426,12 @@ const SuggestionsManager = {
     const message = event.meta?.text || '';
     const excerpt = event.meta?.excerpt || '';
 
-    const _esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     card.innerHTML = `
       <div class="suggestion-card-new">
         <span class="suggestion-tag">${tag}</span>
-        <p>${_esc(message)}</p>
-        ${excerpt ? `<div class="suggestion-context">&ldquo;${_esc(excerpt.slice(0, 100))}&rdquo;</div>` : ''}
-        ${excerpt ? `<div class="suggestion-preview-text">${_esc(excerpt)}</div>` : ''}
+        <p>${esc(message)}</p>
+        ${excerpt ? `<div class="suggestion-context">&ldquo;${esc(excerpt.slice(0, 100))}&rdquo;</div>` : ''}
+        ${excerpt ? `<div class="suggestion-preview-text">${esc(excerpt)}</div>` : ''}
         <div class="suggestion-actions">
           ${excerpt ? `<a href="#" class="btn-preview">Preview</a>` : ''}
           <button class="btn-apply">Apply</button>
@@ -478,6 +479,9 @@ const TimelineRenderer = {
         chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
           _updateScanningDot(res?.session?.isRecording ?? false);
         });
+      }
+      if (msg.action === 'AUTO_EXPORT_LIGHTENED') {
+        _showAutoExportNotice();
       }
       if (msg.action === 'DOC_CONTEXT_UPDATE') {
         _docContext = { text: msg.text, cursorIndex: msg.cursorIndex, selectedText: msg.selectedText };
@@ -656,7 +660,7 @@ const TimelineRenderer = {
       iconClass = 'ecc-warn';
       iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`;
       title = this._ruleToLabel(evt.meta?.rule);
-      const excerpt = evt.meta?.excerpt ? evt.meta.excerpt.slice(0, 32) + (evt.meta.excerpt.length > 32 ? '…' : '') : '';
+      const excerpt = evt.meta?.excerpt ? esc(evt.meta.excerpt.slice(0, 32)) + (evt.meta.excerpt.length > 32 ? '…' : '') : '';
       meta = `${time}${excerpt ? ' · ' + excerpt : ''}`;
       actionHTML = evt.meta?.status === 'dismissed'
         ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
@@ -730,11 +734,11 @@ const TimelineRenderer = {
       const sourceLabel = evt.meta.source === 'internal' ? 'within doc' : 'external';
       contentHTML = `<div class="text-only">${evt.meta.char_count || 0} chars from ${sourceLabel}</div>`;
       if (evt.meta.output_preview) {
-        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${evt.meta.output_preview}"</div>`;
+        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${esc(evt.meta.output_preview)}"</div>`;
       }
       if (evt.meta.source !== 'internal') {
-        if (evt.meta.source_url) {
-          contentHTML += `<div class="paste-source-row"><span class="paste-source-display">Source: <a href="${evt.meta.source_url}" target="_blank" rel="noopener" style="color:var(--ai-color)">${evt.meta.source_url}</a></span></div>`;
+        if (evt.meta.source_url && /^https?:\/\//i.test(evt.meta.source_url)) {
+          contentHTML += `<div class="paste-source-row"><span class="paste-source-display">Source: <a href="${esc(evt.meta.source_url)}" target="_blank" rel="noopener" style="color:var(--ai-color)">${esc(evt.meta.source_url)}</a></span></div>`;
         } else {
           contentHTML += `<div class="paste-source-row"><button class="btn-add-source" style="background:none;border:1px dashed var(--text-secondary);color:var(--text-secondary);padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;margin-top:4px;">+ Add source</button></div>`;
         }
@@ -745,10 +749,10 @@ const TimelineRenderer = {
       typeClass = 'ai';
       authorLabel = 'Writing tip';
       const tipText = evt.meta.text || '';
-      const excerpt = evt.meta.excerpt ? `<div class="text-only" style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;font-style:italic;">"${evt.meta.excerpt}"</div>` : '';
+      const excerpt = evt.meta.excerpt ? `<div class="text-only" style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;font-style:italic;">"${esc(evt.meta.excerpt)}"</div>` : '';
       contentHTML = `
         <div class="card suggestion-card">
-          <p>${tipText}</p>
+          <p>${esc(tipText)}</p>
           ${excerpt}
           <div class="actions">
             <button class="btn-dismiss">Dismiss</button>
@@ -766,12 +770,12 @@ const TimelineRenderer = {
       const fullText = evt.meta.text || 'No preview available.';
       const isLong = fullText.length > 100;
       const preview = isLong
-        ? `${fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>`
-        : fullText;
+        ? `${esc(fullText.substring(0, 100))}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>`
+        : esc(fullText);
 
       contentHTML = `
         <div class="card suggestion-card" data-gemini="${isGemini}">
-          <p data-full-text="${fullText.replace(/"/g, '&quot;')}" data-expanded="false">${preview}</p>
+          <p data-full-text="${esc(fullText)}" data-expanded="false">${preview}</p>
           <div class="actions">
             <button class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
             ${!isGemini ? '<button class="btn-copy-ai">Copy</button>' : ''}
@@ -806,12 +810,12 @@ const TimelineRenderer = {
           <div class="card diff-card">
             <div class="diff-block removed" style="display: ${hasBefore ? 'none' : 'none'};">
               <div class="indicator"></div>
-              <p>${beforeText || '—'}</p>
+              <p>${beforeText ? esc(beforeText) : '—'}</p>
             </div>
             <div class="diff-arrow" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
             <div class="diff-block added">
               <div class="indicator"></div>
-              <p>${hasAfter ? afterText : '(no preview available)'}</p>
+              <p>${hasAfter ? esc(afterText) : '(no preview available)'}</p>
             </div>
             <div class="card-footer">
               ${footerHTML}
@@ -823,7 +827,7 @@ const TimelineRenderer = {
         typeClass = 'ai';
         authorLabel = 'You • Dismissed';
         const reason = evt.meta.reason || "User dismissed suggestion.";
-        contentHTML = `<div class="text-only">${reason}</div>`;
+        contentHTML = `<div class="text-only">${esc(reason)}</div>`;
       }
     }
 
@@ -835,7 +839,7 @@ const TimelineRenderer = {
       const preview = evt.meta?.output_preview || '';
       contentHTML = `
         <div class="card suggestion-card gemini-card">
-          <p>${preview ? `"${preview}"` : `${charCount} characters inserted`}</p>
+          <p>${preview ? `"${esc(preview)}"` : `${charCount} characters inserted`}</p>
           ${velocity ? `<div class="text-only" style="font-size:0.75rem;color:var(--text-secondary);">Detected via edit velocity (${velocity} chars/s)</div>` : ''}
         </div>
       `;
@@ -923,7 +927,9 @@ const TimelineRenderer = {
         const save = () => {
           const val = input.value.trim();
           if (!val) { row.replaceChildren(btn); return; }
-          const displayHref = val.startsWith('http') ? `<a href="${val}" target="_blank" rel="noopener" style="color:var(--ai-color)">${val}</a>` : val;
+          const displayHref = /^https?:\/\//i.test(val)
+            ? `<a href="${esc(val)}" target="_blank" rel="noopener" style="color:var(--ai-color)">${esc(val)}</a>`
+            : esc(val);
           row.innerHTML = `<span class="paste-source-display" style="font-size:0.8rem;color:var(--text-secondary);">Source: ${displayHref}</span>`;
           if (cardTimestamp) {
             chrome.runtime.sendMessage({
@@ -973,10 +979,10 @@ const TimelineRenderer = {
         e.preventDefault();
         const p = e.target.closest('p');
         if (p.dataset.expanded === "true") {
-          p.innerHTML = `${p.dataset.fullText.substring(0, 100)}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>`;
+          p.innerHTML = `${esc(p.dataset.fullText.substring(0, 100))}... <a href="#" class="expand-toggle" style="color: var(--ai-color); font-weight: bold; text-decoration: none; margin-left: 4px;">Show</a>`;
           p.dataset.expanded = "false";
         } else {
-          p.innerHTML = `${p.dataset.fullText} <a href="#" class="expand-toggle" style="color: var(--text-secondary); font-weight: bold; text-decoration: none; margin-left: 4px;">Hide</a>`;
+          p.innerHTML = `${esc(p.dataset.fullText)} <a href="#" class="expand-toggle" style="color: var(--text-secondary); font-weight: bold; text-decoration: none; margin-left: 4px;">Hide</a>`;
           p.dataset.expanded = "true";
         }
         return;
@@ -1401,8 +1407,8 @@ const ChatInput = {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         </div>
         <div class="ecc-body">
-          <div class="ecc-title">${errMeta.title}</div>
-          <div class="ecc-meta">${errMeta.detail}</div>
+          <div class="ecc-title">${esc(errMeta.title)}</div>
+          <div class="ecc-meta">${esc(errMeta.detail)}</div>
         </div>
         <div class="ecc-action" style="gap:4px;display:flex;">
           ${(isTimeout || isNetworkErr) ? '<button class="ecc-btn ecc-btn-retry-ai">Retry</button>' : ''}
@@ -1581,7 +1587,7 @@ const ModelStatus = {
   _onError(message) {
     if (this.bannerEl) {
       // Truncate long messages (e.g. llamafile stderr dumps) to keep banner readable
-      const display = message.length > 200 ? message.slice(0, 200) + '…' : message;
+      const display = esc(message.length > 200 ? message.slice(0, 200) + '…' : message);
       this.bannerEl.style.display = 'flex';
       this.bannerEl.innerHTML = `
         <span class="banner-text error" style="white-space:pre-wrap;font-size:0.75rem;">${display}</span>
@@ -1643,7 +1649,7 @@ const SelectionContext = {
 
     this.el.style.display = 'block';
     this.el.innerHTML = `
-      <div class="sel-quote">"${preview}"</div>
+      <div class="sel-quote">"${esc(preview)}"</div>
       <div class="sel-row">
         <input class="sel-input" placeholder="Ask something about this…" type="text">
         <button class="sel-ask banner-btn">Ask AI</button>
@@ -1890,6 +1896,25 @@ const QuickActions = {
 function _updateScanningDot(isRecording) {
   const dot = document.getElementById('scanning-dot');
   if (dot) dot.classList.toggle('active', !!isRecording);
+}
+
+// Shown when a long session auto-exports and lightens itself to stay under
+// chrome.storage.local's quota — nothing is deleted (the export is durable),
+// only summarized in the live copy, but that shouldn't happen silently.
+function _showAutoExportNotice() {
+  let el = document.getElementById('auto-export-notice');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'auto-export-notice';
+    el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;'
+      + 'background:#111827;color:#fff;font-size:0.78rem;padding:10px 14px;'
+      + 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);transition:opacity 0.3s;';
+    document.body.appendChild(el);
+  }
+  el.textContent = 'Session auto-exported & lightened to keep recording — nothing lost, see Downloads.';
+  el.style.opacity = '1';
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.style.opacity = '0'; }, 6000);
 }
 
 // ── Panel tab switching ───────────────────────────────────────────────────────

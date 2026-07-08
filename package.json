@@ -18,5 +18,8 @@
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
     "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "dompurify": "^3.4.11"
   }
 }

@@ -1,6 +1,7 @@
 import { PANEL_CSS } from './panel.css.js'
 import { icons } from './icons.js'
 import { Composer, ProjectContext, TimelineItem } from './components.js'
+import { esc } from '../shared/esc.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function render(state) {
 
       <div class="docbar">
         ${icons.doc}
-        <div class="doc-title">${state.docTitle}</div>
+        <div class="doc-title">${esc(state.docTitle)}</div>
         <button class="icon-btn doc-menu" data-action="more" aria-label="Panel menu">${icons.dots}</button>
       </div>
 

@@ -1,5 +1,6 @@
 import JSZip from '../lib/jszip.js';
 import { computeAnnotations, compositeKey } from '../lib/annotate.js';
+import { esc } from '../shared/esc.js';
 
 // ── File input / drag-drop ────────────────────────────────────────────────────
 
@@ -279,14 +280,6 @@ function squareIcon() {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
 }
 
-function esc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -355,6 +348,11 @@ function openAnnotatedView(log, meta, xhtmlStr) {
   try {
     const styleDom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
     xhtmlStyles = Array.from(styleDom.querySelectorAll('style')).map(s => s.textContent).join('\n');
+    // Defensive: this string gets concatenated into a <style> block via a
+    // template literal, not a DOM API, so a literal "</style" would break
+    // out of the block — can't actually occur from a real <style> element's
+    // textContent, but escape it anyway as cheap insurance.
+    xhtmlStyles = xhtmlStyles.replace(/<\/style/gi, '<\\/style');
   } catch { /* no preserved styles */ }
 
   const usedKeys = [];
