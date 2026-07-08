@@ -81,7 +81,7 @@ export function analyzeText(text) {
       );
     }
 
-    // 4. Passive voice
+    /* passive_voice — temporarily disabled
     const passiveMatches = trimmed.match(PASSIVE_RE) ?? [];
     if (passiveMatches.length >= 2) {
       const excerpt = passiveMatches.slice(0, 2).join(', ');
@@ -91,6 +91,7 @@ export function analyzeText(text) {
         trimmed.slice(0, 80)
       );
     }
+    */
 
     // 5. Weak/filler words — word-boundary match, not substring: a plain
     // `.includes()` check flags "every" as containing "very" and "adjust"/
@@ -105,7 +106,7 @@ export function analyzeText(text) {
       );
     }
 
-    // 6. Wordy phrases
+    /* wordy_phrase — temporarily disabled
     for (const [re, replacement] of WORDY_PHRASES) {
       const m = trimmed.match(re);
       if (m) {
@@ -116,6 +117,7 @@ export function analyzeText(text) {
         add('wordy_phrase', tip, trimmed.slice(0, 80));
       }
     }
+    */
 
     // ── Per-sentence checks ────────────────────────────────────────────────
     const sentences = trimmed.split(/(?<=[.!?])\s+/).filter(Boolean);
@@ -153,9 +155,9 @@ export function analyzeText(text) {
       }
     }
 
-    // 9. Repeated content words within paragraph
+    /* word_repetition — temporarily disabled
     const contentWords = trimmed.toLowerCase().match(/\b[a-z]{5,}\b/g) ?? [];
-    const freq = /** @type {Record<string,number>} */ ({});
+    const freq = /** @type {Record<string,number>} *\/ ({});
     for (const w of contentWords) freq[w] = (freq[w] ?? 0) + 1;
     for (const [w, n] of Object.entries(freq)) {
       if (n >= 3) {
@@ -166,6 +168,7 @@ export function analyzeText(text) {
         );
       }
     }
+    */
   }
 
   return suggestions;
