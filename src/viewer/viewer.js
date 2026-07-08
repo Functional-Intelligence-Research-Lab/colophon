@@ -8,7 +8,6 @@ const viewerContent = document.getElementById('viewer-content');
 const errorBanner   = document.getElementById('error-banner');
 const pdfBtn        = document.getElementById('btn-annotated-pdf');
 
-const _liveXhtmlStr = '';   // kept empty for live sessions (no XHTML available until export)
 let _liveInterval = null;
 
 fileInput.addEventListener('change', (e) => {
@@ -395,7 +394,7 @@ function _fuzzyFind(haystack, needle, expectedLength, consumedRanges, ctxBefore 
           return { pos: startPos, length: finalLength };
         }
       }
-    } catch (e) {
+    } catch {
       continue;
     }
   }

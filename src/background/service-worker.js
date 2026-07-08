@@ -19,7 +19,6 @@ import {
   getSessionByDocId,
   saveSessionByDocId,
   ensureUserId,
-  clearSession,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
 import { HOST_PY_B64 } from "../generated/host-py-b64.js";
@@ -211,7 +210,7 @@ async function handleMessage(msg, _sender) {
           _modelStatus = 'running';
           return { ok: true, status: 'running', port: _llamafilePort };
         }
-      } catch (e) {
+      } catch {
         if (_modelStatus === 'running') {
           _modelStatus = 'available';
         }
