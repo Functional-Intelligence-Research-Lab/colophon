@@ -1491,7 +1491,7 @@ const ModelStatus = {
     }
   },
 
-  _showBanner(type) {
+  _showBanner(type, platformOs) {
     if (!this.bannerEl) return;
     this.bannerEl.className = `model-banner ${type}`;
     this.bannerEl.style.display = 'flex';
@@ -1503,7 +1503,7 @@ const ModelStatus = {
         actionFn: () => this._downloadSetup(),
       },
       setup_downloaded: {
-        text: 'Run the downloaded file, then:',
+        text: this._setupDownloadedSteps(platformOs),
         actionLabel: 'Check again',
         actionFn: () => chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }).catch(() => {}),
       },
@@ -1534,6 +1534,44 @@ const ModelStatus = {
       <button class="banner-btn">${c.actionLabel}</button>
     `;
     this.bannerEl.querySelector('.banner-btn').addEventListener('click', c.actionFn);
+  },
+
+  // OS-specific steps for the setup_downloaded banner — the file manager is
+  // already opened at the downloaded script (see _downloadSetup), so these
+  // only need to cover actually running it. Windows/Mac stay to a single
+  // low-friction click since those users aren't expected to be comfortable
+  // in a terminal; Windows also gets a heads-up about the SmartScreen
+  // prompt an unsigned script showing up as a security warning would
+  // otherwise look alarming rather than expected.
+  _setupDownloadedSteps(platformOs) {
+    const listStyle = 'margin:4px 0 0 18px;padding:0;';
+    if (platformOs === 'win') {
+      return `
+        <div>Almost done:
+          <ol style="${listStyle}">
+            <li>Double-click <code>colophon-setup.bat</code> in the Downloads window we just opened.</li>
+            <li>If Windows shows a blue "Windows protected your PC" screen, click <strong>More info</strong> → <strong>Run anyway</strong> — expected for a new, unsigned script, not a sign anything's wrong.</li>
+            <li>Come back and click Check again.</li>
+          </ol>
+        </div>`;
+    }
+    if (platformOs === 'mac') {
+      return `
+        <div>Almost done:
+          <ol style="${listStyle}">
+            <li>Right-click <code>colophon-setup.command</code> in the Downloads window we just opened, then choose <strong>Open</strong> — first time only, since it isn't from the App Store.</li>
+            <li>Come back and click Check again.</li>
+          </ol>
+        </div>`;
+    }
+    return `
+      <div>Almost done:
+        <ol style="${listStyle}">
+          <li>Open a terminal in the Downloads folder we just opened.</li>
+          <li>Run: <code>chmod +x colophon-setup.sh &amp;&amp; ./colophon-setup.sh</code></li>
+          <li>Come back and click Check again.</li>
+        </ol>
+      </div>`;
   },
 
   async _downloadSetup() {
@@ -1573,12 +1611,34 @@ const ModelStatus = {
 
     const blob = new Blob([result.script], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
-    chrome.downloads.download({ url, filename: result.filename, saveAs: false }, () => {
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const scriptDownloadId = await new Promise((resolve) => {
+      chrome.downloads.download({ url, filename: result.filename, saveAs: false }, (downloadId) => {
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        resolve(downloadId ?? null);
+      });
     });
 
+    // Open the file manager right at the downloaded script — directly
+    // answers "where did it go," rather than leaving the user to hunt
+    // through their Downloads folder for it.
+    if (scriptDownloadId != null) {
+      try {
+        await new Promise((resolve) => {
+          const listener = (delta) => {
+            if (delta.id !== scriptDownloadId) return;
+            if (delta.state?.current === 'complete' || delta.state?.current === 'interrupted') {
+              chrome.downloads.onChanged.removeListener(listener);
+              resolve();
+            }
+          };
+          chrome.downloads.onChanged.addListener(listener);
+        });
+        chrome.downloads.show(scriptDownloadId);
+      } catch { /* non-critical — the instructions still name the file */ }
+    }
+
     // Show "run the file, then check again" state
-    this._showBanner('setup_downloaded');
+    this._showBanner('setup_downloaded', result.platformOs);
   },
 
   _downloadNativeHostZip(platformOs) {

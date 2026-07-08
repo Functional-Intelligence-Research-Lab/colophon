@@ -317,7 +317,11 @@ async function handleMessage(msg, _sender) {
       if (platformOs === 'win') {
         return { ok: true, script: _buildWindowsBat(extId), filename: 'colophon-setup.bat', platformOs };
       }
-      return { ok: true, script: _buildPosixScript(extId), filename: 'colophon-setup.command', platformOs };
+      // Same script content works on both — only the filename differs.
+      // .command is a macOS Finder double-click convention with no meaning
+      // on Linux, so Linux gets the more conventional .sh instead.
+      const filename = platformOs === 'mac' ? 'colophon-setup.command' : 'colophon-setup.sh';
+      return { ok: true, script: _buildPosixScript(extId), filename, platformOs };
     }
 
     default:
