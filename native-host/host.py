@@ -15,8 +15,10 @@ Security notes:
   - No user-supplied data is passed to subprocess or used in file paths.
   - All paths are constructed from constants; no shell=True ever.
   - llamafile is bound to 127.0.0.1 only.
-  - Downloads are HTTPS only.
-  # TODO before production: add SHA-256 verification of downloaded binaries.
+  - Downloads are HTTPS only, pinned to specific versions/revisions, and
+    SHA-256 verified before being installed or (for llamafile) executed.
+  - The spawned llamafile subprocess is cleaned up on exit (atexit/SIGTERM),
+    so an ungraceful disconnect doesn't leave an orphaned inference server.
 """
 
 import sys
@@ -32,6 +34,8 @@ import subprocess
 import time
 import socket
 import tempfile
+import atexit
+import signal
 from pathlib import Path
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -39,19 +43,25 @@ from pathlib import Path
 COLOPHON_DIR = Path.home() / ".colophon" / "models"
 SERVER_PORT = 8080
 
-# Llamafile 0.8.14 — update URL + verify hash when upgrading
+# Llamafile 0.8.14 — update URL + hash together when upgrading
 LLAMAFILE_VERSION = "0.8.14"
 LLAMAFILE_URL = (
     f"https://github.com/Mozilla-Ocho/llamafile/releases/download/"
     f"{LLAMAFILE_VERSION}/llamafile-{LLAMAFILE_VERSION}"
 )
+LLAMAFILE_SHA256 = "73e1d63c8c81efe797664f7556af83af4ad78b4880091321165163eed6b42f60"
 
-# Llama 3.2 1B Instruct Q4_K_M (~670 MB) — fast, good at writing tasks
+# Llama 3.2 1B Instruct Q4_K_M (~770 MB) — fast, good at writing tasks.
+# Pinned to a specific commit (not "resolve/main/...", a moving branch
+# reference) so the upstream repo owner can't silently swap the file's
+# content under this URL.
 MODEL_FILENAME = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+MODEL_REVISION = "067b946cf014b7c697f3654f621d577a3e3afd1c"
 MODEL_URL = (
-    "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/"
-    "resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    f"https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/"
+    f"resolve/{MODEL_REVISION}/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 )
+MODEL_SHA256 = "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83"
 
 ALLOWED_ACTIONS = {"CHECK_MODEL", "DOWNLOAD_MODEL", "LAUNCH_MODEL", "STOP_MODEL"}
 
@@ -59,6 +69,25 @@ ALLOWED_ACTIONS = {"CHECK_MODEL", "DOWNLOAD_MODEL", "LAUNCH_MODEL", "STOP_MODEL"
 
 _llamafile_proc = None
 _send_lock = threading.Lock()
+
+
+def _cleanup_llamafile():
+    """Terminate the running llamafile server if this process exits without
+    an explicit STOP_MODEL — e.g. Chrome closes the native-messaging pipe on
+    extension reload/browser crash. Without this, the server (and its loaded
+    model) would keep running as an orphaned process indefinitely."""
+    global _llamafile_proc
+    if _llamafile_proc is not None and _llamafile_proc.poll() is None:
+        _llamafile_proc.terminate()
+        try:
+            _llamafile_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _llamafile_proc.kill()
+
+
+atexit.register(_cleanup_llamafile)
+if platform.system() != "Windows":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 # ── Native messaging I/O ──────────────────────────────────────────────────────
 
@@ -119,9 +148,12 @@ def handle_check_model():
     })
 
 
-def _download_file(url, dest, label):
+def _download_file(url, dest, label, expected_sha256):
     """
-    Stream-download url → dest, emitting PROGRESS messages.
+    Stream-download url → dest, emitting PROGRESS messages, then verify the
+    downloaded bytes' SHA-256 before installing — a compromised/hijacked
+    release (either upstream URL) would otherwise be installed and, for
+    llamafile, directly executed with no check at all.
     Returns True on success, False on failure (ERROR already sent).
     """
     tmp = Path(str(dest) + ".tmp")
@@ -129,6 +161,7 @@ def _download_file(url, dest, label):
         req = urllib.request.Request(
             url, headers={"User-Agent": f"Colophon/{LLAMAFILE_VERSION}"}
         )
+        digest = hashlib.sha256()
         with urllib.request.urlopen(req, timeout=60) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
@@ -139,12 +172,26 @@ def _download_file(url, dest, label):
                     if not chunk:
                         break
                     f.write(chunk)
+                    digest.update(chunk)
                     downloaded += len(chunk)
                     if total > 0:
                         pct = int(downloaded / total * 100)
                         if pct != last_pct:
                             send({"action": "PROGRESS", "label": label, "percent": pct})
                             last_pct = pct
+
+        actual = digest.hexdigest()
+        if actual != expected_sha256:
+            tmp.unlink(missing_ok=True)
+            send({
+                "action": "ERROR",
+                "message": (
+                    f"Download verification failed ({label}): expected hash "
+                    f"does not match downloaded file. Not installing it."
+                ),
+            })
+            return False
+
         tmp.replace(dest)
         return True
     except Exception as exc:
@@ -160,10 +207,10 @@ def handle_download_model():
     lf = _llamafile_path()
     model = _model_path()
 
-    # Step 1: llamafile runtime (~50 MB)
+    # Step 1: llamafile runtime (~160 MB)
     if not lf.exists():
         send({"action": "PROGRESS", "label": "llamafile runtime", "percent": 0})
-        if not _download_file(LLAMAFILE_URL, lf, "llamafile runtime"):
+        if not _download_file(LLAMAFILE_URL, lf, "llamafile runtime", LLAMAFILE_SHA256):
             return
         # Mark executable on POSIX
         if platform.system() != "Windows":
@@ -171,10 +218,10 @@ def handle_download_model():
     else:
         send({"action": "PROGRESS", "label": "llamafile runtime", "percent": 100})
 
-    # Step 2: model GGUF (~670 MB)
+    # Step 2: model GGUF (~770 MB)
     if not model.exists():
         send({"action": "PROGRESS", "label": "Llama 3.2 1B model", "percent": 0})
-        if not _download_file(MODEL_URL, model, "Llama 3.2 1B model"):
+        if not _download_file(MODEL_URL, model, "Llama 3.2 1B model", MODEL_SHA256):
             return
     else:
         send({"action": "PROGRESS", "label": "Llama 3.2 1B model", "percent": 100})
