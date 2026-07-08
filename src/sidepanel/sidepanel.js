@@ -1492,7 +1492,7 @@ const ModelStatus = {
 
     const configs = {
       setup: {
-        text: 'Local AI needs one-time setup. Requires Python 3.8+ installed on your system.',
+        text: 'Local AI needs one-time setup.',
         actionLabel: 'Download setup file',
         actionFn: () => this._downloadSetup(),
       },

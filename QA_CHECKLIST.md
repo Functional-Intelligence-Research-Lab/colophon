@@ -15,8 +15,9 @@ Docs with real AI providers.
 - [ ] `nvm use` (picks up `.nvmrc`), `npm run build`, load `dist/` as an
       unpacked extension in a clean Chrome profile.
 - [ ] Confirm the toolbar icon and the extension's entry in
-      `chrome://extensions` show the new icon (green Φ mark) — no blurry/
-      mismatched icon at any size.
+      `chrome://extensions` show the new icon (round circle badge) — no
+      blurry/mismatched icon at any size, and check it reads clearly at the
+      smallest (16px) toolbar size.
 - [ ] Open the popup with no active Google Doc tab — confirm it doesn't error,
       and the "Start recording" button is disabled with a sensible tooltip.
 
@@ -71,16 +72,25 @@ Docs with real AI providers.
       viewer (`viewer/viewer.html?live=1`) with the live session, showing the
       real brand logo in the header (not a placeholder/broken image).
 - [ ] Open the exported `.twff` file at `colophon.firl.nl/viewer` too, and
-      confirm it renders consistently with the extension's own viewer.
+      confirm it renders consistently with the extension's own viewer — both
+      now share the same drift-correction engine (`lib/annotate.js`), so
+      highlighting should match closely.
+- [ ] Click "Export Annotated PDF" in the extension's viewer and confirm: the
+      highlighted spans line up with the actual AI/paste/paraphrase text (not
+      offset or overlapping neighboring text), the legend only lists
+      categories actually present, and if any events couldn't be matched
+      they show up in an "Unlocated events" appendix rather than silently
+      vanishing. If your browser blocks the pop-up, confirm a visible error
+      appears in the viewer instead of nothing happening.
 
 ## 6. Cross-platform / native host
 
-- [ ] On a machine *without* Python pre-installed (or a fresh VM), attempt the
-      native-host install flow (`native-host/install.sh` / `install.ps1`) and
-      confirm what actually happens — this is a known, already-tracked gap
-      (see `firl-infra/READINESS.md`'s "blocking packaging" section), so the
-      goal here is to document the actual failure mode, not to fix it in this
-      pass.
+- [ ] On a machine *without* Python pre-installed (or a fresh VM), use the
+      side panel's "Download setup file" flow and confirm it completes with
+      no Python install prompt anywhere — the native host now ships as a
+      compiled binary (`native-host/build_native_host.py`, Nuitka), so this
+      should just work on a bare machine. Test on Windows and macOS too —
+      only a Linux build has been produced and tested so far.
 - [ ] Confirm the extension still works normally (recording, heuristics,
       export) with the native host *not* installed — local-model-dependent
       features should degrade gracefully, not break the rest of the UI.
@@ -105,6 +115,8 @@ Docs with real AI providers.
       popup).
 - [ ] Confirm the settings gear looks identical in the popup and the side
       panel (same glyph, not two different icon styles).
+- [ ] Open the Settings page and confirm "Gemini API key" shows a dimmed,
+      disabled "Soon" state and can't be selected.
 
 ## Before actually submitting to the Chrome Web Store
 

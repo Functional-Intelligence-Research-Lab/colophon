@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Options preview</title>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    body { display: flex; align-items: flex-start; justify-content: center; background: #f3f4f6; padding: 24px; }
+    iframe { width: 640px; height: 900px; border: 1px solid #d1d5db; border-radius: 12px; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,0.06); }
+  </style>
+</head>
+<body>
+  <iframe id="options-frame"></iframe>
+
+  <script type="module">
+    // Fetch the real options.html, inject a chrome.storage.local mock as the
+    // FIRST script so options.js sees a valid chrome object the moment it runs.
+    // Set STORED_AI_PATH to 'gemini-api' to verify the fallback-to-ollama path.
+    const OPTIONS_URL = '../../src/options/options.html'
+    const STORED_AI_PATH = new URL(location.href).searchParams.get('aiPath') || 'ollama'
+
+    const mock = `
+      const store = { settings: { aiPath: '${STORED_AI_PATH}' } }
+      window.chrome = {
+        storage: {
+          local: {
+            get: async (key) => ({ [key]: store[key] }),
+            set: async (obj) => { Object.assign(store, obj) },
+          },
+        },
+      }
+    `
+
+    async function loadOptions() {
+      const html = await fetch(OPTIONS_URL).then(r => r.text())
+      const patched = html.replace(
+        /<head([^>]*)>/i,
+        `<head$1><script>${mock}<\/script><base href="../../src/options/">`,
+      )
+      const frame = document.getElementById('options-frame')
+      frame.srcdoc = patched
+    }
+
+    loadOptions()
+  </script>
+</body>
+</html>

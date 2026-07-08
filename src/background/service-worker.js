@@ -21,7 +21,6 @@ import {
   ensureUserId,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
-import { HOST_PY_B64 } from "../generated/host-py-b64.js";
 
 // ── Native Messaging (llamafile host) ─────────────────────────────────────────
 
@@ -304,10 +303,19 @@ async function handleMessage(msg, _sender) {
     case 'REQUEST_SETUP_SCRIPT': {
       const info = await chrome.runtime.getPlatformInfo();
       const extId = chrome.runtime.id;
-      if (info.os === 'win') {
-        return { ok: true, script: _buildWindowsBat(HOST_PY_B64, extId), filename: 'colophon-setup.bat' };
+      const platformOs = info.os; // 'win' | 'mac' | 'linux' — matches native-host/bin/<os>/
+      if (!['win', 'mac', 'linux'].includes(platformOs)) {
+        return { ok: false, error: `Local AI setup isn't available on this platform (${platformOs}).` };
       }
-      return { ok: true, script: _buildPosixScript(HOST_PY_B64, extId), filename: 'colophon-setup.command' };
+      try {
+        await _downloadNativeHostZip(platformOs);
+      } catch (err) {
+        return { ok: false, error: `Could not download the native host files: ${err.message}` };
+      }
+      if (platformOs === 'win') {
+        return { ok: true, script: _buildWindowsBat(extId), filename: 'colophon-setup.bat' };
+      }
+      return { ok: true, script: _buildPosixScript(extId), filename: 'colophon-setup.command' };
     }
 
     default:
@@ -611,15 +619,48 @@ async function updateEventMetadata({ eventTimestamp, key, value }) {
   return { status: 'success' };
 }
 
+// ── Native host binary staging ───────────────────────────────────────────────
+
+// Downloads the prebuilt platform zip (bundled inside the extension package —
+// see native-host/build_native_host.py) into a fixed Downloads subfolder, so
+// the small setup script generated below can find and install it. Resolves
+// once the download actually finishes writing to disk.
+function _downloadNativeHostZip(platformOs) {
+  return new Promise((resolve, reject) => {
+    const url = chrome.runtime.getURL(`native-host/bin/${platformOs}/colophon-host.zip`);
+    chrome.downloads.download(
+      { url, filename: 'colophon-setup/colophon-host.zip', saveAs: false, conflictAction: 'overwrite' },
+      (downloadId) => {
+        if (chrome.runtime.lastError || downloadId == null) {
+          reject(new Error(chrome.runtime.lastError?.message || 'Download failed to start'));
+          return;
+        }
+        const listener = (delta) => {
+          if (delta.id !== downloadId) return;
+          if (delta.state?.current === 'complete') {
+            chrome.downloads.onChanged.removeListener(listener);
+            resolve();
+          } else if (delta.state?.current === 'interrupted') {
+            chrome.downloads.onChanged.removeListener(listener);
+            reject(new Error('Native host download was interrupted'));
+          }
+        };
+        chrome.downloads.onChanged.addListener(listener);
+      },
+    );
+  });
+}
+
 // ── Setup script builders ──────────────────────────────────────────────────────
+//
+// No Python dependency check here — the native host ships as a compiled
+// binary (see native-host/build_native_host.py), so these scripts only need
+// to unzip the already-downloaded platform binary into place and register it
+// as a native-messaging host. Chrome doesn't let native scripts run from the
+// extension itself, so this still has to be a separately downloaded file the
+// user double-clicks once.
 
-function _buildWindowsBat(b64, extId) {
-  const chunkLines = [];
-  const cs = 1900;
-  for (let i = 0; i < b64.length; i += cs) {
-    chunkLines.push(`  echo ${b64.slice(i, i + cs)}`);
-  }
-
+function _buildWindowsBat(extId) {
   return [
     '@echo off',
     'setlocal',
@@ -628,31 +669,33 @@ function _buildWindowsBat(b64, extId) {
     'echo =======================',
     'echo.',
     '',
-    'python --version >nul 2>&1',
-    'if %ERRORLEVEL% neq 0 (',
-    '  echo Python is not installed.',
-    '  echo.',
-    '  echo Install Python from: https://www.python.org/downloads/',
-    '  echo Check "Add Python to PATH" when installing, then run this file again.',
-    '  start "" "https://www.python.org/downloads/"',
+    'set "ZIP=%USERPROFILE%\\Downloads\\colophon-setup\\colophon-host.zip"',
+    'if not exist "%ZIP%" (',
+    '  echo Could not find the downloaded setup file at:',
+    '  echo   %ZIP%',
+    '  echo Make sure the download finished, then run this file again.',
     '  pause & exit /b 1',
     ')',
     '',
     'set "DEST=%APPDATA%\\Colophon\\native-host"',
     'if not exist "%DEST%" mkdir "%DEST%"',
     '',
-    'echo Installing host script...',
-    '> "%TEMP%\\ch.b64" (',
-    ...chunkLines,
+    'echo Installing native host...',
+    'tar -xf "%ZIP%" -C "%DEST%"',
+    '',
+    '> "%DEST%\\com.colophon.llamahost.json" (',
+    '  echo {',
+    '  echo   "name": "com.colophon.llamahost",',
+    '  echo   "description": "Colophon local AI",',
+    '  echo   "path": "%DEST:\\=\\\\%\\\\colophon-host.exe",',
+    '  echo   "type": "stdio",',
+    `  echo   "allowed_origins": ["chrome-extension://${extId}/"]`,
+    '  echo }',
     ')',
-    'certutil -decode "%TEMP%\\ch.b64" "%DEST%\\host.py" >nul 2>&1',
-    'del "%TEMP%\\ch.b64" >nul 2>&1',
     '',
-    `python -c "import os; d=os.path.join(os.environ['APPDATA'],'Colophon','native-host'); q=chr(34); open(os.path.join(d,'host_wrapper.bat'),'w').write('@echo off\\npython '+q+os.path.join(d,'host.py')+q+' %%*\\n')"`,
-    `python -c "import json,os; d=os.path.join(os.environ['APPDATA'],'Colophon','native-host'); m={'name':'com.colophon.llamahost','description':'Colophon local AI','path':os.path.join(d,'host_wrapper.bat'),'type':'stdio','allowed_origins':['chrome-extension://${extId}/']}; open(os.path.join(d,'com.colophon.llamahost.json'),'w').write(json.dumps(m,indent=2))"`,
+    'reg add "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.colophon.llamahost" /ve /t REG_SZ /d "%DEST%\\com.colophon.llamahost.json" /f >nul',
     '',
-    `for /f "usebackq tokens=*" %%P in (\`python -c "import os; print(os.path.join(os.environ['APPDATA'],'Colophon','native-host','com.colophon.llamahost.json'))"\`) do set "MP=%%P"`,
-    'reg add "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.colophon.llamahost" /ve /t REG_SZ /d "%MP%" /f >nul',
+    'del "%ZIP%" >nul 2>&1',
     '',
     'echo.',
     'echo Setup complete! Return to Chrome and click "Check again" in Colophon.',
@@ -661,60 +704,58 @@ function _buildWindowsBat(b64, extId) {
   ].join('\r\n');
 }
 
-function _buildPosixScript(b64, extId) {
+function _buildPosixScript(extId) {
   const TEMPLATE = `#!/bin/bash
 echo "Colophon Local AI Setup"
 echo "========================"
 echo ""
 
-if ! command -v python3 &>/dev/null; then
-  echo "Python 3 is not installed."
-  echo "Install from: https://www.python.org/downloads/"
-  echo "Or with Homebrew: brew install python3"
+ZIP="$HOME/Downloads/colophon-setup/colophon-host.zip"
+if [ ! -f "$ZIP" ]; then
+  echo "Could not find the downloaded setup file at:"
+  echo "  $ZIP"
+  echo "Make sure the download finished, then run this file again."
   read -p "Press Enter to close..."
   exit 1
 fi
 
-python3 << 'PYEOF'
-import base64, json, os, shutil
+DEST="$HOME/.colophon/native-host"
+mkdir -p "$DEST"
 
-d = os.path.expanduser('~/.colophon/native-host')
-os.makedirs(d, exist_ok=True)
+echo "Installing native host..."
+unzip -o -q "$ZIP" -d "$DEST"
+chmod +x "$DEST/colophon-host"
 
-with open(os.path.join(d, 'host.py'), 'wb') as f:
-    f.write(base64.b64decode('__B64__'))
-os.chmod(os.path.join(d, 'host.py'), 0o755)
-
-m = {
-    'name': 'com.colophon.llamahost',
-    'description': 'Colophon local AI',
-    'path': os.path.join(d, 'host.py'),
-    'type': 'stdio',
-    'allowed_origins': ['chrome-extension://__EXTID__/']
+cat > "$DEST/com.colophon.llamahost.json" << MANIFEST
+{
+  "name": "com.colophon.llamahost",
+  "description": "Colophon local AI",
+  "path": "$DEST/colophon-host",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://__EXTID__/"]
 }
-p = os.path.join(d, 'com.colophon.llamahost.json')
-with open(p, 'w') as f:
-    json.dump(m, f, indent=2)
+MANIFEST
 
-for cd in [
-    os.path.expanduser('~/Library/Application Support/Google/Chrome/NativeMessagingHosts'),
-    os.path.expanduser('~/Library/Application Support/Chromium/NativeMessagingHosts'),
-    os.path.expanduser('~/.config/google-chrome/NativeMessagingHosts'),
-    os.path.expanduser('~/.config/chromium/NativeMessagingHosts'),
-]:
-    if os.path.isdir(os.path.dirname(cd)):
-        os.makedirs(cd, exist_ok=True)
-        shutil.copy(p, cd)
-        print('Installed to:', cd)
+for cd in \\
+  "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts" \\
+  "$HOME/Library/Application Support/Chromium/NativeMessagingHosts" \\
+  "$HOME/.config/google-chrome/NativeMessagingHosts" \\
+  "$HOME/.config/chromium/NativeMessagingHosts"
+do
+  if [ -d "$(dirname "$cd")" ]; then
+    mkdir -p "$cd"
+    cp "$DEST/com.colophon.llamahost.json" "$cd/"
+    echo "Installed to: $cd"
+  fi
+done
 
-print('Setup complete!')
-PYEOF
+rm -f "$ZIP"
 
 echo ""
-echo "Return to Chrome and click Check in Colophon."
+echo "Setup complete! Return to Chrome and click Check in Colophon."
 read -p "Press Enter to close..."
 `;
-  return TEMPLATE.replace('__B64__', b64).replace('__EXTID__', extId);
+  return TEMPLATE.replace('__EXTID__', extId);
 }
 
 async function updateEventState({ eventTimestamp, status }) {
