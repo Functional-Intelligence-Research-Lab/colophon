@@ -1558,6 +1558,19 @@ const ModelStatus = {
       return;
     }
 
+    // Download the platform's native-host zip. This has to happen here, in a
+    // page context — chrome.downloads.download() cannot source a
+    // chrome-extension:// URL from the service worker (verified against a
+    // real Chrome instance: fails with interruptReason NETWORK_FAILED there,
+    // regardless of web_accessible_resources), only from a page like this one.
+    this.bannerEl.innerHTML = `<span class="banner-text">Downloading native host…</span>`;
+    try {
+      await this._downloadNativeHostZip(result.platformOs);
+    } catch (e) {
+      this._onError(`Could not download the native host files: ${e.message}`);
+      return;
+    }
+
     const blob = new Blob([result.script], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     chrome.downloads.download({ url, filename: result.filename, saveAs: false }, () => {
@@ -1566,6 +1579,33 @@ const ModelStatus = {
 
     // Show "run the file, then check again" state
     this._showBanner('setup_downloaded');
+  },
+
+  _downloadNativeHostZip(platformOs) {
+    return new Promise((resolve, reject) => {
+      const url = chrome.runtime.getURL(`native-host/bin/${platformOs}/colophon-host.zip`);
+      chrome.downloads.download(
+        { url, filename: 'colophon-setup/colophon-host.zip', saveAs: false, conflictAction: 'overwrite' },
+        (downloadId) => {
+          if (chrome.runtime.lastError || downloadId == null) {
+            reject(new Error(chrome.runtime.lastError?.message || 'Download failed to start'));
+            return;
+          }
+          const listener = (delta) => {
+            if (delta.id !== downloadId) return;
+            if (delta.state?.current === 'complete') {
+              chrome.downloads.onChanged.removeListener(listener);
+              resolve();
+            } else if (delta.state?.current === 'interrupted') {
+              chrome.downloads.onChanged.removeListener(listener);
+              const reason = delta.error?.current;
+              reject(new Error(`download was interrupted${reason ? ` (${reason})` : ''}`));
+            }
+          };
+          chrome.downloads.onChanged.addListener(listener);
+        },
+      );
+    });
   },
 
   _startDownload() {
