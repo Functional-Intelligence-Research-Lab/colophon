@@ -25,6 +25,8 @@
  * helpers without touching the rest of content.js.
  */
 
+import { debugLog } from '../shared/debug.js'
+
 /**
  * Accessible names (button labels / aria-labels) that indicate the user is
  * ACCEPTING a Gemini suggestion into the document. Matched case-insensitively
@@ -284,7 +286,7 @@ export function extractGeminiProposedDiff(root = document) {
   let insertedText = '';
   let deletedText = '';
 
-  console.log('[Colophon Canvas Inspection] Starting suggestion diff extraction...');
+  debugLog('[Colophon Canvas Inspection] Starting suggestion diff extraction...');
 
   // ── Strategy 1: explicit tracked-change / suggestion DOM elements ────────────
   // These exist when Docs renders suggestions in "Suggesting" mode.
@@ -296,11 +298,11 @@ export function extractGeminiProposedDiff(root = document) {
   ));
 
   if (insertEls.length > 0) {
-    console.log('[Colophon Canvas Inspection] Explicit insert elements:', insertEls.map(e => e.textContent));
+    debugLog('[Colophon Canvas Inspection] Explicit insert elements:', insertEls.map(e => e.textContent));
     insertedText = insertEls.map(e => e.textContent).join(' ').trim();
   }
   if (deleteEls.length > 0) {
-    console.log('[Colophon Canvas Inspection] Explicit delete elements:', deleteEls.map(e => e.textContent));
+    debugLog('[Colophon Canvas Inspection] Explicit delete elements:', deleteEls.map(e => e.textContent));
     deletedText = deleteEls.map(e => e.textContent).join(' ').trim();
   }
 
@@ -322,7 +324,7 @@ export function extractGeminiProposedDiff(root = document) {
       }).filter(t => t.length > 2);
       if (cardTexts.length > 0) {
         insertedText = cardTexts.join(' ');
-        console.log('[Colophon Canvas Inspection] Diff card text extracted:', insertedText);
+        debugLog('[Colophon Canvas Inspection] Diff card text extracted:', insertedText);
       }
     }
   }
@@ -351,13 +353,13 @@ export function extractGeminiProposedDiff(root = document) {
       if (raw.length > 10) {
         // Strip leading meta-commentary lines before the actual generated text.
         const cleaned = stripMetaLines(raw);
-        console.log('[Colophon Canvas Inspection] Sidebar response text (cleaned):', cleaned.slice(0, 80));
+        debugLog('[Colophon Canvas Inspection] Sidebar response text (cleaned):', cleaned.slice(0, 80));
         insertedText = cleaned;
         break;
       }
     }
   }
 
-  console.log('[Colophon Canvas Inspection] Final result:', { insertedText: insertedText.slice(0, 80), deletedText: deletedText.slice(0, 80) });
+  debugLog('[Colophon Canvas Inspection] Final result:', { insertedText: insertedText.slice(0, 80), deletedText: deletedText.slice(0, 80) });
   return { insertedText, deletedText };
 }

@@ -1,13 +1,10 @@
 /**
- * popup.js — Colophon popup (issue #30: 5 states)
+ * popup.js — Colophon popup
  *
- * Visual layout matches the approved Sprint 1 design:
- *   - Header: doc title + settings gear
- *   - Originality verdict banner (good / warn / bad)
- *   - Breakdown card: Own writing / AI Paraphrase / External Source bars
- *   - Recent Activity timeline (3 most recent events)
- *   - Start/Stop, View full log, Export
- *   - Footer: "Private and local" + TWFF link
+ * Layout: header (doc title + settings gear), originality verdict banner
+ * (good / warn / bad), breakdown card (Own writing / AI Paraphrase /
+ * External Source bars), Recent Activity timeline (3 most recent events),
+ * Start/Stop, View full log, Export, footer ("Private and local" + TWFF link).
  *
  * Five rendered states:
  *   1. No session                — verdict hidden, breakdown empty, timeline empty
@@ -194,10 +191,8 @@ function renderScores(session) {
 const LEAF_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
 const WARN_ICON_PATH = '<path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/>'
 
-// Turns the raw own/AI/source split into a verdict banner — this was
-// previously a single hardcoded state ("mostly original") regardless of the
-// actual session data; now it reflects it, with a distinct warn state once
-// AI involvement is the majority of the document.
+// Turns the raw own/AI/source split into a verdict banner, with a distinct
+// warn state once AI involvement is the majority of the document.
 function renderVerdict(aiPercent) {
   const banner = $('summary-banner')
   const icon = $('verdict-icon')

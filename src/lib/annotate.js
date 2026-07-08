@@ -4,7 +4,7 @@
  * Computes a drift-corrected, provenance-aware annotation of a document
  * (content/document.xhtml) from its process log (meta/process-log.json).
  *
- * Design notes (see firl-infra plan for the full write-up):
+ * Design notes:
  *  - The real extension does not reliably log usable position offsets for
  *    most event types today (position_start is hardcoded to 0 at most call
  *    sites except clipboard pastes). Offsets are therefore treated as a

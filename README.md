@@ -1,61 +1,38 @@
 # Colophon
 
-Colophon runs in Chrome and Firefox alongside Google Docs. It records AI writing interactions as a TWFF-compatible process log: what was written, when AI assistance was used, and what the author decided to do with each suggestion (accept, modify, or reject). The author exports and submits the log voluntarily.
-
-The `.twff` file is a structured JSON log that shows the writing process
+A Chrome extension that records AI writing interactions alongside Google Docs as a
+TWFF-compatible process log: what was written, when AI assistance was used, and what the
+author decided to do with each suggestion (accept, modify, or reject). The author exports
+and submits the log voluntarily — nothing is sent anywhere automatically.
 
 Full format specification: [TWFF spec](https://github.com/Functional-Intelligence-Research-Lab/twff)
 Live demo of the desktop editor: [firl.nl/twff](https://firl.nl/twff)
 
 ---
 
-## Roadmap
+## What it does
 
-### Sprint 1: In progress (Apr 27 – May 10)
+- Records a writing session in Google Docs: edits, pastes, and AI-assisted text, each
+  tagged with how it entered the document.
+- Optionally runs local AI writing assistance (paraphrase, grammar, brainstorm) entirely on
+  your own machine via a companion program — no cloud API, no data leaving your computer.
+  This is off by default and fully optional.
+- Lightweight writing-quality heuristics (long sentences, filler words, repetition) surface
+  as suggestions in the side panel — a secondary feature, not a replacement for a dedicated
+  grammar checker.
+- Exports the recorded session as a `.twff` file (a structured, human- and
+  machine-readable process log) that can be opened in this extension's own viewer or at
+  [colophon.firl.nl/viewer](https://colophon.firl.nl/viewer).
 
-- [X] [#1](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/2) Manifest V3 scaffold
-- [X] [#2](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/20) Session lifecycle
-- [X] [#3](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/21) Edit event capture
-- [X] [#4](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/22) Popup UI
-- [X] [#5](https://github.com/Functional-Intelligence-Research-Lab/colophon/issues/23) Local JSON export → `.twff`
+**What it keeps**: character counts and edit positions (not your typed keystrokes), paste
+event metadata (character count and source), AI interaction type/model/acceptance decision,
+and session timestamps — never your full document text, never individual keystrokes, and
+nothing is sent to any server unless you explicitly export and share the file yourself.
 
-### Sprint 2: {AI Path A} (May 11 – May 24)
+## Installing
 
-- [~] Llamafile integration: *[llamafile](https://github.com/Mozilla-Ocho/llamafile) should also be tested as alternative*
-- [X] Side panel scaffold
-- [X] `ai_interaction` event schema
-- [X] TWFF v0.2 schema (alignment with dpv moved to v0.3)
-- [x] SHA-256 hash chain for integrity verification
-
-<!-- - [ ] Ollama API integration (`localhost:11434`; model selector populated from `/api/tags`) -->
-
-### Sprint 3: AI Path B  (May 25 – Jun 7)
-
-- [ ] Detect Gemini native suggestions in Google Docs DOM
-- [ ] Google Drive save option
-- Chrome Web Store setup
-- [~] settings page
-
-### Sprint 4: internal beta (Jun 21 - Jul 1)
-
-- [~] Side panel polish
-- Internal beta
-
-### Sprint 5 — Release (Jul 5)
-
-- Chrome Web Store submission
-- User-facing README: install, first use, privacy, TWFF export
-
-### Milestone tracker
-
-| Milestone | Target date | Status | Output | Actual date |
-|---|---|---|---|---|
-| Sprint 1 complete | May 10 | [X] | Extension can produce a valid .twff export | |
-| Sprint 2 complete | May 24 | [ in progress ] | Ollama ai_interaction recorded | |
-| Sprint 3 complete | Jun 7 | [ ] | Gemini detected; Drive save working | |
-| Internal beta | Jun 14 | [ ] | test, no critical bugs | |
-| Store submission | Jul 5 | [ ] | Passing Chrome review | |
-| Case study beta | Jul 2025 | [ ] | Deployed at uni site | |
+Not yet published to the Chrome Web Store. Until then, build from source (see below) and
+load it as an unpacked extension.
 
 ---
 

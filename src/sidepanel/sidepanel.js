@@ -1898,9 +1898,9 @@ function _updateScanningDot(isRecording) {
   if (dot) dot.classList.toggle('active', !!isRecording);
 }
 
-// Shown when a long session auto-exports and lightens itself to stay under
-// chrome.storage.local's quota — nothing is deleted (the export is durable),
-// only summarized in the live copy, but that shouldn't happen silently.
+// A long session can approach chrome.storage.local's quota; when that
+// happens the session is exported and its live copy trimmed automatically —
+// this shouldn't happen silently, so surface it.
 function _showAutoExportNotice() {
   let el = document.getElementById('auto-export-notice');
   if (!el) {
@@ -1911,7 +1911,7 @@ function _showAutoExportNotice() {
       + 'border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.2);transition:opacity 0.3s;';
     document.body.appendChild(el);
   }
-  el.textContent = 'Session auto-exported & lightened to keep recording — nothing lost, see Downloads.';
+  el.textContent = 'This is a long session, so a backup copy was saved to Downloads. Nothing was lost.';
   el.style.opacity = '1';
   clearTimeout(el._hideTimer);
   el._hideTimer = setTimeout(() => { el.style.opacity = '0'; }, 6000);

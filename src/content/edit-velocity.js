@@ -4,7 +4,7 @@
  * Computes chars-per-minute for a burst of real keystrokes and flags bursts too
  * fast to be human-typed — a signal for AI text pasted then disguised as typing.
  *
- * Noise handling (per team-lead spec):
+ * Noise handling:
  *   - PAUSES: gaps longer than PAUSE_GAP_MS between keystrokes are NOT counted
  *     as typing time. Otherwise a 2-minute think-pause would make real typing
  *     look artificially slow. We sum only "active" inter-keystroke time.
