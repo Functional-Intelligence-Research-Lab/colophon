@@ -309,15 +309,15 @@ async function handleMessage(msg, _sender) {
       if (!['win', 'mac', 'linux'].includes(platformOs)) {
         return { ok: false, error: `Local AI setup isn't available on this platform (${platformOs}).` };
       }
-      try {
-        await _downloadNativeHostZip(platformOs);
-      } catch (err) {
-        return { ok: false, error: `Could not download the native host files: ${err.message}` };
-      }
+      // The native-host zip itself is downloaded by the caller (sidepanel.js),
+      // not here — chrome.downloads.download() cannot source a
+      // chrome-extension:// URL from a service worker (verified against a
+      // real Chrome instance: it fails with interruptReason NETWORK_FAILED
+      // regardless of web_accessible_resources), only from a page context.
       if (platformOs === 'win') {
-        return { ok: true, script: _buildWindowsBat(extId), filename: 'colophon-setup.bat' };
+        return { ok: true, script: _buildWindowsBat(extId), filename: 'colophon-setup.bat', platformOs };
       }
-      return { ok: true, script: _buildPosixScript(extId), filename: 'colophon-setup.command' };
+      return { ok: true, script: _buildPosixScript(extId), filename: 'colophon-setup.command', platformOs };
     }
 
     default:
@@ -707,38 +707,6 @@ async function updateEventMetadata({ eventTimestamp, key, value }) {
     await saveSession(session);
   }
   return { status: 'success' };
-}
-
-// ── Native host binary staging ───────────────────────────────────────────────
-
-// Downloads the prebuilt platform zip (bundled inside the extension package —
-// see native-host/build_native_host.py) into a fixed Downloads subfolder, so
-// the small setup script generated below can find and install it. Resolves
-// once the download actually finishes writing to disk.
-function _downloadNativeHostZip(platformOs) {
-  return new Promise((resolve, reject) => {
-    const url = chrome.runtime.getURL(`native-host/bin/${platformOs}/colophon-host.zip`);
-    chrome.downloads.download(
-      { url, filename: 'colophon-setup/colophon-host.zip', saveAs: false, conflictAction: 'overwrite' },
-      (downloadId) => {
-        if (chrome.runtime.lastError || downloadId == null) {
-          reject(new Error(chrome.runtime.lastError?.message || 'Download failed to start'));
-          return;
-        }
-        const listener = (delta) => {
-          if (delta.id !== downloadId) return;
-          if (delta.state?.current === 'complete') {
-            chrome.downloads.onChanged.removeListener(listener);
-            resolve();
-          } else if (delta.state?.current === 'interrupted') {
-            chrome.downloads.onChanged.removeListener(listener);
-            reject(new Error('Native host download was interrupted'));
-          }
-        };
-        chrome.downloads.onChanged.addListener(listener);
-      },
-    );
-  });
 }
 
 // ── Setup script builders ──────────────────────────────────────────────────────
