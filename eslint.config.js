@@ -8,7 +8,7 @@ export default [
     rules: {
       'no-unused-vars':    ['warn', { argsIgnorePattern: '^_' }],
       'no-console':        'off',
-      'eqeqeq':            ['error', 'always'],
+      'eqeqeq':            ['error', 'always', { null: 'ignore' }],
       'no-var':            'error',
       'prefer-const':      'error',
       'no-implicit-globals': 'error',

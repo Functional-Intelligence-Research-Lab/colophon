@@ -1,0 +1,39 @@
+name: Build native host
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-host/host.py'
+      - 'native-host/build_native_host.py'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install patchelf (Linux only)
+        if: runner.os == 'Linux'
+        run: pip install patchelf
+
+      - name: Install Nuitka
+        run: pip install nuitka
+
+      - name: Build
+        working-directory: native-host
+        run: python build_native_host.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: colophon-host-${{ runner.os }}
+          path: native-host/bin/*/colophon-host.zip
+          if-no-files-found: error

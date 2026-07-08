@@ -1,5 +1,6 @@
 dist/
 src/generated/
+native-host/build/
 .env
 *.pem
 *.key

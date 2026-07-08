@@ -6,6 +6,13 @@ async function init() {
   const settings = await getSettings()
   const userId   = await ensureUserId()
 
+  // gemini-api isn't functional yet — fall back for anyone who selected it
+  // before it was marked "coming soon", so they're never stuck on a disabled option.
+  if (settings.aiPath === 'gemini-api') {
+    settings.aiPath = 'ollama'
+    await save({ aiPath: 'ollama' })
+  }
+
   // Populate all fields from stored settings
   setRadio('aiPath', settings.aiPath)
   setRadio('outputFormat', settings.outputFormat)

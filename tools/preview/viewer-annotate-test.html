@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Viewer annotate.js smoke test</title>
+</head>
+<body>
+  <iframe id="viewer-frame" style="width:1000px;height:800px;"></iframe>
+  <pre id="result" style="white-space:pre-wrap;font-family:monospace;"></pre>
+
+  <script type="module">
+    const VIEWER_URL = '../../dist/viewer/viewer.html';
+    const TWFF_URL = new URL(location.href).searchParams.get('twff');
+
+    const frame = document.getElementById('viewer-frame');
+    const resultEl = document.getElementById('result');
+
+    function log(msg) {
+      resultEl.textContent += msg + '\n';
+    }
+
+    frame.addEventListener('load', async () => {
+      const win = frame.contentWindow;
+      const doc = frame.contentDocument;
+
+      // Intercept window.open so we can capture the generated report HTML
+      // instead of actually opening a new tab (which headless Chrome can't
+      // show us) — the report is a Blob URL, so read it back via fetch().
+      win.open = (url) => {
+        win.__capturedReportUrl = url;
+        return { closed: false };
+      };
+
+      try {
+        const resp = await fetch(TWFF_URL);
+        const blob = await resp.blob();
+        const file = new win.File([blob], 'sample.twff', { type: 'application/zip' });
+
+        const dt = new win.DataTransfer();
+        dt.items.add(file);
+        const fileInput = doc.getElementById('file-input');
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new win.Event('change', { bubbles: true }));
+
+        // Wait for async loadFile() to finish rendering
+        await new Promise((r) => setTimeout(r, 500));
+
+        const pdfBtn = doc.getElementById('btn-annotated-pdf');
+        log('PDF button disabled? ' + pdfBtn.disabled);
+        pdfBtn.click();
+
+        await new Promise((r) => setTimeout(r, 200));
+
+        if (!win.__capturedReportUrl) {
+          log('FAIL: window.open was never called (no report generated)');
+          return;
+        }
+        const reportHtml = await (await fetch(win.__capturedReportUrl)).text();
+        win.__reportHtml = reportHtml;
+
+        const annCount = (reportHtml.match(/class="ann ann-/g) || []).length;
+        const supersededMatch = reportHtml.match(/Superseded content \((\d+)\)/);
+        const unlocatedMatch = reportHtml.match(/Unlocated events \((\d+)\)/);
+        const aiCoverageMatch = reportHtml.match(/AI-derived coverage<\/td><td>(\d+)%/);
+        const pasteCoverageMatch = reportHtml.match(/Pasted-content coverage<\/td><td>(\d+)%/);
+
+        log('OK: report generated, length=' + reportHtml.length);
+        log('Annotation <span> count: ' + annCount);
+        log('Superseded section: ' + (supersededMatch ? supersededMatch[0] : 'none'));
+        log('Unlocated section: ' + (unlocatedMatch ? unlocatedMatch[0] : 'none'));
+        log('AI coverage: ' + (aiCoverageMatch ? aiCoverageMatch[1] + '%' : 'n/a'));
+        log('Paste coverage: ' + (pasteCoverageMatch ? pasteCoverageMatch[1] + '%' : 'n/a'));
+        log('DONE');
+      } catch (err) {
+        log('ERROR: ' + err.message + '\n' + err.stack);
+      }
+    });
+
+    frame.src = VIEWER_URL;
+  </script>
+</body>
+</html>
