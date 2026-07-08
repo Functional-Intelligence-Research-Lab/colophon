@@ -25,8 +25,6 @@ const ACTIVITY_FALLBACK = [
   { type: 'info', title: 'No activity yet', meta: ['Start recording in Google Docs to watch events.'] },
 ]
 
-const TWFF_REPO = 'https://github.com/Functional-Intelligence-Research-Lab/twff'
-
 // Keep popup data live while open
 let _refreshTimer = null
 

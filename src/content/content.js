@@ -50,7 +50,6 @@ let _editBuffer = null
 let _debounce   = null
 let _blurredAt  = null
 let _lastPasteAt = 0
-let _pendingPaste = null
 let _listenerTargets = []
 let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
 let _heuristicDebounce = null
@@ -195,10 +194,9 @@ const _geminiDetector = createGeminiDetector({
     }).catch(() => {});
   },
 
-  onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
+  onResolve: ({ acceptance, accepted, suggestionText, reason }) => {
     if (accepted) {
       _lastPasteAt = Date.now();
-      _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
 
       // Use the snapshot taken when the suggestion appeared; fall back to the
       // rolling baseline if the per-suggestion snapshot wasn't ready in time.
@@ -1123,8 +1121,6 @@ function getDocsTitle() {
  * in sync when Google reshuffles class names.
  */
 function findGeminiActionButton(actionType) {
-  const { classifyAction: classify } = /** @type {any} */ (window.__colophon_geminiSelectors || {});
-
   // Containers where the Gemini accept/reject buttons live.
   const CONTAINERS = [
     '.appsElementsSidekickBarkickTopBox',

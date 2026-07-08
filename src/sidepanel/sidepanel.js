@@ -13,7 +13,6 @@ let activeTabId = null;
 let _assignmentPrompt = '';
 let _docContext = null;
 let _lastScanTime = 0;
-let _scanLabelInterval = null;
 
 const _DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 
@@ -55,42 +54,6 @@ async function _triggerManualScan() {
   } catch { /* ignore */ } finally {
     if (btn) { btn.classList.remove('scanning'); btn.disabled = false; }
   }
-}
-
-function _isMetaCommentary(text) {
-  if (!text || text.length < 15) return true;
-  const lower = text.toLowerCase().trim();
-  if (lower.startsWith('{') || lower.startsWith('[')) return true;
-  return [
-    "i've updated",
-    "i updated",
-    "i've rewritten",
-    "i rewritten",
-    "i've revised",
-    "i revised",
-    "i've expanded",
-    "i expanded",
-    "i've added",
-    "i added",
-    "i've modified",
-    "i modified",
-    'the selected text is not provided',
-    'please provide the text',
-    "i don't have",
-    "i'm unable",
-    "i'm sorry",
-    'as an ai',
-    'as a language model',
-    'as an assistant',
-    'i cannot',
-    'i need more context',
-    'could you please provide',
-    "the user's writing is",
-    "the user's text is",
-    'the user wants me to',
-    'treat everything before',
-    '[cursor]',
-  ].some(p => lower.includes(p));
 }
 
 function _cleanAIResponse(text) {
@@ -154,7 +117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       await chrome.tabs.sendMessage(activeTabId, { action: 'GET_TITLE' });
-    } catch (msgErr) {
+    } catch {
       console.warn("Colophon: Content script not ready. (Are you on a Google Doc?)");
     }
   } catch (e) {
@@ -195,7 +158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Export button is temporarily disabled (PDF export coming soon)
   // Refresh the "last scan" label every 30 seconds
-  _scanLabelInterval = setInterval(_updateScanLabel, 30_000);
+  setInterval(_updateScanLabel, 30_000);
   // Seed last scan time and doc context from session metadata if available
   chrome.runtime.sendMessage({ action: 'GET_STATE' }, (res) => {
     const ts = res?.session?.metadata?.last_snapshot_timestamp;
@@ -1184,7 +1147,7 @@ const TimelineRenderer = {
               logAcceptance();
             }
           }
-        } catch (err) {
+        } catch {
           useBtn.innerHTML = 'Failed';
           useBtn.style.borderColor = 'var(--diff-red)';
         }
