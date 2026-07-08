@@ -19,6 +19,7 @@ import {
   getSessionByDocId,
   saveSessionByDocId,
   ensureUserId,
+  aggregateOldEditEvents,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
 
@@ -327,6 +328,11 @@ async function handleMessage(msg, _sender) {
 
 async function startSession({ tabId, docUrl } = {}) {
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
+  // The real (reversible) Google Docs id, distinct from the opaque docId hash
+  // above — persisted so a background-triggered export (storage-quota
+  // auto-export) can fetch the doc without needing an open/focused tab.
+  const googleDocIdMatch = docUrl ? docUrl.match(/\/d\/([a-zA-Z0-9-_]+)/) : null;
+  const googleDocId = googleDocIdMatch ? googleDocIdMatch[1] : null;
   const now = new Date().toISOString();
 
   // ── Guard: do not create a new session if one is already actively recording
@@ -356,6 +362,7 @@ async function startSession({ tabId, docUrl } = {}) {
   if (session) {
     session.isRecording = true;
     session.tabId = tabId ?? null;
+    session.googleDocId = googleDocId ?? session.googleDocId ?? null;
     session.events.push({ timestamp: now, type: "session_resume", meta: {} });
     console.log("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
   } else {
@@ -365,6 +372,7 @@ async function startSession({ tabId, docUrl } = {}) {
       startedAt: now,
       tabId: tabId ?? null,
       docId,
+      googleDocId,
       isRecording: true,
       events: [],
       authors: { [userId]: { label: 'Author 1', color: '#5c3ce6' } },
@@ -471,12 +479,72 @@ async function appendEvent(event) {
   await saveSession(session);
 
   // Broadcast to Side Panel whenever an event is logged
-  chrome.runtime.sendMessage({ 
-    action: 'SYNC_TIMELINE', 
-    events: session.events 
+  chrome.runtime.sendMessage({
+    action: 'SYNC_TIMELINE',
+    events: session.events
   }).catch(() => {});
 
+  // Fire-and-forget: chrome.storage.local has no unlimitedStorage permission
+  // (Chrome's default ~10MB quota applies), so a very long session needs a
+  // way to relieve pressure without ever losing data. Never awaited here —
+  // exporting can be slow and must not block the LOG_EVENT response.
+  maybeAutoExportAndTrim().catch((err) =>
+    console.warn("[Colophon SW] auto-export/trim check failed", err)
+  );
+
   return { ok: true };
+}
+
+const STORAGE_QUOTA_WARN_RATIO = 0.8;
+let _autoExportInProgress = false;
+
+// When storage usage nears its quota, durably export the full session (never
+// deletes anything — the export is the safety net) and then aggregate old
+// plain `edit` events into synthetic roll-ups. `edit` events carry no text
+// snapshot at all (see flushEdit() in content.js — only position/char-delta
+// bookkeeping), so this loses no reconstructable information; every event
+// with acceptance/provenance value (ai_interaction, ai_suggestion,
+// gemini_suggestion, paste, checkpoint, heuristic_suggestion) is never
+// touched, since those carry the pedagogical/legal-evidentiary value.
+async function maybeAutoExportAndTrim() {
+  if (_autoExportInProgress) return;
+
+  let usage;
+  try {
+    usage = await chrome.storage.local.getBytesInUse();
+  } catch {
+    return; // getBytesInUse unavailable — skip, don't risk a broken cycle
+  }
+  const quota = chrome.storage.local.QUOTA_BYTES ?? 10_485_760;
+  if (usage < quota * STORAGE_QUOTA_WARN_RATIO) return;
+
+  const session = await getSession();
+  if (!session?.isRecording) return;
+  if (!session.googleDocId) return; // no tab-independent doc id — skip rather than risk a broken export
+
+  _autoExportInProgress = true;
+  try {
+    await exportSession({ tabIndependent: true });
+
+    // Re-fetch: more events may have been appended while exporting.
+    const fresh = await getSession();
+    if (!fresh?.isRecording) return;
+    const trimmed = aggregateOldEditEvents(fresh.events);
+    if (trimmed.changed) {
+      fresh.events = trimmed.events;
+      await saveSession(fresh);
+      chrome.runtime.sendMessage({ action: 'SYNC_TIMELINE', events: fresh.events }).catch(() => {});
+    }
+    chrome.runtime.sendMessage({ action: 'AUTO_EXPORT_LIGHTENED' }).catch(() => {});
+    console.log("[Colophon SW] auto-export + trim complete", {
+      eventsBefore: session.events.length,
+      eventsAfter: trimmed.events.length,
+    });
+  } catch (err) {
+    console.warn("[Colophon SW] auto-export failed, session left untouched", err);
+  } finally {
+    _autoExportInProgress = false;
+  }
 }
 
 function isNoOpEditEvent(event) {
@@ -497,7 +565,10 @@ async function getState() {
   const session = await getSession();
   if (!session) return { session: null, stats: null };
 
-  const editCount = session.events.filter((e) => e.type === "edit").length;
+  const editCount = session.events.filter((e) => e.type === "edit").length
+    + session.events
+        .filter((e) => e.type === "edit_summary")
+        .reduce((sum, e) => sum + (e.meta?.source_event_count ?? 0), 0);
   const aiCount = session.events.filter(
     (e) => e.type === "ai_interaction",
   ).length;
@@ -508,7 +579,12 @@ async function getState() {
   return { session, stats: { editCount, aiCount, elapsed }, docContext: _lastDocContext };
 }
 
-async function exportSession() {
+// tabIndependent=true skips the active-tab requirement (needed when this is
+// triggered from a background check, e.g. the storage-quota auto-export,
+// rather than a user clicking "Export") — requires session.googleDocId to
+// have been captured at startSession() time; older sessions without it fall
+// back to the normal active-tab path and will throw if no Docs tab is open.
+async function exportSession({ tabIndependent = false } = {}) {
   const session = await getSession();
   if (!session) throw new Error("No active session to export.");
 
@@ -521,7 +597,11 @@ async function exportSession() {
   logger.startTime = session.startedAt;
   logger.events = session.events;
 
-  const exportData = await logger.export();
+  const docId = tabIndependent ? (session.googleDocId ?? null) : null;
+  if (tabIndependent && !docId) {
+    throw new Error("No stored Google Doc id for this session — cannot export without an active tab.");
+  }
+  const exportData = await logger.export(docId);
 
   // Return the {filename, base64}
   return exportData;
@@ -590,6 +670,15 @@ async function updateMetadata({ key, value }) {
   return { status: 'success' };
 }
 
+// Unlike output_preview/context_before/context_after elsewhere (capped to
+// ~100-300 chars at the point they're captured in content.js), these two
+// fields had no size cap at all — a single accept/reject update could attach
+// arbitrary-length text to an event. 2000 chars is generous enough that
+// lib/annotate.js's verify()/classifyReliability logic (which already treats
+// anything ≥500 chars specially — see insertedLength()) keeps working
+// unchanged for real sessions.
+const MAX_CONTENT_SNAPSHOT_CHARS = 2000;
+
 async function updateEventAcceptance({ eventTimestamp, acceptance, content_before, content_after }) {
   const session = await getSession();
   if (!session) return { status: 'error' };
@@ -597,8 +686,8 @@ async function updateEventAcceptance({ eventTimestamp, acceptance, content_befor
   const event = session.events.find(e => e.timestamp === eventTimestamp);
   if (event?.meta) {
     event.meta.acceptance = acceptance;
-    if (content_before !== undefined) event.meta.content_before = content_before;
-    if (content_after !== undefined) event.meta.content_after = content_after;
+    if (content_before !== undefined) event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+    if (content_after !== undefined) event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
     await saveSession(session);
     chrome.runtime.sendMessage({
       action: 'SYNC_TIMELINE',

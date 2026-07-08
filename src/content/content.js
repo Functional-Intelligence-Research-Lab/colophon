@@ -385,7 +385,9 @@ function activate() {
   // Native Gemini suggestion detection (Help me write / Refine)
   _geminiDetector.start()
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // Periodic checkpoints every 5 minutes + heuristic pass
+  // Periodic checkpoints + heuristic pass — 15 minutes (heuristics are a
+  // lighter-weight, lower-priority feature now; most users have their own
+  // grammar checker for anything time-sensitive).
   _checkpointTimer = setInterval(() => {
     const text = _getDocText()
     const words = text.trim().split(/\s+/).filter(Boolean).length
@@ -398,7 +400,7 @@ function activate() {
       },
     }).catch(() => {})
     runHeuristics()
-  }, 5 * 60 * 1000)
+  }, 15 * 60 * 1000)
   console.log('[Colophon Content] recording activated', {
     activeElement: describeElement(document.activeElement),
     hasEditor: !!document.querySelector(EDITOR_SELECTOR),
@@ -436,7 +438,7 @@ function runHeuristics() {
 
 function scheduleHeuristics() {
   clearTimeout(_heuristicDebounce)
-  _heuristicDebounce = setTimeout(runHeuristics, 30_000)
+  _heuristicDebounce = setTimeout(runHeuristics, 90_000)
 }
 
 function describeElement(el) {
@@ -589,6 +591,7 @@ function onKeydown(e) {
 // ── Edit capture: MutationObserver (secondary) ────────────────────────────────
 
 function waitForEditor(callback) {
+  if (!_active) return
   const el = document.querySelector(EDITOR_SELECTOR)
   if (el) { callback(el); return }
   console.log('[Colophon Content] waiting for editor', { selector: EDITOR_SELECTOR })
