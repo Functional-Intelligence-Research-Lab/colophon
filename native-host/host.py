@@ -43,7 +43,11 @@ from pathlib import Path
 COLOPHON_DIR = Path.home() / ".colophon" / "models"
 SERVER_PORT = 8080
 
-# Llamafile 0.8.14 — update URL + hash together when upgrading
+# Llamafile 0.8.14 — update URL + hash together when upgrading.
+# One cross-platform binary (Cosmopolitan/APE format) — no separate Windows
+# .exe release asset exists (confirmed against the actual release asset
+# list), so the URL does not vary by platform. The Windows-specific piece is
+# the *local* filename (see _llamafile_path() below), not the download URL.
 LLAMAFILE_VERSION = "0.8.14"
 LLAMAFILE_URL = (
     f"https://github.com/Mozilla-Ocho/llamafile/releases/download/"

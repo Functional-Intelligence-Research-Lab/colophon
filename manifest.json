@@ -3,6 +3,7 @@
   "name": "Colophon",
   "version": "0.2.0",
   "description": "Records AI writing interactions as a TWFF-compatible process log in Google Docs.",
+  "homepage_url": "https://colophon.firl.nl",
 
   "permissions": [
     "activeTab",
