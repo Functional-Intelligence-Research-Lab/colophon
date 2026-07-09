@@ -170,7 +170,12 @@ async function handleMessage(msg, _sender) {
   switch (route) {
     case "SESSION_START":
     case "startSession":
-      return startSession(msg); // Pass the whole msg so we can grab msg.title
+      // Fall back to the sender's tab id when the message doesn't carry one —
+      // e.g. the in-page "Start Session" toast can't know its own tabId,
+      // unlike the popup which queries it explicitly. Without this, the
+      // session gets marked as recording but activateContentScript() is
+      // silently skipped, so no events are ever actually captured.
+      return startSession({ ...msg, tabId: msg.tabId ?? _sender?.tab?.id }); // Pass the whole msg so we can grab msg.title
 
     case "AUTO_SESSION_START":
       // Always-on recording (spike): the content script asks to start as soon as
