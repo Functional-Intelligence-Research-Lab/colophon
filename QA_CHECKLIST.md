@@ -118,6 +118,37 @@ Docs with real AI providers.
 - [ ] Open the Settings page and confirm "Gemini API key" shows a dimmed,
       disabled "Soon" state and can't be selected.
 
+## 9. Clean uninstall (reset to a truly clean state before re-testing fresh install)
+
+Needed between repeated fresh-install QA passes so leftover state from a previous run
+doesn't mask a real bug (or fake a pass). Native-messaging host id is
+`com.colophon.llamahost` throughout.
+
+- [ ] Remove the extension via `chrome://extensions` — this clears all of
+      `chrome.storage.local` (`settings`, `session`, `sessions`, `currentSession`,
+      `authorId`, `llamafilePort`). No IndexedDB/localStorage is used anywhere in this
+      extension, so nothing else persists in the browser after this step.
+- [ ] Remove the native-messaging registration + installed host binary:
+  - **macOS/Linux**: delete whichever of these exist —
+    `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.colophon.llamahost.json`,
+    `~/Library/Application Support/Chromium/NativeMessagingHosts/com.colophon.llamahost.json`,
+    `~/.config/google-chrome/NativeMessagingHosts/com.colophon.llamahost.json`,
+    `~/.config/chromium/NativeMessagingHosts/com.colophon.llamahost.json` — then
+    `rm -rf ~/.colophon/native-host`.
+  - **Windows**:
+    `reg delete "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.colophon.llamahost" /f`,
+    then delete `%APPDATA%\Colophon\native-host\`.
+  - See `native-host/README.md`'s "Uninstall" section for the authoritative version of
+    these steps.
+- [ ] Remove the downloaded local model: `rm -rf ~/.colophon/models` (the llamafile/
+      llamafile.exe runtime, the ~770 MB GGUF model, `llamafile-stderr.log`, and any
+      stray `*.tmp` partial downloads left by an interrupted install).
+- [ ] Before rebuilding from scratch, run `rm -rf dist` first. `npm run build` does
+      **not** clean `dist/` — it only copies files in, so stale artifacts from an older
+      build silently persist (e.g. a leftover `dist/native-host/install.sh`/
+      `install.ps1` from before those legacy scripts were removed from source). Confirm
+      a fresh `dist/native-host/` contains no `install.sh`/`install.ps1` after rebuilding.
+
 ## Before actually submitting to the Chrome Web Store
 
 This checklist covers functional/visual regressions from this round's
