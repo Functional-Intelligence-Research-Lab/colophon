@@ -55,23 +55,26 @@ run once per target platform. `.github/workflows/build-native-host.yml` does thi
 
 ## Uninstall
 
-**Windows** — delete the registry key:
+**Windows** — delete the registry key, then the installed binary directory:
 
 ```ps
-HKCU\Software\Google\Chrome\NativeMessagingHosts\com.colophon.llamahost
+reg delete "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.colophon.llamahost" /f
 ```
 
-**macOS/Linux** — delete:
+```ps
+%APPDATA%\Colophon\native-host\
+```
+
+**macOS/Linux** — delete whichever of these manifest files exist (Chrome and/or
+Chromium, if both are installed):
 
 ```bash
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.colophon.llamahost.json
-```
-
-or
-
-```bash
+~/Library/Application Support/Chromium/NativeMessagingHosts/com.colophon.llamahost.json
 ~/.config/google-chrome/NativeMessagingHosts/com.colophon.llamahost.json
+~/.config/chromium/NativeMessagingHosts/com.colophon.llamahost.json
 ```
 
 Then remove `~/.colophon/native-host` (the installed binary). To also remove the
-downloaded model (~720 MB), delete `~/.colophon/models/`.
+downloaded model (~720 MB), delete `~/.colophon/models/` (llamafile/llamafile.exe,
+the GGUF model file, and `llamafile-stderr.log`).
