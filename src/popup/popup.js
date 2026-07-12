@@ -1,16 +1,17 @@
 /**
  * popup.js — Colophon popup
  *
- * Layout: header (doc title + settings gear), originality verdict banner
- * (good / warn / bad), breakdown card (Own writing / AI Paraphrase /
- * External Source bars), Recent Activity timeline (3 most recent events),
- * Start/Stop, View full log, Export, footer ("Private and local" + TWFF link).
+ * Layout: header (doc title + settings gear), a plain recording-status
+ * banner (no verdict, no judgment), breakdown card (Own writing / AI
+ * Paraphrase / External Source bars — the actual evidence), Recent Activity
+ * timeline (3 most recent events), Start/Stop, View full log, Export,
+ * footer ("Private and local" + TWFF link).
  *
  * Five rendered states:
- *   1. No session                — verdict hidden, breakdown empty, timeline empty
- *   2. Recording, no activity    — verdict "neutral" tone, bars at 0%
- *   3. Recording with activity   — verdict + bars + timeline populated
- *   4. Stopped, has events       — verdict + bars + timeline; Export enabled
+ *   1. No session                — banner "Nothing recorded yet", breakdown empty, timeline empty
+ *   2. Recording, no activity    — banner "Nothing recorded yet", bars at 0%
+ *   3. Recording with activity   — banner "recorded" + bars + timeline populated
+ *   4. Stopped, has events       — banner "recorded" + bars + timeline; Export enabled
  *   5. Error / SW unreachable    — notice banner shown
  */
 
@@ -183,44 +184,28 @@ function renderScores(session) {
   setScore('own', own)
   setScore('ai', ai)
   setScore('source', source)
-  renderVerdict(hasData ? ai : null)
+  renderSummaryBanner(hasData)
 }
 
-// Icon paths for the two verdict states. Both are single filled paths (not
-// stroke-based) since .leaf-mark svg forces fill:currentColor; stroke:none.
-const LEAF_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
-const WARN_ICON_PATH = '<path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/>'
+// Single filled path (not stroke-based, since .leaf-mark svg forces
+// fill:currentColor; stroke:none) — a plain document mark, not a judgment
+// icon. The own/AI/source breakdown below is the actual evidence; this
+// banner only states whether anything's been recorded yet.
+const DOC_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
 
-// Turns the raw own/AI/source split into a verdict banner, with a distinct
-// warn state once AI involvement is the majority of the document.
-function renderVerdict(aiPercent) {
+// Deliberately no verdict tiers here — no "mostly original" / "mostly
+// AI-assisted" framing, no color-coded good/warn states. Just whether
+// there's anything recorded yet; the breakdown bars carry the real data.
+function renderSummaryBanner(hasData) {
   const banner = $('summary-banner')
   const icon = $('verdict-icon')
   const title = $('summary-title')
   if (!banner || !icon || !title) return
 
-  banner.classList.remove('summary--good', 'summary--neutral', 'summary--warn')
-
-  if (aiPercent === null) {
-    title.innerHTML = 'Nothing recorded <strong>yet</strong>'
-    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
-    banner.classList.add('summary--neutral')
-    return
-  }
-
-  if (aiPercent <= 20) {
-    title.innerHTML = 'Your writing is <strong>mostly original</strong>'
-    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
-    banner.classList.add('summary--good')
-  } else if (aiPercent <= 50) {
-    title.innerHTML = 'Your writing is <strong>a mix of you and AI</strong>'
-    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${LEAF_ICON_PATH}</svg>`
-    banner.classList.add('summary--neutral')
-  } else {
-    title.innerHTML = 'Your writing is <strong>mostly AI-assisted</strong>'
-    icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${WARN_ICON_PATH}</svg>`
-    banner.classList.add('summary--warn')
-  }
+  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${DOC_ICON_PATH}</svg>`
+  title.innerHTML = hasData
+    ? 'Writing activity <strong>recorded</strong>'
+    : 'Nothing recorded <strong>yet</strong>'
 }
 
 function setScore(id, value) {
