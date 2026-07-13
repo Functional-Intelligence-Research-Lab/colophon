@@ -1,4 +1,5 @@
 import JSZip from './jszip.js';
+import { computeEventHash } from '../shared/process-log.js';
 
 // Annotation type registry
 export const ANNOTATION_TYPES = {
@@ -172,28 +173,46 @@ export class ProcessLog {
     }
 
     /**
-     * 
-     * @returns {<String>} author ID
+     * Computes the per-event SHA-256 hash chain (spec §5.2) over
+     * `processLogDict.events` — which must already be the sanitized/exported
+     * shape (i.e. the output of toDict()), never the raw in-memory events —
+     * so the chain always matches what actually gets written to
+     * process-log.json. Mutates each event with `_hash` and sets
+     * `processLogDict._integrity` in place.
+     * @param {{events: Array, [key: string]: any}} processLogDict
+     * @returns {Promise<void>}
      */
-    async getAuthorId() {
-        const { authorId } = await chrome.storage.local.get("authorId");
-        if (authorId) return authorId;
-        const id = crypto.randomUUID();
-        await chrome.storage.local.set({ authorId: id });
-        return id;
+    async _applyIntegrityChain(processLogDict) {
+        let previousHash = "";
+        for (const event of processLogDict.events) {
+            event._hash = await computeEventHash(event, previousHash, this.sessionId);
+            previousHash = event._hash;
         }
+
+        processLogDict._integrity = {
+            algorithm: "SHA-256-CHAIN",
+            chain_length: processLogDict.events.length,
+            head_hash: previousHash,
+            session_id: this.sessionId,
+            note: "Per-event chained hash. Verify using spec §5.2.",
+        };
+    }
 
     /**
      * builds metadata for user session
+     *
+     * Uses the same `this.userId` set at construction (the session's single,
+     * session-scoped author ID — see shared/storage.js's ensureSessionUserId)
+     * rather than a second, independently-generated id, so metadata.json and
+     * process-log.json always agree on who wrote a session.
      * @returns {{}} Metadata of user session
      */
     async buildMetadata() {
-        const authorId = await this.getAuthorId();
         return {
             title: this.title || 'colophone',
             created: new Date().toISOString(),
             twff_version: ProcessLog.SPEC_VERSION,
-            author_id: authorId,
+            author_id: this.userId,
             session_id: this.sessionId
         };
         }
@@ -322,35 +341,6 @@ export class ProcessLog {
         return await this._inlineEpubImages(mainContent, loadedEpub, xhtmlFolder);
     }
 
-    /**
-     * Mimicks python's json.dump
-     * Note: Required for the integrity hash 
-     * @param {*} obj object
-     * @returns {<String>} A python styled JSON file.
-     */
-    pythonJsonDump(obj) {
-        // Native stringify safely handle strings, numbers, booleans, and null
-        if (obj === null || typeof obj !== 'object') {
-            return JSON.stringify(obj);
-        }
-
-        // Handle Arrays: Map through items and join with a comma and a space
-        if (Array.isArray(obj)) {
-            const items = obj.map(item => this.pythonJsonDump(item));
-            return `[${items.join(', ')}]`;
-        }
-
-        // Handle Objects: Sort keys alphabetically, then format with Python's colon and comma spaces
-        const keys = Object.keys(obj).sort();
-        const items = keys.map(key => {
-            const safeKey = JSON.stringify(key);
-            const safeValue = this.pythonJsonDump(obj[key]);
-            return `${safeKey}: ${safeValue}`;
-        });
-        
-        return `{${items.join(', ')}}`;
-}
-
     async getHtml() {
         // Finds the active Google Docs tab
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -417,26 +407,10 @@ export class ProcessLog {
     async export(docId = null) {
         //const endTime = this.endSession();
         const processLogDict = this.toDict();
+        await this._applyIntegrityChain(processLogDict);
         const xhtmlContent = await this.getXhtmlContentEpub(docId)
         //const xhtmlContent = await this.getHtml()
         const metaData = await this.buildMetadata()
-
-        // Compute integrity hash using the native Web Crypto API
-        const eventsJson = this.pythonJsonDump(this.events);
-        const salt = this.sessionId;
-        const textEncoder = new TextEncoder();
-        const dataToHash = textEncoder.encode(eventsJson + salt);
-        
-        const hashBuffer = await crypto.subtle.digest("SHA-256", dataToHash);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const integrityHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-        processLogDict._integrity = {
-            algorithm: "SHA-256",
-            salt: "session_id",
-            hash: integrityHash,
-            note: "Hash of events array concatenated with session_id salt."
-        };
 
         const manifest = this._buildManifest();
 
@@ -468,8 +442,11 @@ export class ProcessLog {
 
     // --- Private helpers ---
     /**
-     * Generate a short, anonymous, session-scoped user ID.
-     * Not stored anywhere — user can rotate by refreshing. 
+     * Defensive fallback for when a ProcessLog is constructed without a
+     * userId. In production, service-worker.js always supplies one (via
+     * shared/storage.js's ensureSessionUserId) before this class is
+     * instantiated, so this path isn't normally hit — it just guarantees the
+     * class never produces a log with a missing/undefined user_id.
      */
     _generateEphemeralId() {
         // Hashing a UUID4 (like in Python) is technically redundant for randomness.

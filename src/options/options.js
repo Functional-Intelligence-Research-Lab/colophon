@@ -1,10 +1,10 @@
-import { getSettings, saveSettings, ensureUserId } from '../shared/storage.js'
+import { getSettings, saveSettings, getSession } from '../shared/storage.js'
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
   const settings = await getSettings()
-  const userId   = await ensureUserId()
+  const session  = await getSession()
 
   // gemini-api isn't functional yet — fall back for anyone who selected it
   // before it was marked "coming soon", so they're never stuck on a disabled option.
@@ -19,7 +19,8 @@ async function init() {
   document.getElementById('ollama-endpoint').value = settings.ollamaEndpoint
   document.getElementById('ollama-model').value    = settings.ollamaModel
   document.getElementById('gemini-key').value      = settings.geminiApiKey
-  document.getElementById('user-id').textContent   = userId
+  document.getElementById('user-id').textContent   = session?.userId
+    ?? 'No active session — an ID is generated automatically once you start recording'
 
   updateConditionalSections(settings.aiPath)
 
@@ -46,8 +47,6 @@ async function init() {
   document.getElementById('gemini-key').addEventListener('change', e =>
     save({ geminiApiKey: e.target.value.trim() })
   )
-
-  document.getElementById('btn-rotate').addEventListener('click', rotateUserId)
 }
 
 // ── Save ──────────────────────────────────────────────────────────────────────
@@ -62,17 +61,6 @@ function flashSaved() {
   el.hidden = false
   clearTimeout(el._timer)
   el._timer = setTimeout(() => { el.hidden = true }, 1500)
-}
-
-// ── User ID rotation ──────────────────────────────────────────────────────────
-
-async function rotateUserId() {
-  const raw = crypto.randomUUID()
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
-  const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
-  const newId = 'anon-' + hex.slice(0, 12)
-  await save({ userId: newId })
-  document.getElementById('user-id').textContent = newId
 }
 
 // ── Conditional visibility ────────────────────────────────────────────────────

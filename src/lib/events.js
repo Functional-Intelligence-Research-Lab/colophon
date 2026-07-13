@@ -20,6 +20,18 @@ function clip(value, n) {
   return (value ?? '').slice(0, n)
 }
 
+/**
+ * True length of a value, captured *before* truncation. Position/reliability
+ * classification in annotate.js (classifyReliability, insertedLength) only
+ * ever needs a length, never the substring itself — carrying this alongside
+ * the capped content_before/content_after fields lets drift correction stay
+ * accurate for long insertions without needing to raise the content cap
+ * itself (spec v0.2 §6.1's 500-char privacy cap on stored text).
+ */
+function trueLength(value) {
+  return (value ?? '').length
+}
+
 export function editEvent({ content, source, position_start, position_end, content_before, content_after, delta_words } = {}) {
   return {
     type: 'edit',
@@ -86,6 +98,8 @@ export function aiInteractionEvent({ model, model_version, context_window, outpu
       output_preview: output_preview || '',
       content_before: clip(content_before, 500),
       content_after: clip(content_after, 500),
+      content_before_length: trueLength(content_before),
+      content_after_length: trueLength(content_after),
       position_start: position_start || 0,
       position_end: position_end || 0,
       acceptance: acceptance || '',
@@ -112,6 +126,8 @@ export function aiSuggestionEvent({ model, model_version, context_window, output
       output_preview: output_preview || '',
       content_before: clip(content_before, 500),
       content_after: clip(content_after, 500),
+      content_before_length: trueLength(content_before),
+      content_after_length: trueLength(content_after),
       position_start: position_start || 0,
       position_end: position_end || 0,
       acceptance: acceptance || '',
@@ -197,6 +213,8 @@ export function geminiSuggestionEvent({ char_count = 0, output_preview = '', ins
       insertion_velocity,
       content_before: clip(content_before, 500),
       content_after: clip(content_after, 500),
+      content_before_length: trueLength(content_before),
+      content_after_length: trueLength(content_after),
       _hash: hash,
     },
   }

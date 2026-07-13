@@ -91,4 +91,22 @@ describe('aiSuggestionEvent / aiInteractionEvent fields', () => {
     const e = aiInteractionEvent({ model: 'x' })
     expect(e.meta).not.toHaveProperty('similarity_score')
   })
+
+  it('content_after_length survives truncation even though content_after itself is capped at 500', () => {
+    const long = 'y'.repeat(1800)
+    const interaction = aiInteractionEvent({ model: 'x', content_after: long })
+    expect(interaction.meta.content_after).toHaveLength(500)
+    expect(interaction.meta.content_after_length).toBe(1800)
+
+    const suggestion = aiSuggestionEvent({ model: 'x', content_before: long, content_after: long })
+    expect(suggestion.meta.content_before).toHaveLength(500)
+    expect(suggestion.meta.content_before_length).toBe(1800)
+    expect(suggestion.meta.content_after_length).toBe(1800)
+  })
+
+  it('content_before_length/content_after_length are 0 for empty/omitted content, never undefined', () => {
+    const e = aiInteractionEvent({ model: 'x' })
+    expect(e.meta.content_before_length).toBe(0)
+    expect(e.meta.content_after_length).toBe(0)
+  })
 })

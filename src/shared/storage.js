@@ -11,7 +11,6 @@ const DEFAULT_SETTINGS = {
   ollamaModel:     '',
   outputFormat:    'twff',
   geminiApiKey:    '',
-  userId:          '',
 }
 
 export async function getSettings() {
@@ -109,16 +108,10 @@ export function aggregateOldEditEvents(events) {
   return { events: result, changed }
 }
 
-/** Returns the persisted anonymous user ID, generating one if missing. */
-export async function ensureUserId() {
-  const settings = await getSettings()
-  if (settings.userId) return settings.userId
-  const userId = await _generateUserId()
-  await saveSettings({ userId })
-  return userId
-}
-
-async function _generateUserId() {
+/**
+ * Generate a fresh, anonymous, unlinkable author ID. Pure — no storage side effects.
+ */
+export async function generateUserId() {
   const raw = crypto.randomUUID()
   const bytes = new TextEncoder().encode(raw)
   const buf = await crypto.subtle.digest('SHA-256', bytes)
@@ -126,4 +119,27 @@ async function _generateUserId() {
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
   return 'anon-' + hex.slice(0, 12)
+}
+
+/**
+ * Returns `session.userId`, generating and attaching one if the session doesn't
+ * have one yet. Mutates `session` in place — the caller is responsible for
+ * persisting it (saveSession/saveSessionByDocId).
+ *
+ * This is the ID's whole rotation story: a session only ever gets a fresh ID
+ * once, when it's first created, so the same ID stays stable for every event
+ * within that session (they still correlate correctly) but a brand new
+ * session always starts with a brand new ID — nothing links one session to
+ * the next. This satisfies TWFF spec §6.2 ("SHOULD be rotatable between
+ * sessions") using the session boundary itself, not an arbitrary timer, and
+ * without persisting an identity that would outlive any single session.
+ *
+ * Cross-session/cross-document identity for longitudinal research is
+ * deliberately NOT this ID's job — see SPEC.md §6.2 and READINESS.md for
+ * where that lives instead (the authenticated web-app layer).
+ */
+export async function ensureSessionUserId(session) {
+  if (session.userId) return session.userId
+  session.userId = await generateUserId()
+  return session.userId
 }

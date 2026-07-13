@@ -49,9 +49,16 @@ export function normalizeEvent(raw, index) {
   const contentBefore = desentinel(f.content_before);
   const contentAfter = desentinel(f.content_after);
 
+  // True pre-truncation lengths (spec v0.2 §6.1's content_before_length/
+  // content_after_length), when the producer supplied them — falls back to
+  // the (possibly 500-char-capped) string's own length for older files that
+  // predate this field, same as before.
+  const contentBeforeLength = numOrNull(f.content_before_length) ?? (contentBefore != null ? contentBefore.length : null);
+  const contentAfterLength = numOrNull(f.content_after_length) ?? (contentAfter != null ? contentAfter.length : null);
+
   const lengthHint =
     numOrNull(f.char_delta) ??
-    (contentBefore != null && contentAfter != null ? contentAfter.length - contentBefore.length : null) ??
+    (contentBeforeLength != null && contentAfterLength != null ? contentAfterLength - contentBeforeLength : null) ??
     (posStart != null && posEnd != null ? posEnd - posStart : null);
 
   return {
@@ -64,6 +71,7 @@ export function normalizeEvent(raw, index) {
     acceptance: f.acceptance ?? null, // preserved verbatim, including the real producer's non-spec "pending"
     posStart, posEnd,
     contentBefore, contentAfter,
+    contentBeforeLength, contentAfterLength,
     preview: f.output_preview ?? f.content_preview ?? null,
     charCount: numOrNull(f.char_count) ?? numOrNull(f.ai_chars),
     lengthHint,
@@ -111,7 +119,7 @@ export function classifyReliability(e, docLenEstimate) {
     }
     return 'length-only';
   }
-  if (e.contentAfter != null && Math.abs((e.posEnd - e.posStart) - e.contentAfter.length) > 2) {
+  if (e.contentAfterLength != null && Math.abs((e.posEnd - e.posStart) - e.contentAfterLength) > 2) {
     return 'length-only';
   }
   return 'position';
@@ -119,7 +127,10 @@ export function classifyReliability(e, docLenEstimate) {
 
 // ── 4. Shift oplog + forward position mapping (drift correction) ────────
 function insertedLength(e) {
-  if (e.contentAfter != null && e.contentAfter.length < 500) return e.contentAfter.length;
+  // Prefer the true pre-truncation length when the producer supplied one —
+  // accurate even for insertions longer than the 500-char content cap,
+  // since this field is a plain integer, not text, and isn't capped.
+  if (e.contentAfterLength != null) return e.contentAfterLength;
   return e.charCount ?? Math.max(0, e.lengthHint ?? (e.posEnd - e.posStart));
 }
 
@@ -353,7 +364,7 @@ export function computeAnnotations(xhtmlStr, log) {
     }
 
     const snapshot = e.contentAfter ?? e.preview ?? null;
-    const expectedLength = e.charCount ?? e.contentAfter?.length ?? (e.posEnd != null && e.posStart != null ? e.posEnd - e.posStart : null);
+    const expectedLength = e.charCount ?? e.contentAfterLength ?? (e.posEnd != null && e.posStart != null ? e.posEnd - e.posStart : null);
     let range = null;
     let locatedVia = null;
 
