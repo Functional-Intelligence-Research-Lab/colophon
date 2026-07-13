@@ -687,15 +687,27 @@ async function updateMetadata({ key, value }) {
 // lib/annotate.js's verify()/classifyReliability logic (which already treats
 // anything ≥500 chars specially — see insertedLength()) keeps working
 // unchanged for real sessions.
+//
+// Known gap: TWFF spec v0.2 §6.1 promises content_before/content_after are
+// capped at 500 chars everywhere; this path (an accept/reject update arriving
+// after the original event) can still push them up to 2000. Lowering this to
+// 500 is not a free change — annotate.js's classifyReliability() (line ~114)
+// uses the true contentAfter length vs. posEnd-posStart to detect the
+// "position_end is actually a length" producer bug, and a tighter cap would
+// misclassify some real long AI insertions (500-2000 chars) as unreliable.
+// Flagged in firl-infra/READINESS.md rather than changed here without a
+// closer look at drift-correction accuracy.
 const MAX_CONTENT_SNAPSHOT_CHARS = 2000;
 
-async function updateEventAcceptance({ eventTimestamp, acceptance, content_before, content_after }) {
+async function updateEventAcceptance({ eventTimestamp, acceptance, similarity_score, content_before, content_after }) {
   const session = await getSession();
   if (!session) return { status: 'error' };
 
   const event = session.events.find(e => e.timestamp === eventTimestamp);
   if (event?.meta) {
     event.meta.acceptance = acceptance;
+    // 0-1: how much of the AI's wording survived — spec v0.2 §4.4.
+    if (similarity_score !== undefined) event.meta.similarity_score = similarity_score;
     if (content_before !== undefined) event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
     if (content_after !== undefined) event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
     await saveSession(session);
