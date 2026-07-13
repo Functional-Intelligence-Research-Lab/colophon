@@ -18,7 +18,8 @@ import {
   saveSession,
   getSessionByDocId,
   saveSessionByDocId,
-  ensureUserId,
+  ensureSessionUserId,
+  generateUserId,
   aggregateOldEditEvents,
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
@@ -376,7 +377,9 @@ async function startSession({ tabId, docUrl } = {}) {
     session.events.push({ timestamp: now, type: "session_resume", meta: {} });
     debugLog("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
   } else {
-    const userId = await ensureUserId();
+    // Fresh, session-scoped anon ID — never persisted outside this session, so
+    // every new session_start starts a brand new identity (TWFF spec §6.2).
+    const userId = await generateUserId();
     session = {
       sessionId: crypto.randomUUID(),
       startedAt: now,
@@ -385,6 +388,7 @@ async function startSession({ tabId, docUrl } = {}) {
       googleDocId,
       isRecording: true,
       events: [],
+      userId,
       authors: { [userId]: { label: 'Author 1', color: '#5c3ce6' } },
       metadata: {
         assignment_prompt: ""
@@ -480,7 +484,7 @@ async function appendEvent(event) {
     });
     return { ok: true, ignored: true };
   }
-  const userId = await ensureUserId();
+  const userId = await ensureSessionUserId(session);
   session.events.push({ author_id: userId, ...event });
   debugLog("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
@@ -598,7 +602,11 @@ async function exportSession({ tabIndependent = false } = {}) {
   const session = await getSession();
   if (!session) throw new Error("No active session to export.");
 
-  const userId = await ensureUserId();
+  // Sessions created before this field existed won't have one yet — generate
+  // and persist it now so it stays stable for the rest of this session.
+  const hadUserId = Boolean(session.userId);
+  const userId = await ensureSessionUserId(session);
+  if (!hadUserId) await saveSession(session);
 
   const logger = new ProcessLog(userId);
 
@@ -680,24 +688,18 @@ async function updateMetadata({ key, value }) {
   return { status: 'success' };
 }
 
-// Unlike output_preview/context_before/context_after elsewhere (capped to
-// ~100-300 chars at the point they're captured in content.js), these two
-// fields had no size cap at all — a single accept/reject update could attach
-// arbitrary-length text to an event. 2000 chars is generous enough that
-// lib/annotate.js's verify()/classifyReliability logic (which already treats
-// anything ≥500 chars specially — see insertedLength()) keeps working
-// unchanged for real sessions.
-//
-// Known gap: TWFF spec v0.2 §6.1 promises content_before/content_after are
-// capped at 500 chars everywhere; this path (an accept/reject update arriving
-// after the original event) can still push them up to 2000. Lowering this to
-// 500 is not a free change — annotate.js's classifyReliability() (line ~114)
-// uses the true contentAfter length vs. posEnd-posStart to detect the
-// "position_end is actually a length" producer bug, and a tighter cap would
-// misclassify some real long AI insertions (500-2000 chars) as unreliable.
-// Flagged in firl-infra/READINESS.md rather than changed here without a
-// closer look at drift-correction accuracy.
-const MAX_CONTENT_SNAPSHOT_CHARS = 2000;
+// Matches the 500-char cap applied everywhere else (spec v0.2 §6.1,
+// lib/events.js's clip() calls) — this path (an accept/reject update arriving
+// after the original event) used to allow up to 2000 chars, which was an
+// inconsistency, not a deliberate wider allowance. It's safe to tighten now:
+// annotate.js's classifyReliability()/insertedLength() were changed to read
+// the true pre-truncation length from content_before_length/
+// content_after_length (set below) instead of the capped string's own
+// `.length`, so position/reliability classification no longer depends on
+// having the untruncated text. Fuzzy-match *location* confidence for the
+// truncated portion of insertions beyond 500 characters is a real, bounded,
+// documented cost of this cap (see SPEC.md §4.4/§6.1) — not a bug.
+const MAX_CONTENT_SNAPSHOT_CHARS = 500;
 
 async function updateEventAcceptance({ eventTimestamp, acceptance, similarity_score, content_before, content_after }) {
   const session = await getSession();
@@ -708,8 +710,14 @@ async function updateEventAcceptance({ eventTimestamp, acceptance, similarity_sc
     event.meta.acceptance = acceptance;
     // 0-1: how much of the AI's wording survived — spec v0.2 §4.4.
     if (similarity_score !== undefined) event.meta.similarity_score = similarity_score;
-    if (content_before !== undefined) event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
-    if (content_after !== undefined) event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+    if (content_before !== undefined) {
+      event.meta.content_before_length = content_before.length;
+      event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+    }
+    if (content_after !== undefined) {
+      event.meta.content_after_length = content_after.length;
+      event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+    }
     await saveSession(session);
     chrome.runtime.sendMessage({
       action: 'SYNC_TIMELINE',
