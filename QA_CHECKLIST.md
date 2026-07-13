@@ -1,15 +1,5 @@
 # Manual QA checklist — before treating this as a release candidate
 
-This covers what I could *not* verify myself this round: I don't have a way to
-authenticate to Google, load a live unpacked extension in a real browser, or
-drive an actual Google Docs session from here. Everything below needs a real
-Chrome + Google account. What I *did* verify directly: `npm run check` passes
-clean (0 lint errors/warnings, 60/60 tests, build succeeds), and every fix in
-this round was checked against a rendered preview (the popup via
-`tools/preview/popup-preview.html`, and static snapshots of the side panel and
-viewer) — but a rendered preview isn't the same as real usage inside Google
-Docs with real AI providers.
-
 ## 1. Fresh install
 
 - [ ] `nvm use` (picks up `.nvmrc`), `npm run build`, load `dist/` as an
