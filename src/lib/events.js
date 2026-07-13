@@ -75,7 +75,7 @@ export function imageUploadEvent({ filename, file_type, position } = {}) {
   }
 }
 
-export function aiInteractionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, source, text, reason } = {}) {
+export function aiInteractionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, similarity_score, source, text, reason } = {}) {
   return {
     type: 'ai_interaction',
     timestamp: now(),
@@ -90,6 +90,9 @@ export function aiInteractionEvent({ model, model_version, context_window, outpu
       position_end: position_end || 0,
       acceptance: acceptance || '',
       ai_chars: ai_chars || 0,
+      // 0-1: how much of the AI's wording survived into the kept text — spec
+      // v0.2 §4.4, alongside (not instead of) acceptance.
+      ...(similarity_score !== undefined ? { similarity_score } : {}),
       // Colophon runtime extras (not in the export schema but used by the UI):
       ...(source ? { source } : {}),
       ...(text ? { text } : {}),
@@ -98,7 +101,7 @@ export function aiInteractionEvent({ model, model_version, context_window, outpu
   }
 }
 
-export function aiSuggestionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, source, text } = {}) {
+export function aiSuggestionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, similarity_score, source, text } = {}) {
   return {
     type: 'ai_suggestion',
     timestamp: now(),
@@ -113,6 +116,7 @@ export function aiSuggestionEvent({ model, model_version, context_window, output
       position_end: position_end || 0,
       acceptance: acceptance || '',
       ai_chars: ai_chars || 0,
+      ...(similarity_score !== undefined ? { similarity_score } : {}),
       // The side panel renders suggestion cards from meta.text; keep the full
       // text (output_preview is only the first 100 chars).
       ...(source ? { source } : {}),

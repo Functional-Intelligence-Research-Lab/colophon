@@ -77,4 +77,18 @@ describe('aiSuggestionEvent / aiInteractionEvent fields', () => {
     expect(e.meta).not.toHaveProperty('text')
     expect(e.meta).not.toHaveProperty('source')
   })
+
+  it('carries similarity_score (0-1, spec v0.2 §4.4) when provided', () => {
+    const interaction = aiInteractionEvent({ model: 'x', similarity_score: 0.42 })
+    expect(interaction.meta.similarity_score).toBe(0.42)
+    const suggestion = aiSuggestionEvent({ model: 'x', similarity_score: 0 })
+    // 0 is a real, meaningful value (nothing survived) — must not be dropped
+    // the way `0 || {}`-style optional-spreads would silently drop it.
+    expect(suggestion.meta.similarity_score).toBe(0)
+  })
+
+  it('omits similarity_score when not provided, rather than defaulting to 0', () => {
+    const e = aiInteractionEvent({ model: 'x' })
+    expect(e.meta).not.toHaveProperty('similarity_score')
+  })
 })

@@ -1,5 +1,6 @@
 import { complete } from '../lib/ai/ollama-client.js';
 import { esc } from '../shared/esc.js';
+import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js';
 
 // ── Utility: Debounce Function ───────────────────────────────────────────────
 function debounce(func, wait) {
@@ -860,7 +861,7 @@ const TimelineRenderer = {
       contentHTML = `
         <div class="card suggestion-card gemini-card">
           <p>${preview ? `"${esc(preview)}"` : `${charCount} characters inserted`}</p>
-          ${velocity ? `<div class="text-only" style="font-size:0.75rem;color:var(--text-secondary);">Detected via edit velocity (${velocity} chars/s)</div>` : ''}
+          ${velocity ? `<div class="text-only" style="font-size:0.75rem;color:var(--text-secondary);">Classified as AI insert — unusually fast for typing (${velocity} chars/s)</div>` : ''}
         </div>
       `;
     }
@@ -1283,28 +1284,16 @@ async function _buildSystemPrompt() {
 }
 
 // ── Acceptance Similarity Scoring ─────────────────────────────────────────────
-function jaccardSimilarity(a, b) {
-  const words = s => new Set(s.toLowerCase().match(/\b\w+\b/g) || []);
-  const setA = words(a);
-  const setB = words(b);
-  const intersection = [...setA].filter(w => setB.has(w)).length;
-  const union = new Set([...setA, ...setB]).size;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function acceptanceFromSimilarity(score) {
-  if (score >= 0.9) return 'fully_accepted';
-  if (score >= 0.5) return 'partially_modified';
-  if (score >= 0.1) return 'modified';
-  return 'rejected';
-}
+// jaccardSimilarity/acceptanceFromSimilarity live in lib/similarity.js, shared
+// with content.js/gemini-detector.js's diff-based acceptance path so both
+// produce a comparable similarity_score (TWFF spec v0.2 §4.4).
 
 async function scoreAcceptance(eventTimestamp, suggestionText, tabId) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, { action: 'GET_EDITOR_TEXT' });
     if (!res?.text) return;
-    const score = jaccardSimilarity(suggestionText, res.text);
-    const acceptance = acceptanceFromSimilarity(score);
+    const similarity_score = jaccardSimilarity(suggestionText, res.text);
+    const acceptance = acceptanceFromSimilarity(similarity_score);
 
     // Locate suggestion in doc and extract surrounding context
     let content_before = '';
@@ -1318,7 +1307,7 @@ async function scoreAcceptance(eventTimestamp, suggestionText, tabId) {
 
     chrome.runtime.sendMessage({
       action: 'UPDATE_EVENT_ACCEPTANCE',
-      payload: { eventTimestamp, acceptance, content_before, content_after },
+      payload: { eventTimestamp, acceptance, similarity_score, content_before, content_after },
     });
   } catch {
     // Content script not available (not on a Docs page); skip

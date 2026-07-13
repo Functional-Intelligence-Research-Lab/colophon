@@ -4,6 +4,7 @@ import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
 import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
 import { aiInteractionEvent } from '../lib/events.js'
+import { jaccardSimilarity } from '../lib/similarity.js'
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 import { debugLog } from '../shared/debug.js'
 
@@ -221,6 +222,10 @@ const _geminiDetector = createGeminiDetector({
           source: diff.addedText ? 'export-diff' : domDiff.insertedText ? 'dom-diff' : 'suggestion-text',
         });
 
+        // How much of the AI's original wording survived into what was
+        // actually kept — spec v0.2 §4.4, alongside (not instead of) acceptance.
+        const similarity_score = jaccardSimilarity(suggestionText, finalAdded);
+
         send('LOG_EVENT', aiInteractionEvent({
           source: 'ai',
           model: GEMINI_MODEL_ID,
@@ -231,6 +236,7 @@ const _geminiDetector = createGeminiDetector({
           position_end: 0,
           acceptance,
           ai_chars: finalAdded.length,
+          similarity_score,
           ...(reason ? { reason } : {})
         }));
 
@@ -249,6 +255,7 @@ const _geminiDetector = createGeminiDetector({
         position_end: 0,
         acceptance,
         ai_chars: 0,
+        similarity_score: 0, // nothing kept — dismissed/rejected
         ...(reason ? { reason } : {})
       }));
     }
@@ -677,6 +684,12 @@ function flushEdit() {
   const cpm = v.chars_per_min
   const elapsed = Math.max((Date.now() - _bufferStartTime) / 1000, 0.1);
   const absDelta = Math.abs(_editBuffer.delta);
+  // insertion_velocity is a cruder rate than edit-velocity.js's cpm (no
+  // pause-exclusion, whole-buffer average) — used only to route a suspiciously
+  // fast, large insertion to the gemini_suggestion event type instead of edit.
+  // Like chars_per_min/too_fast_for_human below, this is a weak plausibility
+  // signal, not a detector of any specific behavior — see edit-velocity.js's
+  // header comment for what it can and cannot tell us.
   const insertion_velocity = Math.round(absDelta / elapsed);
   const likely_ai = insertion_velocity > 150 && absDelta > 80;
 

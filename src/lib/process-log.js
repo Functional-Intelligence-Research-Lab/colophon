@@ -26,14 +26,37 @@ export const ANNOTATION_TYPES = {
     ai_completion: {
         css_class: "ann-completion",
         label: "AI Completion",
-        description: "Tab-completed by Glass Box",
+        description: "Tab-completed by Colophon",
         log_type: "ai_interaction",
         interaction: "completion",
     },
 };
 
+/**
+ * Content caps enforced on export, matching TWFF spec v0.2 §6.1. `content_before`/
+ * `content_after` are already clipped to 500 chars at event-creation time (see
+ * lib/events.js's clip() calls) — this only needs to catch fields that are deliberately
+ * left full at capture time for live UI rendering (e.g. the side panel reads meta.text to
+ * render suggestion cards) but must still respect the spec's content caps once a session is
+ * serialized into an exported/shareable .twff file.
+ */
+const EXPORT_TEXT_CAP = 500;
+
+function sanitizeEventForExport(event) {
+    const meta = event.meta;
+    if (!meta || (meta.text === undefined && meta.reason === undefined)) return event;
+    const sanitizedMeta = { ...meta };
+    if (typeof sanitizedMeta.text === 'string') {
+        sanitizedMeta.text = sanitizedMeta.text.slice(0, EXPORT_TEXT_CAP);
+    }
+    if (typeof sanitizedMeta.reason === 'string') {
+        sanitizedMeta.reason = sanitizedMeta.reason.slice(0, EXPORT_TEXT_CAP);
+    }
+    return { ...event, meta: sanitizedMeta };
+}
+
     /**
-    * TWFF v0.1 process log.
+    * TWFF v0.2 process log.
     * Instantiate once per writing session. Call log_event() as the user writes.
     * Call export() to produce a .twff ZIP container as bytes.
      */
@@ -133,7 +156,7 @@ export class ProcessLog {
     }
 
     /**
-     * @param {*} endTime 
+     * @param {*} endTime
      * @returns Return the process log as a spec-compliant object
      */
     toDict(endTime = null) {
@@ -144,7 +167,7 @@ export class ProcessLog {
             start_time: this.startTime,
             end_time: endTime || new Date().toISOString(),
             content_source: this._contentSource,
-            events: this.events,
+            events: this.events.map(sanitizeEventForExport),
         };
     }
 
@@ -169,7 +192,7 @@ export class ProcessLog {
         return {
             title: this.title || 'colophone',
             created: new Date().toISOString(),
-            twff_version: "0.1",
+            twff_version: ProcessLog.SPEC_VERSION,
             author_id: authorId,
             session_id: this.sessionId
         };
