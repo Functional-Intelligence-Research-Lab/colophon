@@ -128,7 +128,7 @@ body {
   transform: rotate(-90deg);
 }
 
-/* ─── Banner dismiss (✕) button ─── */
+/* --- Banner dismiss button --- */
 .banner-dismiss {
   background: none;
   border: none;
@@ -415,7 +415,7 @@ body {
 }
 
 .diff-arrow {
-  color: #b0b0b0;
+  color: #6b7280;
   display: flex;
   justify-content: flex-start;
   margin: 6px 0 6px 14px;
@@ -545,7 +545,7 @@ body {
 }
 
 .input-box input::placeholder {
-  color: #a0a0a0;
+  color: var(--text-secondary);
   font-family: "Atkinson Hyperlegible", sans-serif;
 }
 
@@ -730,7 +730,7 @@ body {
 }
 
 .sel-input::placeholder {
-  color: #b0a080;
+  color: #8a6416;
 }
 
 .sel-ask {

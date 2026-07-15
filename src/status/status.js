@@ -201,6 +201,30 @@ function checkExtension() {
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 
+const ICON_PATHS = {
+  ok: 'M4 10.5l4 4 8-9',
+  fail: 'M5 5l10 10M15 5L5 15',
+  warn: 'M10 3v8m0 4h.01M2 17h16L10 4z',
+}
+
+function statusIcon(status) {
+  const svgNS = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(svgNS, 'svg')
+  svg.setAttribute('viewBox', '0 0 20 20')
+  svg.setAttribute('width', '13')
+  svg.setAttribute('height', '13')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  const path = document.createElementNS(svgNS, 'path')
+  path.setAttribute('d', ICON_PATHS[status] || ICON_PATHS.warn)
+  svg.appendChild(path)
+  return svg
+}
+
 function renderList(ul, items) {
   ul.innerHTML = ''
   for (const item of items) {
@@ -209,7 +233,7 @@ function renderList(ul, items) {
 
     const icon = document.createElement('span')
     icon.className = 'icon'
-    icon.textContent = item.status === 'ok' ? '✓' : item.status === 'fail' ? '✗' : '⚠'
+    icon.appendChild(statusIcon(item.status))
 
     const label = document.createElement('span')
     label.className = 'label'
@@ -236,7 +260,7 @@ function setOverall(kind, msg) {
 function setOverallVerdict(items) {
   const hasFail = items.some(i => i.status === 'fail')
   const hasWarn = items.some(i => i.status === 'warn')
-  if (hasFail)      setOverall('fail', '✗ Some checks failed — see details below')
-  else if (hasWarn) setOverall('warn', '⚠ Mostly fine — a few items need attention')
-  else              setOverall('ok',   '✓ Everything looks good — you are good to go')
+  if (hasFail)      setOverall('fail', 'Some checks failed — see details below')
+  else if (hasWarn) setOverall('warn', 'Mostly fine — a few items need attention')
+  else              setOverall('ok',   'Everything looks good — you are good to go')
 }

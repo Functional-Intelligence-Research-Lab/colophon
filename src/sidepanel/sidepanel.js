@@ -833,7 +833,7 @@ const TimelineRenderer = {
               <div class="indicator"></div>
               <p>${beforeText ? esc(beforeText) : '—'}</p>
             </div>
-            <div class="diff-arrow" style="display: none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
+            <div class="diff-arrow" style="display: none;"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg></div>
             <div class="diff-block added">
               <div class="indicator"></div>
               <p>${hasAfter ? esc(afterText) : '(no preview available)'}</p>
@@ -908,7 +908,7 @@ const TimelineRenderer = {
       const insertBtn = node.querySelector('.btn-insert');
       const dismissBtn = node.querySelector('.btn-dismiss');
       if (insertBtn) {
-        insertBtn.innerHTML = "Inserted ✓";
+        insertBtn.innerHTML = 'Inserted <svg aria-hidden="true" viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:-2px;"><path d="M4 10.5l4 4 8-9"/></svg>';
         insertBtn.style.backgroundColor = "var(--user-color)";
         insertBtn.style.color = "white";
         insertBtn.style.borderColor = "var(--user-color)";

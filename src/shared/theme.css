@@ -5,7 +5,29 @@
  * contrast) and live on colophon.firl.nl/pricing, so the extension and the
  * web app read as one product instead of each surface inventing its own
  * colors. Load this before each surface's own stylesheet.
+ *
+ * Also declares Atkinson Hyperlegible (already vendored in
+ * ../assets/fonts/) once here, so sidepanel.css/viewer.css's existing
+ * `font-family: "Atkinson Hyperlegible", ...` references (previously
+ * dangling, with nothing loading the actual font file) resolve correctly.
+ * options.html/status.html don't link this file, so they each carry their
+ * own copy of this same @font-face block.
  */
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  src: url('../assets/fonts/atkinson-hyperlegible-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  src: url('../assets/fonts/atkinson-hyperlegible-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Neutral surface tokens */
   --bg-primary: #ffffff;
@@ -13,7 +35,7 @@
   --bg-card: #f9fafb;
   --text-primary: #1a1a1a;
   --text-secondary: #6b6b70;
-  --text-muted: #9ca3af;
+  --text-muted: #6b7280;
   --border-color: #e5e5e5;
 
   /* Categorical provenance palette (own / AI / pasted / AI-paraphrased) */

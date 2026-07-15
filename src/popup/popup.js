@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       exportButton.disabled = true;
       try {
         const result = await exportTwff()
-        exportLabel.textContent = 'Exported ✓';
+        exportLabel.textContent = 'Exported';
         showNotice(`Exported ${result.filename}`, false)
         setTimeout(() => {
           exportLabel.textContent = originalText;

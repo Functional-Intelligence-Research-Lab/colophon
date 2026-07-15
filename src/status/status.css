@@ -1,7 +1,25 @@
+/* Self-hosted Atkinson Hyperlegible — status.html doesn't link shared/
+   theme.css, so this is its own copy of the same @font-face block
+   popup.css/theme.css also declare. */
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../assets/fonts/atkinson-hyperlegible-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../assets/fonts/atkinson-hyperlegible-700.woff2') format('woff2');
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   max-width: 560px;
   margin: 48px auto;
@@ -51,7 +69,7 @@ h2 {
   text-align: center;
   transition: background 0.2s;
 }
-.overall--checking { background: #f3f4f6; color: #6b7280; }
+.overall--checking { background: #f3f4f6; color: #4b5563; }
 .overall--ok       { background: #dcfce7; color: #166534; }
 .overall--warn     { background: #fef3c7; color: #92400e; }
 .overall--fail     { background: #fee2e2; color: #991b1b; }
@@ -92,8 +110,8 @@ section:last-of-type { border-bottom: none; }
 
 .check-list li .detail {
   font-family: 'SFMono-Regular', Consolas, monospace;
-  font-size: 11px;
-  color: #9ca3af;
+  font-size: 12px;
+  color: #4b5563;
   margin-left: 6px;
 }
 
@@ -109,7 +127,7 @@ footer {
 
 .note {
   font-size: 12px;
-  color: #9ca3af;
+  color: #4b5563;
 }
 
 .note code {
@@ -117,5 +135,5 @@ footer {
   background: #f3f4f6;
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 12px;
 }
