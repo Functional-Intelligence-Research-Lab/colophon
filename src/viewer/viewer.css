@@ -308,7 +308,7 @@ body {
 }
 
 .accept-badge.fully_accepted  { background: var(--user-bg); color: var(--user-color); border: 1px solid #c3e2d1; }
-.accept-badge.partially_modified { background: #fff8e1; color: #9a6800; border: 1px solid #f0d070; }
+.accept-badge.partially_accepted { background: #fff8e1; color: #9a6800; border: 1px solid #f0d070; }
 .accept-badge.modified         { background: #fff3e0; color: #c06010; border: 1px solid #f0b060; }
 .accept-badge.rejected         { background: #fef2f2; color: var(--diff-red); border: 1px solid #fecaca; }
 .accept-badge.pending          { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-color); }

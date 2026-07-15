@@ -45,9 +45,9 @@ describe('acceptanceFromSimilarity', () => {
     expect(acceptanceFromSimilarity(0.9)).toBe('fully_accepted')
   })
 
-  it('maps mid-high similarity to partially_modified', () => {
-    expect(acceptanceFromSimilarity(0.7)).toBe('partially_modified')
-    expect(acceptanceFromSimilarity(0.5)).toBe('partially_modified')
+  it('maps mid-high similarity to partially_accepted', () => {
+    expect(acceptanceFromSimilarity(0.7)).toBe('partially_accepted')
+    expect(acceptanceFromSimilarity(0.5)).toBe('partially_accepted')
   })
 
   it('maps low-mid similarity to modified', () => {

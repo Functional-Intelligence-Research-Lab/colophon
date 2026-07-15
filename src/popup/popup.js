@@ -171,7 +171,7 @@ function renderScores(session) {
   const editCount = events.filter(event => event.type === 'edit').length
   const aiCount = events.filter(
     event => event.type === 'ai_interaction' &&
-    (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_modified' || event.meta?.acceptance === 'modified')
+    (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_accepted' || event.meta?.acceptance === 'modified')
   ).length
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
   const hasData = editCount + aiCount + sourceCount > 0

@@ -23,7 +23,7 @@ export function jaccardSimilarity(a, b) {
  * v0.2's ai_interaction/ai_suggestion `acceptance` enum. */
 export function acceptanceFromSimilarity(score) {
   if (score >= 0.9) return 'fully_accepted';
-  if (score >= 0.5) return 'partially_modified';
+  if (score >= 0.5) return 'partially_accepted';
   if (score >= 0.1) return 'modified';
   return 'rejected';
 }
