@@ -34,7 +34,7 @@ let _llamafilePort = 8080;
 let _lastSelection = { text: '' };
 let _lastDocContext = null;
 let _lastSnapshotTimestamp = 0;
-let _pendingAIOutput = null; // { text, expiresAt } — set when sidepanel sends paraphrase/improve result
+let _pendingAIOutput = null; // { text, subtype, model, expiresAt } — set when sidepanel sends paraphrase/improve result
 
 function getNativePort() {
   if (_nativePort) return _nativePort;
@@ -278,15 +278,20 @@ async function handleMessage(msg, _sender) {
     }
 
     case 'SET_PENDING_AI_OUTPUT':
-      _pendingAIOutput = { text: msg.payload?.text ?? '', expiresAt: Date.now() + 5 * 60 * 1000 };
+      _pendingAIOutput = {
+        text: msg.payload?.text ?? '',
+        subtype: msg.payload?.subtype ?? null,
+        model: msg.payload?.model ?? null,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      };
       return { ok: true };
 
     case 'GET_PENDING_AI_OUTPUT':
       if (_pendingAIOutput && Date.now() < _pendingAIOutput.expiresAt) {
-        return { ok: true, text: _pendingAIOutput.text };
+        return { ok: true, text: _pendingAIOutput.text, subtype: _pendingAIOutput.subtype, model: _pendingAIOutput.model };
       }
       _pendingAIOutput = null;
-      return { ok: true, text: null };
+      return { ok: true, text: null, subtype: null, model: null };
 
     case 'CLEAR_PENDING_AI_OUTPUT':
       _pendingAIOutput = null;

@@ -1365,7 +1365,7 @@ const ChatInput = {
 
       // If triggered by a quick action (paraphrase/improve), store output so
       // content.js can reclassify the next paste as an AI interaction.
-      QuickActions.notifyAIResponse(reply);
+      QuickActions.notifyAIResponse(reply, model);
 
       // Replace the placeholder card with the real suggestion
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
@@ -1392,7 +1392,7 @@ const ChatInput = {
             output_preview: reply.substring(0, 200),
             position_start: 0,
             position_end: 0,
-            acceptance: 'pending',
+            acceptance: 'rejected',
             ai_chars: reply.length,
           },
         },
@@ -1834,7 +1834,7 @@ const SelectionContext = {
             output_preview: reply.substring(0, 200),
             position_start: 0,
             position_end: 0,
-            acceptance: 'pending',
+            acceptance: 'rejected',
             ai_chars: reply.length,
             context: text.slice(0, 200),
           },
@@ -1996,11 +1996,11 @@ const QuickActions = {
 
   // Called after an AI response completes — store output so content.js can
   // reclassify the subsequent paste as AI-sourced.
-  notifyAIResponse(replyText) {
+  notifyAIResponse(replyText, model) {
     if (!this._pendingType) return;
     chrome.runtime.sendMessage({
       action: 'SET_PENDING_AI_OUTPUT',
-      payload: { text: replyText },
+      payload: { text: replyText, subtype: this._pendingType, model },
     }).catch(() => {});
     this._pendingType = null;
   },

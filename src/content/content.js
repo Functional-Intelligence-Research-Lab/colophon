@@ -4,7 +4,7 @@ import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
 import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
 import { aiInteractionEvent } from '../lib/events.js'
-import { jaccardSimilarity } from '../lib/similarity.js'
+import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js'
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 import { debugLog } from '../shared/debug.js'
 
@@ -848,8 +848,10 @@ async function emitPaste(text) {
         const similarity = _textSimilarity(text, pendingRes.text);
         if (similarity >= 0.8) {
           event.type = 'ai_interaction';
-          event.meta.source = 'paraphrase';
-          event.meta.acceptance = 'fully_accepted';
+          event.meta.model = pendingRes.model;
+          event.meta.interaction_subtype = pendingRes.subtype;
+          event.meta.acceptance = acceptanceFromSimilarity(similarity);
+          event.meta.similarity_score = similarity;
           event.meta.ai_chars = text.length;
           chrome.runtime.sendMessage({ action: 'CLEAR_PENDING_AI_OUTPUT' }).catch(() => {});
           debugLog('[Colophon Content] Paste reclassified as AI paraphrase (similarity:', similarity, ')');
