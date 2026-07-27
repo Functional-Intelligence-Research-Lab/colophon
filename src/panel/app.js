@@ -22,7 +22,8 @@ function eventToItem(evt) {
   const meta = evt.meta ?? {}
 
   switch (evt.type) {
-    case 'edit': {
+    case 'edit':
+    case 'edit_block': {
       const deltaWords = Number(meta.delta_words ?? 0)
       const charDelta = Number(meta.char_delta ?? 0)
       const hasContentPreview = typeof meta.content_after === 'string' && meta.content_after.length > 0

@@ -168,7 +168,7 @@ function renderRecordButton(session, tab) {
 
 function renderScores(session) {
   const events = session?.events ?? []
-  const editCount = events.filter(event => event.type === 'edit').length
+  const editCount = events.filter(event => event.type === 'edit' || event.type === 'edit_block').length
   const aiCount = events.filter(
     event => event.type === 'ai_interaction' &&
     (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_accepted' || event.meta?.acceptance === 'modified')

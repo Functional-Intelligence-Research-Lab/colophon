@@ -96,7 +96,7 @@ export function aggregateOldEditEvents(events) {
 
   for (let i = 0; i < events.length; i++) {
     const e = events[i]
-    if (i < lastCheckpointIdx && e.type === 'edit') {
+    if (i < lastCheckpointIdx && (e.type === 'edit' || e.type === 'edit_block')) {
       run.push(e)
     } else {
       flushRun()

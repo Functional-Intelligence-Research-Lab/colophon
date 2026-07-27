@@ -418,7 +418,7 @@ async function startSession({ tabId, docUrl } = {}) {
           meta: {
             char_count_total: snap.text.length,
             word_count_total: words,
-            _snapshot: snap.text.slice(0, 1500),
+            _snapshot_hash: await sha256Hex(snap.text),
             note: 'pre-recording state',
           },
         });
@@ -490,7 +490,11 @@ async function appendEvent(event) {
     return { ok: true, ignored: true };
   }
   const userId = await ensureSessionUserId(session);
-  session.events.push({ author_id: userId, ...event });
+  // Normalize the pre-v0.2 'edit' type string so every downstream consumer of
+  // in-memory session events (popup, sidepanel, panel, storage.js) only ever
+  // sees 'edit_block', regardless of which content-script version sent it.
+  const normalizedType = event.type === 'edit' ? 'edit_block' : event.type;
+  session.events.push({ author_id: userId, ...event, type: normalizedType });
   debugLog("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
     meta: event.meta,
@@ -567,7 +571,7 @@ async function maybeAutoExportAndTrim() {
 }
 
 function isNoOpEditEvent(event) {
-  if (event?.type !== "edit") return false;
+  if (event?.type !== "edit" && event?.type !== "edit_block") return false;
   const meta = event.meta ?? {};
   const deltaWords = Number(meta.delta_words ?? 0);
   const charDelta = Number(meta.char_delta ?? 0);
@@ -584,7 +588,7 @@ async function getState() {
   const session = await getSession();
   if (!session) return { session: null, stats: null };
 
-  const editCount = session.events.filter((e) => e.type === "edit").length
+  const editCount = session.events.filter((e) => e.type === "edit" || e.type === "edit_block").length
     + session.events
         .filter((e) => e.type === "edit_summary")
         .reduce((sum, e) => sum + (e.meta?.source_event_count ?? 0), 0);
@@ -631,6 +635,13 @@ async function exportSession({ tabIndependent = false } = {}) {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 async function hashDocUrl(url) {
   const path = new URL(url).pathname;

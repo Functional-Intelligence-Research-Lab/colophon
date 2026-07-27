@@ -45,7 +45,11 @@ const EXPORT_TEXT_CAP = 500;
 
 function sanitizeEventForExport(event) {
     const meta = event.meta;
-    if (!meta || (meta.text === undefined && meta.reason === undefined)) return event;
+    if (!meta) return event;
+    const hasSanitizableField = meta.text !== undefined || meta.reason !== undefined
+        || meta.insertion_velocity !== undefined || meta.likely_ai !== undefined
+        || meta.too_fast_for_human !== undefined;
+    if (!hasSanitizableField) return event;
     const sanitizedMeta = { ...meta };
     if (typeof sanitizedMeta.text === 'string') {
         sanitizedMeta.text = sanitizedMeta.text.slice(0, EXPORT_TEXT_CAP);
@@ -53,6 +57,9 @@ function sanitizeEventForExport(event) {
     if (typeof sanitizedMeta.reason === 'string') {
         sanitizedMeta.reason = sanitizedMeta.reason.slice(0, EXPORT_TEXT_CAP);
     }
+    delete sanitizedMeta.insertion_velocity;
+    delete sanitizedMeta.likely_ai;
+    delete sanitizedMeta.too_fast_for_human;
     return { ...event, meta: sanitizedMeta };
 }
 
@@ -104,7 +111,7 @@ export class ProcessLog {
     }
 
     logEdit(positionStart, positionEnd, source = "human") {
-        return this.logEvent("edit", {
+        return this.logEvent("edit_block", {
             position_start: positionStart,
             position_end: positionEnd,
             source: source,

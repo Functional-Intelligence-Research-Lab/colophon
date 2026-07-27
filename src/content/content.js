@@ -695,7 +695,7 @@ function flushEdit() {
 
   debugLog('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai })
 
-  const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit';
+  const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit_block';
   if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
 
   send('LOG_EVENT', {
@@ -774,7 +774,7 @@ function onInput(e) {
     debugLog('[Colophon Content] block insertion (unattributed)', { chars, inputType })
     send('LOG_EVENT', {
       timestamp: new Date().toISOString(),
-      type: 'edit',
+      type: 'edit_block',
       meta: {
         position_start: 0,
         position_end:   chars,
@@ -883,7 +883,7 @@ function onVisibilityChange() {
     send('LOG_EVENT', {
       timestamp: new Date().toISOString(),
       type: 'focus_change',
-      meta: { duration_ms: Date.now() - _blurredAt },
+      meta: { direction: 'regained', duration_ms: Date.now() - _blurredAt },
     })
     _blurredAt = null
   }

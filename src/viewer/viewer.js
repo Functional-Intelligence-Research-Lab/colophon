@@ -111,7 +111,11 @@ function renderSession(log, meta, xhtmlStr = '') {
 }
 
 function _renderSessionInner(log, meta, xhtmlStr) {
-  const events = log.events ?? [];
+  // Normalize the pre-v0.2 'edit' type string (older exported .twff files)
+  // to 'edit_block', so both old and new files render the same way here.
+  const events = (log.events ?? []).map(e => (
+    e.type === 'edit' ? { ...e, type: 'edit_block' } : e
+  ));
 
   // ── Session bar ──
   const startEvt = events.find(e => e.type === 'session_start');
@@ -140,7 +144,7 @@ function _renderSessionInner(log, meta, xhtmlStr) {
   ].filter(Boolean).join('');
 
   // ── Stats row ──
-  const editCount = events.filter(e => e.type === 'edit').length;
+  const editCount = events.filter(e => e.type === 'edit_block').length;
   const aiCount   = events.filter(e => e.type === 'ai_interaction').length;
   const pasteCount = events.filter(e => e.type === 'paste').length;
   const accepted  = events.filter(e => e.type === 'ai_interaction' && e.meta?.acceptance === 'fully_accepted').length;
@@ -190,7 +194,7 @@ function buildCard(evt) {
     nodeHTML = solidNode(squareIcon());
     bodyHTML = `<p class="tl-text">Recording complete</p>`;
   }
-  else if (evt.type === 'edit') {
+  else if (evt.type === 'edit_block') {
     authorLabel = 'You • Edited';
     const delta = evt.meta?.char_delta ?? 0;
     bodyHTML = `<p class="tl-text">${delta > 0 ? '+' : ''}${delta} characters</p>`;

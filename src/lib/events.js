@@ -10,7 +10,7 @@
 // (fields at the top level) would blank the side-panel cards and hash
 // `meta: undefined` for every event, silently destroying the integrity chain.
 //
-// Schema field coverage follows src/lib/schemas/process-log.schema.json (v0.2)./** ISO-8601 timestamp for "now". Helper so every constructor is consistent. */
+// Schema field coverage follows the canonical spec at twff/spec/process-log.schema.json (v0.2)./** ISO-8601 timestamp for "now". Helper so every constructor is consistent. */
 function now() {
   return new Date().toISOString()
 }
@@ -34,7 +34,7 @@ function trueLength(value) {
 
 export function editEvent({ content, source, position_start, position_end, content_before, content_after, delta_words } = {}) {
   return {
-    type: 'edit',
+    type: 'edit_block',
     timestamp: now(),
     meta: {
       content: content || '',

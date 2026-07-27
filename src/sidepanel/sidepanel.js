@@ -551,7 +551,7 @@ const TimelineRenderer = {
         SuggestionsManager.push(evt);
       }
 
-      if (evt.type === 'edit') {
+      if (evt.type === 'edit' || evt.type === 'edit_block') {
         if (!currentRun) currentRun = { events: [], totalDelta: 0 };
         currentRun.events.push(evt);
         currentRun.totalDelta += evt.meta?.char_delta ?? 0;
@@ -568,7 +568,7 @@ const TimelineRenderer = {
       }
 
       // Skip individual edit events — shown as grouped card below
-      if (evt.type === 'edit') return;
+      if (evt.type === 'edit' || evt.type === 'edit_block') return;
 
       // In compact mode, heuristic suggestions show as compact cards (also in suggestions section)
 
@@ -745,7 +745,7 @@ const TimelineRenderer = {
       contentHTML = `<div class="text-only">${timeAgo} – Duration: ${durationStr}</div>`;
     }
 
-    else if (evt.type === 'edit') {
+    else if (evt.type === 'edit' || evt.type === 'edit_block') {
       authorLabel = 'You • Edited';
       contentHTML = `<div class="text-only">${evt.meta.char_delta || 0} characters</div>`;
     }
