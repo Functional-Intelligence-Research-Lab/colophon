@@ -1,6 +1,6 @@
 # Contributing to Colophon
 
-Colophon is the browser extension for [TWFF](https://github.com/Functional-Intelligence-Research-Lab/twff) — the Tracked Writing File Format. It records AI writing interactions as a transparent, author-controlled process log.
+Colophon is the browser extension for [TWFF](https://github.com/Functional-Intelligence-Research-Lab/twff), the Tracked Writing File Format. It records AI writing interactions as a transparent, author-controlled process log.
 
 This extension is what we are building. Read the spec before writing code.
 
@@ -22,7 +22,7 @@ All work happens through GitHub Issues and Pull Requests.
 
 - Pick up an issue from the project board. Assign it to yourself.
 - Create a branch: `feat/short-description` or `fix/short-description`
-- Open a **draft PR** within 24 hours of starting — even if empty. This makes work visible.
+- Open a **draft PR** within 24 hours of starting, even if empty. This makes work visible.
 - Move the PR out of draft when it is ready for review.
 - Every PR must close at least one issue: add `Closes #N` to the PR description.
 
@@ -55,7 +55,7 @@ AI tools: none
 ```
 or
 ```
-AI tools: used for [specific purpose — e.g. unit test boilerplate, regex generation].
+AI tools: used for [specific purpose, e.g. unit test boilerplate, regex generation].
 Reviewed and modified before commit.
 ```
 
