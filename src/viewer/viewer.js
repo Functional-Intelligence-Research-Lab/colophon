@@ -459,6 +459,7 @@ body {
   top: 0;
   z-index: 100;
   background: #fff;
+  padding-top: 16px;
   border-bottom: 1px solid #dadce0;
 }
 .toolbar {
@@ -576,10 +577,6 @@ body {
 <body>
 
 <div class="app-header">
-  <div class="toolbar">
-    <button onclick="window.print()">Print / Save as PDF</button>
-    <span class="tip">Choose "Save as PDF" in the print dialog.</span>
-  </div>
   <div class="legend">${legendRows}</div>
 </div>
 
