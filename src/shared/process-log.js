@@ -39,11 +39,17 @@ function sortedJSON(value) {
  *            + "|" + previousHash + "|" + sessionId
  */
 export async function computeEventHash(event, previousHash, sessionId) {
-  const payload = sortedJSON({
-    meta:      event.meta,
-    timestamp: event.timestamp,
-    type:      event.type,
-  })
+  // const payload = sortedJSON({
+  //   meta:      event.meta,
+  //   timestamp: event.timestamp,
+  //   type:      event.type,
+  // })
+
+  // Destructure to remove _hash, keep everything else in payloadObject
+  const { _hash, ...payloadObject } = event;
+  
+  // Now payloadObject contains type, timestamp, meta, author_id, etc.
+  const payload = sortedJSON(payloadObject);
   const input = `${payload}|${previousHash}|${sessionId}`
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
   return Array.from(new Uint8Array(buf))
