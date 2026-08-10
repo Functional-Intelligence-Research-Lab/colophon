@@ -91,12 +91,16 @@ describe('createGeminiDetector emission', () => {
     expect(emitted[0].meta.output_preview).toBe('Draft text from Gemini')
   })
 
-  it('truncates long previews to 100 chars + ellipsis but keeps full text', () => {
+  it('caps output_preview at the schema limit (100 chars) but keeps full text', () => {
     const long = 'x'.repeat(250)
     detector._onSuggestionAppeared(long)
     const meta = emitted[0].meta
+    // Full text is preserved for the side panel to render.
     expect(meta.text).toBe(long)
-    expect(meta.output_preview).toBe('x'.repeat(100) + '...')
+    // output_preview must not exceed the schema's maxLength of 100, or the web
+    // verifier rejects the event. The event constructor clips it.
+    expect(meta.output_preview.length).toBeLessThanOrEqual(100)
+    expect(meta.output_preview).toBe('x'.repeat(100))
   })
 
   it('emits ai_interaction fully_accepted on Insert click', () => {

@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { buildProcessLog, SPEC_VERSION } from '../src/shared/process-log.js'
+import { buildProcessLog, SPEC_VERSION, computeEventHash } from '../src/shared/process-log.js'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,30 @@ describe('buildProcessLog — hash chain (SPEC §5.2)', () => {
     for (let i = 0; i < log.events.length; i++) {
       expect(log.events[i]._hash).toBe(log2.events[i]._hash)
     }
+  })
+
+  it('matches the Python verifier byte-for-byte on non-ASCII content', async () => {
+    // Cross-check against twff_verify.compute_event_hash (the web verifier).
+    // The expected value was produced by that Python reference for this exact
+    // event. Google Docs routinely emits curly quotes, em dashes, accents, and
+    // emoji, so the JS serialisation must escape non-ASCII the way Python's
+    // json.dumps(ensure_ascii=True) does, or uploaded .twff files fail
+    // verification. This locks that parity so a regression here fails loudly.
+    const event = {
+      type: 'ai_interaction',
+      timestamp: '2026-08-10T10:00:00Z',
+      author_id: 'anon-abc123',
+      meta: {
+        model: 'google/gemini',
+        output_preview: 'Don’t — the “smart” quotes \u{1f600} café',
+        acceptance: 'rejected',
+        position_start: 0,
+        position_end: 0,
+        ai_chars: 0,
+      },
+    }
+    const hash = await computeEventHash(event, '', 'sess-1')
+    expect(hash).toBe('49919f452589595b93ece30f52dcc2f5f7fd7d8540fadaa55a4ca284021429b9')
   })
 
   it('modifying a single event breaks all subsequent hashes', async () => {
