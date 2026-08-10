@@ -29,7 +29,16 @@ function deepSortKeys(value) {
 }
 
 function sortedJSON(value) {
-  return JSON.stringify(deepSortKeys(value))
+  // Escape every non-ASCII code unit as \uXXXX so this matches Python's
+  // json.dumps(..., ensure_ascii=True) byte-for-byte. The web verifier
+  // (twff_verify.py) hashes the Python-serialized form; without this, any
+  // document containing non-ASCII (curly quotes, em dashes, accents, emoji,
+  // all of which Google Docs produces routinely) would serialize differently
+  // here than on the server and fail hash verification on upload.
+  return JSON.stringify(deepSortKeys(value)).replace(
+    /[\u0080-\uffff]/g,
+    (ch) => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'),
+  )
 }
 
 /**
@@ -39,11 +48,17 @@ function sortedJSON(value) {
  *            + "|" + previousHash + "|" + sessionId
  */
 export async function computeEventHash(event, previousHash, sessionId) {
-  const payload = sortedJSON({
-    meta:      event.meta,
-    timestamp: event.timestamp,
-    type:      event.type,
-  })
+  // const payload = sortedJSON({
+  //   meta:      event.meta,
+  //   timestamp: event.timestamp,
+  //   type:      event.type,
+  // })
+
+  // Destructure to remove _hash, keep everything else in payloadObject
+  const { _hash, ...payloadObject } = event;
+  
+  // Now payloadObject contains type, timestamp, meta, author_id, etc.
+  const payload = sortedJSON(payloadObject);
   const input = `${payload}|${previousHash}|${sessionId}`
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input))
   return Array.from(new Uint8Array(buf))
