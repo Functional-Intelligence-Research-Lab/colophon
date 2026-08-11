@@ -16,6 +16,7 @@
  */
 
 import { exportTwff } from '../lib/export.js'
+import { classifyEuLabel, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
 
 const $ = id => document.getElementById(id)
 
@@ -185,6 +186,71 @@ function renderScores(session) {
   setScore('ai', ai)
   setScore('source', source)
   renderSummaryBanner(hasData)
+  // Derive the EU label from the SAME rounded percentages the bars display, so
+  // the suggestion can never contradict what the user sees (e.g. "AI 0%" must
+  // not produce an "AI" label).
+  renderEuLabel({ hasSession: !!session, own, ai, source })
+}
+
+// Informational EU AI-disclosure label. Suggests the European Commission's
+// AI-labelling icon that matches this session's composition. It is a
+// suggestion only — Colophon can't know whether a document falls within AI Act
+// Article 50 scope, so the author decides whether to apply it. Never written to
+// the log or auto-applied here.
+function renderEuLabel({ hasSession, own, ai, source }) {
+  const wrap = $('eu-label')
+  if (!wrap) return
+  const icon = $('eu-label-icon')
+  const text = $('eu-label-text')
+  const none = $('eu-label-none')
+
+  // Only show the row once a session exists; before that the popup is the
+  // static dashboard and a disclosure suggestion would be meaningless.
+  if (!hasSession) {
+    wrap.hidden = true
+    return
+  }
+  wrap.hidden = false
+
+  // Classify from the displayed percentages: aiShare = ai / (own + ai + source)
+  // matches the AI bar exactly, so label and bars always agree.
+  const { label, aiShare } = classifyEuLabel({ humanChars: own + source, aiChars: ai })
+  const aiPct = Math.round(aiShare * 100)
+
+  wrap.title = euLabelReason(label, aiPct)
+
+  if (label === EU_LABEL.NONE) {
+    // Session recorded, but no AI in the breakdown — muted "no label" state
+    // rather than hiding, so the feature stays discoverable.
+    if (icon) icon.hidden = true
+    if (text) text.textContent = ''
+    if (none) none.hidden = false
+    return
+  }
+
+  if (none) none.hidden = true
+  const path = euIconPath(label)          // extension-relative, e.g. assets/eu-icons/ai-modified-black.svg
+  if (icon && path) {
+    icon.src = `../${path}`
+    icon.alt = euLabelText(label)
+    icon.hidden = false
+  }
+  if (text) text.textContent = euLabelText(label)
+}
+
+// Plain-language "why" for the hover tooltip on the suggested-label row.
+function euLabelReason(label, aiPct) {
+  const tail = ' This is a suggestion from your recorded session — you decide whether it applies.'
+  switch (label) {
+    case EU_LABEL.AI_GENERATED:
+      return `Suggested: "AI generated". Nearly all recorded activity (${aiPct}%) came from AI, with little or no writing of your own.` + tail
+    case EU_LABEL.AI_MODIFIED:
+      return `Suggested: "AI modified". AI made up ${aiPct}% of recorded activity, mixed with your own writing.` + tail
+    case EU_LABEL.AI:
+      return `Suggested: "AI". AI was involved but made up only ${aiPct}% of recorded activity.` + tail
+    default:
+      return 'No AI contribution recorded in this session, so no EU AI label is suggested.'
+  }
 }
 
 // Single filled path (not stroke-based, since .leaf-mark svg forces
