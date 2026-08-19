@@ -1,5 +1,6 @@
 import { complete } from '../lib/ai/ollama-client.js';
 import { esc } from '../shared/esc.js';
+import {aiInteractionEvent} from '../lib/events.js'
 import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js';
 
 // ── Utility: Debounce Function ───────────────────────────────────────────────
@@ -1033,21 +1034,17 @@ const TimelineRenderer = {
         } else {
           // Local AI suggestions have no detector, so log the rejection here.
           chrome.runtime.sendMessage({
-            action: 'LOG_EVENT',
-            payload: {
-              type: 'ai_interaction',
-              timestamp: new Date().toISOString(),
-              meta: {
-                model: 'local/unknown',
-                output_preview: textPreview.substring(0, 100),
-                position_start: 0,
-                position_end: 0,
-                acceptance: 'rejected',
-                ai_chars: 0,
-                reason: 'User dismissed suggestion.'
-              }
-            }
-          }).catch(() => {});
+          action: 'LOG_EVENT',
+          payload: aiInteractionEvent({
+            model: 'local/unknown',
+            output_preview: textPreview, 
+            position_start: 0,
+            position_end: 0,
+            acceptance: 'rejected',
+            ai_chars: 0,
+            reason: 'User dismissed suggestion.'
+          })
+        }).catch(() => {});
         }
         return;
       }
@@ -1077,20 +1074,16 @@ const TimelineRenderer = {
           const interactionTimestamp = new Date().toISOString();
           chrome.runtime.sendMessage({
             action: 'LOG_EVENT',
-            payload: {
-              type: 'ai_interaction',
-              timestamp: interactionTimestamp,
-              meta: {
-                model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
-                output_preview: textToInsert.substring(0, 100),
-                position_start: 0,
-                position_end: textToInsert.length,
-                acceptance: 'fully_accepted',
-                content_before: '[snapshot unavailable]',
-                content_after: textToInsert,
-                ai_chars: textToInsert.length
-              }
-            }
+            payload: aiInteractionEvent({
+              model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
+              output_preview: textToInsert,
+              position_start: 0,
+              position_end: textToInsert.length,
+              acceptance: 'fully_accepted',
+              content_before: '[snapshot unavailable]',
+              content_after: textToInsert,
+              ai_chars: textToInsert.length
+            })
           }).catch(() => {});
 
           if (!isGemini && activeTabId) {
@@ -1384,19 +1377,15 @@ const ChatInput = {
       // Log to session so it appears in TWFF export
       chrome.runtime.sendMessage({
         action: 'LOG_EVENT',
-        payload: {
-          type: 'ai_interaction',
-          timestamp: now,
-          meta: {
-            model,
-            output_preview: reply.substring(0, 200),
-            position_start: 0,
-            position_end: 0,
-            acceptance: 'rejected',
-            ai_chars: reply.length,
-          },
-        },
-      });
+        payload: aiInteractionEvent({
+          model: model,
+          output_preview: reply,
+          position_start: 0,
+          position_end: 0,
+          acceptance: 'rejected',
+          ai_chars: reply.length,
+        })
+      }).catch(() => {});
 
     } catch (err) {
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
@@ -1826,20 +1815,16 @@ const SelectionContext = {
 
       chrome.runtime.sendMessage({
         action: 'LOG_EVENT',
-        payload: {
-          type: 'ai_interaction',
-          timestamp: now,
-          meta: {
-            model,
-            output_preview: reply.substring(0, 200),
-            position_start: 0,
-            position_end: 0,
-            acceptance: 'rejected',
-            ai_chars: reply.length,
-            context: text.slice(0, 200),
-          },
-        },
-      });
+        payload: aiInteractionEvent({
+          model: model,
+          output_preview: reply,
+          position_start: 0,
+          position_end: 0,
+          acceptance: 'rejected',
+          ai_chars: reply.length,
+          context_window: text,
+        })
+      }).catch(() => {});
 
       if (activeTabId) {
         setTimeout(() => scoreAcceptance(now, reply, activeTabId), 1500);
