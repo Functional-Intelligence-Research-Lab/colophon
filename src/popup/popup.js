@@ -147,9 +147,20 @@ async function refresh() {
   renderScores(session)
   renderActivity(session)
   renderRecordButton(session, tab)
+  renderTooltip(session)
 
   const eventCount = session?.events?.length ?? 0
   $('btn-export').disabled = eventCount < 2
+}
+
+function renderTooltip(session) {
+  const tooltipInfo = $('tooltip-info')
+  if (!tooltipInfo) return
+
+  const isRecording = session?.isRecording
+  tooltipInfo.textContent = isRecording
+    ? 'Recording active — tracking document edits'
+    : 'Start recording before you edit the document'
 }
 
 function renderRecordButton(session, tab) {

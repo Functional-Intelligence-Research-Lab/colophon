@@ -1354,7 +1354,7 @@ async function checkAndInjectStartToast() {
     }, 400); 
   };
 
-  const timeoutId = setTimeout(removeToast, 30000);
+  const timeoutId = setTimeout(removeToast, 6000);
 
   dismissBtn.addEventListener('click', () => { clearTimeout(timeoutId); removeToast(); });
   dismissBtn.addEventListener('mouseenter', () => dismissBtn.style.color = 'white');

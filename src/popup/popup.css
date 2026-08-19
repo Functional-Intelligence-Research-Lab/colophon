@@ -88,7 +88,8 @@ button {
   transition: stroke 0.3s ease;
 }
 
-.tooltip-container:hover .tooltip-icon {
+.tooltip-container:hover .tooltip-icon,
+.tooltip-container:focus-within .tooltip-icon {
   stroke: #6749d7;
 }
 
@@ -102,24 +103,18 @@ button {
   color: white;
   padding: 8px 12px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
 
   transition: opacity 0.3s ease, visibility 0.3s ease;
-
-  animation: showOnLoad 3s ease-in-out;
 }
 
-.tooltip-container:hover .tooltip-text {
+.tooltip-container:hover .tooltip-text,
+.tooltip-container:focus-within .tooltip-text {
   opacity: 1;
   visibility: visible;
-  animation: none;
-}
-
-@keyframes showOnLoad {
-  0%   { opacity: 1; visibility: visible; }
-  80%  { opacity: 1; visibility: visible; }
-  100% { opacity: 0; visibility: hidden; }
 }
 
 .topbar h1 {
