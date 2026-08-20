@@ -1,5 +1,4 @@
 import { icons } from './icons.js'
-import { esc } from '../shared/esc.js'
 
 function button(label, className, action, icon = '') {
   return `<button class="button ${className}" data-action="${action}">${icon}${label}</button>`
@@ -18,10 +17,10 @@ function head(item) {
   const labelClass = item.kind === 'ai' ? 'label--ai' : item.kind === 'you' ? 'label--you' : ''
   return `
     <div class="item-head">
-      <span class="actor ${actorClass}">${esc(item.actor)}</span>
+      <span class="actor ${actorClass}">${item.actor}</span>
       <span class="head-sep">•</span>
-      <span class="${labelClass}">${esc(item.label)}</span>
-      <span class="time">${esc(item.time)}</span>
+      <span class="${labelClass}">${item.label}</span>
+      <span class="time">${item.time}</span>
     </div>
   `
 }
@@ -30,7 +29,7 @@ function suggestionCard(item) {
   if (item.state === 'applying') {
     return `
       <div class="card card--ai">
-        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>Applying</span><span class="time">${esc(item.time)}</span></div>
+        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>Applying</span><span class="time">${item.time}</span></div>
         <p class="card-copy">Applying to document...</p>
         <div class="progress"><span></span></div>
       </div>
@@ -40,7 +39,7 @@ function suggestionCard(item) {
   if (item.state === 'applied') {
     return `
       <div class="card card--applied">
-        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${esc(item.time)}</span></div>
+        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${item.time}</span></div>
         <p class="card-copy">Concrete example added.</p>
         <p class="card-note">You can edit it anytime.</p>
         <button class="button button--ghost" data-action="view-changes">View changes ${icons.chevron}</button>
@@ -51,7 +50,7 @@ function suggestionCard(item) {
   if (item.state === 'changes') {
     return `
       <div class="card card--applied">
-        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${esc(item.time)}</span></div>
+        <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${item.time}</span></div>
         <div class="diff">
           <div class="diff-line diff-line--old">Many companies are looking at ways to reduce their environmental impact...</div>
           <div class="diff-line diff-line--new">For example, Patagonia redesigned its packaging in 2022, eliminating 80% of virgin plastic from shipments...</div>
@@ -64,7 +63,7 @@ function suggestionCard(item) {
   if (item.state === 'dismissed') {
     return `
       <div class="card card--dismissed">
-        <div class="item-head"><span class="actor actor--quiet">${icons.blocked} AI suggestion dismissed</span><span class="time">${esc(item.time)}</span></div>
+        <div class="item-head"><span class="actor actor--quiet">${icons.blocked} AI suggestion dismissed</span><span class="time">${item.time}</span></div>
         ${button('Undo', 'button--ghost', 'undo-dismiss')}
       </div>
     `
@@ -76,9 +75,9 @@ function suggestionCard(item) {
       : ''
     return `
       <div class="card card--ai">
-        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>${esc(item.label)}</span><span class="time">${esc(item.time)}</span></div>
+        <div class="item-head"><span class="actor">AI</span><span class="head-sep">•</span><span>${item.label}</span><span class="time">${item.time}</span></div>
         <div class="thread" style="margin-top:8px">
-          <div class="thread-bubble">${esc(item.copy)}</div>
+          <div class="thread-bubble">${item.copy}</div>
           ${extra}
         </div>
         <div class="actions-row" style="margin-top:12px">
@@ -92,8 +91,8 @@ function suggestionCard(item) {
 
   return `
     <div class="card card--ai">
-      <div class="item-head" style="margin-bottom:10px"><span class="actor">AI</span><span class="head-sep">•</span><span>${esc(item.label)}</span><span class="time">${esc(item.time)}</span></div>
-      <p class="card-copy">${esc(item.copy)}</p>
+      <div class="item-head" style="margin-bottom:10px"><span class="actor">AI</span><span class="head-sep">•</span><span>${item.label}</span><span class="time">${item.time}</span></div>
+      <p class="card-copy">${item.copy}</p>
       <div class="actions-row">
         ${button('Use', 'button--primary', 'use-suggestion', `<span class="btn-check">${icons.check}</span>`)}
         ${button('Dismiss', 'button--dismiss', 'dismiss-suggestion')}
@@ -107,8 +106,8 @@ function sourceCard(item) {
     <div class="source-card">
       <div class="source-icon">${icons.globe}</div>
       <div>
-        <div class="source-title">${esc(item.title)}</div>
-        <div class="source-url">${esc(item.url)}</div>
+        <div class="source-title">${item.title}</div>
+        <div class="source-url">${item.url}</div>
       </div>
       ${icons.chevron}
     </div>
@@ -132,9 +131,9 @@ function itemBody(item) {
     `
   }
   if (item.type === 'accepted') return ''
-  if (item.type === 'source') return `<p class="card-copy">${esc(item.copy)}</p>${sourceCard(item)}`
+  if (item.type === 'source') return `<p class="card-copy">${item.copy}</p>${sourceCard(item)}`
   if (item.type === 'image') return `<div class="image-thumb" role="img" aria-label="Added image preview"></div><div class="ellipsis">...</div>`
-  return `<p class="card-copy">${esc(item.copy)}</p>`
+  return `<p class="card-copy">${item.copy}</p>`
 }
 
 export function TimelineItem(item) {
@@ -154,7 +153,7 @@ export function ProjectContext({ title = '', prompt = '' } = {}) {
     <section class="context-card">
       <div class="context-label">Assignment title</div>
       <div class="context-row">
-        <div class="context-text">${esc(title) || 'Untitled document'}</div>
+        <div class="context-text">${title || 'Untitled document'}</div>
         ${icons.chevron}
       </div>
       <div
@@ -162,7 +161,7 @@ export function ProjectContext({ title = '', prompt = '' } = {}) {
         contenteditable="true"
         data-action="edit-prompt"
         data-placeholder="Describe the assignment or task…"
-      >${esc(prompt)}</div>
+      >${prompt}</div>
     </section>
   `
 }

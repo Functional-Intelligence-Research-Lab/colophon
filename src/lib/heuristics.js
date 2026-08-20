@@ -81,7 +81,7 @@ export function analyzeText(text) {
       );
     }
 
-    /* passive_voice — temporarily disabled
+    // 4. Passive voice
     const passiveMatches = trimmed.match(PASSIVE_RE) ?? [];
     if (passiveMatches.length >= 2) {
       const excerpt = passiveMatches.slice(0, 2).join(', ');
@@ -91,13 +91,10 @@ export function analyzeText(text) {
         trimmed.slice(0, 80)
       );
     }
-    */
 
-    // 5. Weak/filler words — word-boundary match, not substring: a plain
-    // `.includes()` check flags "every" as containing "very" and "adjust"/
-    // "justice"/"justify" as containing "just".
+    // 5. Weak/filler words
     const lowerPara = trimmed.toLowerCase();
-    const foundWeak = [...WEAK_WORDS].filter(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lowerPara));
+    const foundWeak = [...WEAK_WORDS].filter(w => lowerPara.includes(w));
     if (foundWeak.length >= 2) {
       add(
         'filler_words',
@@ -106,7 +103,7 @@ export function analyzeText(text) {
       );
     }
 
-    /* wordy_phrase — temporarily disabled
+    // 6. Wordy phrases
     for (const [re, replacement] of WORDY_PHRASES) {
       const m = trimmed.match(re);
       if (m) {
@@ -117,7 +114,6 @@ export function analyzeText(text) {
         add('wordy_phrase', tip, trimmed.slice(0, 80));
       }
     }
-    */
 
     // ── Per-sentence checks ────────────────────────────────────────────────
     const sentences = trimmed.split(/(?<=[.!?])\s+/).filter(Boolean);
@@ -125,7 +121,7 @@ export function analyzeText(text) {
     // 7. Long sentences
     for (const s of sentences) {
       const wc = s.split(/\s+/).length;
-      if (wc > 40) {
+      if (wc > 30) {
         add(
           'long_sentence',
           `Long sentence (${wc} words). Consider splitting it for clarity.`,
@@ -155,12 +151,12 @@ export function analyzeText(text) {
       }
     }
 
-    /* word_repetition — temporarily disabled
+    // 9. Repeated content words within paragraph
     const contentWords = trimmed.toLowerCase().match(/\b[a-z]{5,}\b/g) ?? [];
-    const freq = /** @type {Record<string,number>} *\/ ({});
+    const freq = /** @type {Record<string,number>} */ ({});
     for (const w of contentWords) freq[w] = (freq[w] ?? 0) + 1;
     for (const [w, n] of Object.entries(freq)) {
-      if (n >= 4) {
+      if (n >= 3) {
         add(
           'word_repetition',
           `"${w}" appears ${n} times in this paragraph. Consider varying your word choice.`,
@@ -168,7 +164,6 @@ export function analyzeText(text) {
         );
       }
     }
-    */
   }
 
   return suggestions;

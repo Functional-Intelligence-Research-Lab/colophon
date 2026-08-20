@@ -1,27 +1,36 @@
 # Colophon Native Host — Setup
 
-The native host lets the Colophon extension download and run a local AI model (llamafile)
-on your machine, entirely optionally — recording and heuristic suggestions work without it.
+script has been replaced with a more automated installer on the side panel (keeping this doc for now in case anyone wants to do it manually)
+
+The native host lets the Colophon extension download and run a local AI model (llamafile) on your machine.
 
 ## Requirements
 
+- >=Python 3.8
 - Chrome extension loaded
-- **No Python required.** The host ships as a compiled binary (`colophon-host`/
-  `colophon-host.exe`, built from `host.py` with Nuitka — see `build_native_host.py`), so
-  there's no interpreter or dependency to install first.
 
 ## Install (one-time)
 
-Open the Colophon side panel and click **"Download setup file"** under the local-AI
-banner. This downloads two files: the platform-correct `colophon-host` binary (already
-bundled inside the extension) and a small setup script
-(`colophon-setup.bat`/`colophon-setup.command`). Run the setup script once — it unzips the
-binary into `%APPDATA%\Colophon\native-host` / `~/.colophon/native-host`, and registers it
-as a native-messaging host with Chrome. Then click "Check again" in the side panel.
+### Windows
 
-There is no separate manual `install.sh`/`install.ps1` path anymore — the side panel flow
-above is the only supported install path, since it no longer needs a system Python to
-detect or fall back on.
+```powershell
+cd native-host
+.\install.ps1
+```
+
+### macOS / Linux
+
+```bash
+cd native-host
+bash install.sh
+```
+
+Both scripts will:
+
+1. Ask for your Colophon extension ID (find it in `chrome://extensions`)
+2. Register the host with Chrome so the extension can talk to it
+
+After installing, reload Colophon in `chrome://extensions`.
 
 ## What the host does
 
@@ -38,43 +47,25 @@ detect or fall back on.
 - llamafile is bound to `127.0.0.1`
 - No user data is sent anywhere; inference is 100% local
 - The host only accepts the four actions above; anything else is rejected
-- `host.py`'s source ships alongside the compiled binary in the extension package
-  (`native-host/host.py`) for anyone to audit what actually runs
-
-## Building the binaries
-
-```bash
-pip install nuitka
-python3 build_native_host.py
-```
-
-Nuitka compiles for whatever OS it runs on — it does not cross-compile — so this needs to
-run once per target platform. `.github/workflows/build-native-host.yml` does this on a
-3-OS CI matrix; a maintainer downloads the resulting artifacts and commits them into
-`native-host/bin/<platform>/` before cutting a release build.
 
 ## Uninstall
 
-**Windows** — delete the registry key, then the installed binary directory:
+**Windows** — delete the registry key:
 
 ```ps
-reg delete "HKCU\Software\Google\Chrome\NativeMessagingHosts\com.colophon.llamahost" /f
+HKCU\Software\Google\Chrome\NativeMessagingHosts\com.colophon.llamahost
 ```
 
-```ps
-%APPDATA%\Colophon\native-host\
-```
-
-**macOS/Linux** — delete whichever of these manifest files exist (Chrome and/or
-Chromium, if both are installed):
+**macOS/Linux** — delete:
 
 ```bash
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.colophon.llamahost.json
-~/Library/Application Support/Chromium/NativeMessagingHosts/com.colophon.llamahost.json
-~/.config/google-chrome/NativeMessagingHosts/com.colophon.llamahost.json
-~/.config/chromium/NativeMessagingHosts/com.colophon.llamahost.json
 ```
 
-Then remove `~/.colophon/native-host` (the installed binary). To also remove the
-downloaded model (~720 MB), delete `~/.colophon/models/` (llamafile/llamafile.exe,
-the GGUF model file, and `llamafile-stderr.log`).
+or
+
+```bash
+~/.config/google-chrome/NativeMessagingHosts/com.colophon.llamahost.json
+```
+
+To also remove the downloaded model (~720 MB), delete `~/.colophon/` .

@@ -1,5 +1,4 @@
 import JSZip from './jszip.js';
-import { computeEventHash } from '../shared/process-log.js';
 
 // Annotation type registry
 export const ANNOTATION_TYPES = {
@@ -27,37 +26,14 @@ export const ANNOTATION_TYPES = {
     ai_completion: {
         css_class: "ann-completion",
         label: "AI Completion",
-        description: "Tab-completed by Colophon",
+        description: "Tab-completed by Glass Box",
         log_type: "ai_interaction",
         interaction: "completion",
     },
 };
 
-/**
- * Content caps enforced on export, matching TWFF spec v0.2 §6.1. `content_before`/
- * `content_after` are already clipped to 500 chars at event-creation time (see
- * lib/events.js's clip() calls) — this only needs to catch fields that are deliberately
- * left full at capture time for live UI rendering (e.g. the side panel reads meta.text to
- * render suggestion cards) but must still respect the spec's content caps once a session is
- * serialized into an exported/shareable .twff file.
- */
-const EXPORT_TEXT_CAP = 500;
-
-function sanitizeEventForExport(event) {
-    const meta = event.meta;
-    if (!meta || (meta.text === undefined && meta.reason === undefined)) return event;
-    const sanitizedMeta = { ...meta };
-    if (typeof sanitizedMeta.text === 'string') {
-        sanitizedMeta.text = sanitizedMeta.text.slice(0, EXPORT_TEXT_CAP);
-    }
-    if (typeof sanitizedMeta.reason === 'string') {
-        sanitizedMeta.reason = sanitizedMeta.reason.slice(0, EXPORT_TEXT_CAP);
-    }
-    return { ...event, meta: sanitizedMeta };
-}
-
     /**
-    * TWFF v0.2 process log.
+    * TWFF v0.1 process log.
     * Instantiate once per writing session. Call log_event() as the user writes.
     * Call export() to produce a .twff ZIP container as bytes.
      */
@@ -157,7 +133,7 @@ export class ProcessLog {
     }
 
     /**
-     * @param {*} endTime
+     * @param {*} endTime 
      * @returns Return the process log as a spec-compliant object
      */
     toDict(endTime = null) {
@@ -168,51 +144,33 @@ export class ProcessLog {
             start_time: this.startTime,
             end_time: endTime || new Date().toISOString(),
             content_source: this._contentSource,
-            events: this.events.map(sanitizeEventForExport),
+            events: this.events,
         };
     }
 
     /**
-     * Computes the per-event SHA-256 hash chain (spec §5.2) over
-     * `processLogDict.events` — which must already be the sanitized/exported
-     * shape (i.e. the output of toDict()), never the raw in-memory events —
-     * so the chain always matches what actually gets written to
-     * process-log.json. Mutates each event with `_hash` and sets
-     * `processLogDict._integrity` in place.
-     * @param {{events: Array, [key: string]: any}} processLogDict
-     * @returns {Promise<void>}
+     * 
+     * @returns {<String>} author ID
      */
-    async _applyIntegrityChain(processLogDict) {
-        let previousHash = "";
-        for (const event of processLogDict.events) {
-            event._hash = await computeEventHash(event, previousHash, this.sessionId);
-            previousHash = event._hash;
+    async getAuthorId() {
+        const { authorId } = await chrome.storage.local.get("authorId");
+        if (authorId) return authorId;
+        const id = crypto.randomUUID();
+        await chrome.storage.local.set({ authorId: id });
+        return id;
         }
-
-        processLogDict._integrity = {
-            algorithm: "SHA-256-CHAIN",
-            chain_length: processLogDict.events.length,
-            head_hash: previousHash,
-            session_id: this.sessionId,
-            note: "Per-event chained hash. Verify using spec §5.2.",
-        };
-    }
 
     /**
      * builds metadata for user session
-     *
-     * Uses the same `this.userId` set at construction (the session's single,
-     * session-scoped author ID — see shared/storage.js's ensureSessionUserId)
-     * rather than a second, independently-generated id, so metadata.json and
-     * process-log.json always agree on who wrote a session.
      * @returns {{}} Metadata of user session
      */
     async buildMetadata() {
+        const authorId = await this.getAuthorId();
         return {
             title: this.title || 'colophone',
             created: new Date().toISOString(),
-            twff_version: ProcessLog.SPEC_VERSION,
-            author_id: this.userId,
+            twff_version: "0.1",
+            author_id: authorId,
             session_id: this.sessionId
         };
         }
@@ -274,21 +232,13 @@ export class ProcessLog {
      * Images are inlined as base64 data URIs so they survive in the TWFF container.
      * @returns {Promise<string>} XHTML string with inlined images.
      */
-    async getXhtmlContentEpub(docId = null){
-        // A real docId (the Google Docs id, not this project's opaque session
-        // docId hash) lets a background-triggered export — e.g. the
-        // storage-quota auto-export, which can't assume the Docs tab is
-        // focused — skip the active-tab lookup entirely. The underlying
-        // request is a credentialed fetch via the docs.google.com host
-        // permission, so it never actually needed an open tab, only the id.
-        if (!docId) {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            if (!tab || !tab.url) throw new Error("Could not find active tab.");
+    async getXhtmlContentEpub(){
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !tab.url) throw new Error("Could not find active tab.");
 
-            const docIdMatch = tab.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
-            if (!docIdMatch) throw new Error("Not a valid Google Doc URL");
-            docId = docIdMatch[1];
-        }
+        const docIdMatch = tab.url.match(/\/d\/([a-zA-Z0-9-_]+)/);
+        if (!docIdMatch) throw new Error("Not a valid Google Doc URL");
+        const docId = docIdMatch[1];
 
         const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=epub`;
         const response = await fetch(exportUrl);
@@ -340,6 +290,35 @@ export class ProcessLog {
         const xhtmlFolder = mainKey.includes('/') ? mainKey.substring(0, mainKey.lastIndexOf('/') + 1) : "";
         return await this._inlineEpubImages(mainContent, loadedEpub, xhtmlFolder);
     }
+
+    /**
+     * Mimicks python's json.dump
+     * Note: Required for the integrity hash 
+     * @param {*} obj object
+     * @returns {<String>} A python styled JSON file.
+     */
+    pythonJsonDump(obj) {
+        // Native stringify safely handle strings, numbers, booleans, and null
+        if (obj === null || typeof obj !== 'object') {
+            return JSON.stringify(obj);
+        }
+
+        // Handle Arrays: Map through items and join with a comma and a space
+        if (Array.isArray(obj)) {
+            const items = obj.map(item => this.pythonJsonDump(item));
+            return `[${items.join(', ')}]`;
+        }
+
+        // Handle Objects: Sort keys alphabetically, then format with Python's colon and comma spaces
+        const keys = Object.keys(obj).sort();
+        const items = keys.map(key => {
+            const safeKey = JSON.stringify(key);
+            const safeValue = this.pythonJsonDump(obj[key]);
+            return `${safeKey}: ${safeValue}`;
+        });
+        
+        return `{${items.join(', ')}}`;
+}
 
     async getHtml() {
         // Finds the active Google Docs tab
@@ -404,13 +383,29 @@ export class ProcessLog {
      * and JSZip generation are asynchronous. 
      * @returns {Promise<Blob>} A Blob representing the ZIP file.
      */
-    async export(docId = null) {
+    async export() {
         //const endTime = this.endSession();
         const processLogDict = this.toDict();
-        await this._applyIntegrityChain(processLogDict);
-        const xhtmlContent = await this.getXhtmlContentEpub(docId)
+        const xhtmlContent = await this.getXhtmlContentEpub()
         //const xhtmlContent = await this.getHtml()
         const metaData = await this.buildMetadata()
+
+        // Compute integrity hash using the native Web Crypto API
+        const eventsJson = this.pythonJsonDump(this.events);
+        const salt = this.sessionId;
+        const textEncoder = new TextEncoder();
+        const dataToHash = textEncoder.encode(eventsJson + salt);
+        
+        const hashBuffer = await crypto.subtle.digest("SHA-256", dataToHash);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const integrityHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+        processLogDict._integrity = {
+            algorithm: "SHA-256",
+            salt: "session_id",
+            hash: integrityHash,
+            note: "Hash of events array concatenated with session_id salt."
+        };
 
         const manifest = this._buildManifest();
 
@@ -442,11 +437,8 @@ export class ProcessLog {
 
     // --- Private helpers ---
     /**
-     * Defensive fallback for when a ProcessLog is constructed without a
-     * userId. In production, service-worker.js always supplies one (via
-     * shared/storage.js's ensureSessionUserId) before this class is
-     * instantiated, so this path isn't normally hit — it just guarantees the
-     * class never produces a log with a missing/undefined user_id.
+     * Generate a short, anonymous, session-scoped user ID.
+     * Not stored anywhere — user can rotate by refreshing. 
      */
     _generateEphemeralId() {
         // Hashing a UUID4 (like in Python) is technically redundant for randomness.

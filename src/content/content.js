@@ -4,9 +4,7 @@ import { createVelocityTracker, isTooFastForHuman } from './edit-velocity.js'
 import { classifyInsertion } from './block-insertion.js'
 import { analyzeText } from '../lib/heuristics.js'
 import { aiInteractionEvent } from '../lib/events.js'
-import { jaccardSimilarity } from '../lib/similarity.js'
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
-import { debugLog } from '../shared/debug.js'
 
 /**
  * content.js — Colophon content script
@@ -52,13 +50,10 @@ let _editBuffer = null
 let _debounce   = null
 let _blurredAt  = null
 let _lastPasteAt = 0
+let _pendingPaste = null
 let _listenerTargets = []
 let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
 let _heuristicDebounce = null
-// Tracks rule+excerpt pairs already emitted this session so an issue that's
-// still present in the document isn't re-logged as a brand-new event on
-// every subsequent scan (analyzeText's own dedup is scoped to a single call).
-const _flaggedHeuristics = new Set()
 let _floatingPanel = null
 let _floatingPinned = false
 let _checkpointTimer = null
@@ -179,7 +174,7 @@ function onSelectionChange() {
 // Emits ai_suggestion / ai_interaction events via the same send() path as edits.
 const _geminiDetector = createGeminiDetector({
   emit: event => send('LOG_EVENT', event),
-  log: (...args) => debugLog(...args),
+  log: (...args) => console.log(...args),
   warn: (...args) => console.warn(...args),
   emitInteractions: false,
 
@@ -187,18 +182,19 @@ const _geminiDetector = createGeminiDetector({
   // has accepted or rejected. We grab a fresh, cache-busted doc snapshot here
   // so we have a reliable "before" baseline for the diff on acceptance.
   onSuggestionWillAppear: () => {
-    debugLog('[Colophon Gemini] Pre-suggestion snapshot starting...');
+    console.log('[Colophon Gemini] Pre-suggestion snapshot starting...');
     getDocumentText().then(t => {
       if (t) {
         _preSuggestionSnapshot = t;
-        debugLog('[Colophon Gemini] Pre-suggestion snapshot captured', { chars: t.length });
+        console.log('[Colophon Gemini] Pre-suggestion snapshot captured', { chars: t.length });
       }
     }).catch(() => {});
   },
 
-  onResolve: ({ acceptance, accepted, suggestionText, reason }) => {
+  onResolve: ({ acceptance, accepted, chars, suggestionText, reason }) => {
     if (accepted) {
       _lastPasteAt = Date.now();
+      _pendingPaste = { startedAt: Date.now(), text: '', logged: true };
 
       // Use the snapshot taken when the suggestion appeared; fall back to the
       // rolling baseline if the per-suggestion snapshot wasn't ready in time.
@@ -216,15 +212,11 @@ const _geminiDetector = createGeminiDetector({
         const finalAdded = diff.addedText || domDiff.insertedText || (!commentary ? suggestionText : '');
         const finalRemoved = diff.removedText || domDiff.deletedText || '';
 
-        debugLog('[Colophon Gemini] onResolve diff result', {
+        console.log('[Colophon Gemini] onResolve diff result', {
           addedChars: finalAdded.length,
           removedChars: finalRemoved.length,
           source: diff.addedText ? 'export-diff' : domDiff.insertedText ? 'dom-diff' : 'suggestion-text',
         });
-
-        // How much of the AI's original wording survived into what was
-        // actually kept — spec v0.2 §4.4, alongside (not instead of) acceptance.
-        const similarity_score = jaccardSimilarity(suggestionText, finalAdded);
 
         send('LOG_EVENT', aiInteractionEvent({
           source: 'ai',
@@ -236,7 +228,6 @@ const _geminiDetector = createGeminiDetector({
           position_end: 0,
           acceptance,
           ai_chars: finalAdded.length,
-          similarity_score,
           ...(reason ? { reason } : {})
         }));
 
@@ -255,7 +246,6 @@ const _geminiDetector = createGeminiDetector({
         position_end: 0,
         acceptance,
         ai_chars: 0,
-        similarity_score: 0, // nothing kept — dismissed/rejected
         ...(reason ? { reason } : {})
       }));
     }
@@ -264,8 +254,8 @@ const _geminiDetector = createGeminiDetector({
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-debugLog('[Colophon] Content script injected on', location.pathname)
-debugLog('[Colophon Content] injected', {
+console.log('[Colophon] Content script injected on', location.pathname)
+console.log('[Colophon Content] injected', {
   path: location.pathname,
   readyState: document.readyState,
   hasEditor: !!document.querySelector(EDITOR_SELECTOR),
@@ -273,8 +263,8 @@ debugLog('[Colophon Content] injected', {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   try {
-    if (msg.type === 'ACTIVATE')   { debugLog('[Colophon Content] ACTIVATE message'); activate() }
-    if (msg.type === 'DEACTIVATE') { debugLog('[Colophon Content] DEACTIVATE message'); deactivate() }
+    if (msg.type === 'ACTIVATE')   { console.log('[Colophon Content] ACTIVATE message'); activate() }
+    if (msg.type === 'DEACTIVATE') { console.log('[Colophon Content] DEACTIVATE message'); deactivate() }
     if (msg.action === 'CLEAR_SELECTION') {
       clearTimeout(_selectionDebounce)
       window.getSelection()?.removeAllRanges()
@@ -286,7 +276,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (msg.type === '__PING__')   sendResponse({ ok: true, active: _active })
     if (msg.action === 'FETCH_DOC_EXPORT') {
-      debugLog('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
+      console.log('[Colophon Content] FETCH_DOC_EXPORT requested for format:', msg.format);
       forceFetchExport(msg.docId, msg.format)
         .then(data => sendResponse(data))
         .catch(err => sendResponse({ error: err.message }));
@@ -377,7 +367,7 @@ window.addEventListener('blur', _pushDocContext)
 
 function activate() {
   if (_active) {
-    debugLog('[Colophon Content] activate skipped: already active')
+    console.log('[Colophon Content] activate skipped: already active')
     return
   }
   _active = true
@@ -385,7 +375,7 @@ function activate() {
   // ALL handlers (keydown, input, MutationObserver) ignore the initial burst
   // of events that Google Docs fires when it paints the document canvas.
   _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
-  debugLog('[Colophon Content] DOM settle window active until', new Date(_observerSettleUntil).toISOString())
+  console.log('[Colophon Content] DOM settle window active until', new Date(_observerSettleUntil).toISOString())
   attachInputListeners(document, 'top-document')
   watchTextEventIframe()
   // Secondary: MutationObserver (works in legacy/non-canvas renderer)
@@ -393,9 +383,7 @@ function activate() {
   // Native Gemini suggestion detection (Help me write / Refine)
   _geminiDetector.start()
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // Periodic checkpoints + heuristic pass — 15 minutes (heuristics are a
-  // lighter-weight, lower-priority feature now; most users have their own
-  // grammar checker for anything time-sensitive).
+  // Periodic checkpoints every 5 minutes + heuristic pass
   _checkpointTimer = setInterval(() => {
     const text = _getDocText()
     const words = text.trim().split(/\s+/).filter(Boolean).length
@@ -408,8 +396,8 @@ function activate() {
       },
     }).catch(() => {})
     runHeuristics()
-  }, 15 * 60 * 1000)
-  debugLog('[Colophon Content] recording activated', {
+  }, 5 * 60 * 1000)
+  console.log('[Colophon Content] recording activated', {
     activeElement: describeElement(document.activeElement),
     hasEditor: !!document.querySelector(EDITOR_SELECTOR),
   })
@@ -430,9 +418,6 @@ function runHeuristics() {
   if (!text || text.trim().length < 30) return
   const tips = analyzeText(text)
   for (const tip of tips) {
-    const key = `${tip.rule}::${tip.excerpt}`
-    if (_flaggedHeuristics.has(key)) continue
-    _flaggedHeuristics.add(key)
     chrome.runtime.sendMessage({
       action: 'LOG_EVENT',
       payload: {
@@ -446,7 +431,7 @@ function runHeuristics() {
 
 function scheduleHeuristics() {
   clearTimeout(_heuristicDebounce)
-  _heuristicDebounce = setTimeout(runHeuristics, 90_000)
+  _heuristicDebounce = setTimeout(runHeuristics, 30_000)
 }
 
 function describeElement(el) {
@@ -467,7 +452,7 @@ function attachInputListeners(target, label) {
   target.addEventListener('copy', onCopy, true)
   target.addEventListener('input', onInput, true)
   _listenerTargets.push({ target, label })
-  debugLog('[Colophon Content] input listeners attached', { label })
+  console.log('[Colophon Content] input listeners attached', { label })
 }
 
 function detachInputListeners() {
@@ -476,7 +461,7 @@ function detachInputListeners() {
     target.removeEventListener('paste', onPaste, true)
     target.removeEventListener('copy', onCopy, true)
     target.removeEventListener('input', onInput, true)
-    debugLog('[Colophon Content] input listeners detached', { label })
+    console.log('[Colophon Content] input listeners detached', { label })
   }
   _listenerTargets = []
 }
@@ -498,7 +483,7 @@ function attachTextEventIframe() {
       if (!doc) continue
       attachInputListeners(doc, 'docs-text-iframe-document')
     } catch (err) {
-      debugLog('[Colophon Content] text iframe inaccessible', {
+      console.log('[Colophon Content] text iframe inaccessible', {
         frame: describeElement(frame),
         error: err.message,
       })
@@ -520,12 +505,12 @@ async function syncRecordingState() {
       // it simply updates the tabId and re-sends ACTIVATE without adding any
       // new events to the timeline.
       const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
-      debugLog('[Colophon Content] auto-record requested', res)
+      console.log('[Colophon Content] auto-record requested', res)
       if (res?.ok) activate()
     } else {
       // Manual mode: only activate if the SW says we're already recording.
       const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
-      debugLog('[Colophon Content] sync recording state', {
+      console.log('[Colophon Content] sync recording state', {
         hasSession: !!state?.session,
         isRecording: !!state?.session?.isRecording,
       })
@@ -552,7 +537,7 @@ function deactivate() {
   _checkpointTimer = null
   flushEdit() // flush anything buffered before stopping
   _editBuffer = null
-  debugLog('[Colophon Content] recording deactivated')
+  console.log('[Colophon Content] recording deactivated')
 }
 
 // ── Extension context guard ───────────────────────────────────────────────────
@@ -580,18 +565,18 @@ function onKeydown(e) {
   if (Date.now() < _observerSettleUntil) return
   if (isTargetingFormInput(e.target)) return;
   if (SKIP_KEYS.has(e.key)) {
-    debugLog('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
+    console.log('[Colophon Content] keydown skipped', { reason: 'skip-key', key: e.key })
     return
   }
   if (e.ctrlKey || e.metaKey) {
-    debugLog('[Colophon Content] keydown skipped', { reason: 'shortcut', code: e.code })
+    console.log('[Colophon Content] keydown skipped', { reason: 'shortcut', code: e.code })
     return
   }
 
   // Backspace/Delete remove a character; everything else adds one
   const isDelete = (e.key === 'Backspace' || e.key === 'Delete')
   const delta = isDelete ? -1 : 1
-  debugLog('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
+  console.log('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
   bufferEdit(delta, isDelete)
   scheduleHeuristics()
 }
@@ -599,10 +584,9 @@ function onKeydown(e) {
 // ── Edit capture: MutationObserver (secondary) ────────────────────────────────
 
 function waitForEditor(callback) {
-  if (!_active) return
   const el = document.querySelector(EDITOR_SELECTOR)
   if (el) { callback(el); return }
-  debugLog('[Colophon Content] waiting for editor', { selector: EDITOR_SELECTOR })
+  console.log('[Colophon Content] waiting for editor', { selector: EDITOR_SELECTOR })
   setTimeout(() => waitForEditor(callback), EDITOR_POLL_MS)
 }
 
@@ -615,7 +599,7 @@ function attachObserver(editor) {
   // Suppress the initial DOM-render burst — Docs re-inserts every paragraph
   // node when the canvas first paints, which looks like a huge insertion.
   _observerSettleUntil = Date.now() + OBSERVER_SETTLE_MS;
-  debugLog('[Colophon Content] MutationObserver attached', { target: describeElement(editor), settleUntil: _observerSettleUntil })
+  console.log('[Colophon Content] MutationObserver attached', { target: describeElement(editor), settleUntil: _observerSettleUntil })
 }
 
 function onMutation(mutations) {
@@ -653,7 +637,7 @@ function onMutation(mutations) {
     }
   }
   if (delta !== 0) {
-    debugLog('[Colophon Content] mutation delta', { delta, count: mutations.length })
+    console.log('[Colophon Content] mutation delta', { delta, count: mutations.length })
     bufferEdit(delta)
   }
 }
@@ -662,18 +646,18 @@ function onMutation(mutations) {
 
 function bufferEdit(delta, isDelete = false) {
   if (Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
-    debugLog('[Colophon Content] Edit suppressed after paste', { delta })
+    console.log('[Colophon Content] Edit suppressed after paste', { delta })
     return;
   }
   const nowMs = Date.now()
   if (!_editBuffer) {
     _editBuffer = { timestamp: new Date().toISOString(), delta: 0, velocity: createVelocityTracker() }
     _bufferStartTime = Date.now();
-    debugLog('[Colophon Content] edit buffer started', { delta })
+    console.log('[Colophon Content] edit buffer started', { delta })
   }
   _editBuffer.delta += delta
   _editBuffer.velocity.record(isDelete, nowMs)
-  debugLog('[Colophon Content] edit buffer updated', { delta, total: _editBuffer.delta })
+  console.log('[Colophon Content] edit buffer updated', { delta, total: _editBuffer.delta })
   clearTimeout(_debounce)
   _debounce = setTimeout(flushEdit, DEBOUNCE_MS)
 }
@@ -684,16 +668,10 @@ function flushEdit() {
   const cpm = v.chars_per_min
   const elapsed = Math.max((Date.now() - _bufferStartTime) / 1000, 0.1);
   const absDelta = Math.abs(_editBuffer.delta);
-  // insertion_velocity is a cruder rate than edit-velocity.js's cpm (no
-  // pause-exclusion, whole-buffer average) — used only to route a suspiciously
-  // fast, large insertion to the gemini_suggestion event type instead of edit.
-  // Like chars_per_min/too_fast_for_human below, this is a weak plausibility
-  // signal, not a detector of any specific behavior — see edit-velocity.js's
-  // header comment for what it can and cannot tell us.
   const insertion_velocity = Math.round(absDelta / elapsed);
   const likely_ai = insertion_velocity > 150 && absDelta > 80;
 
-  debugLog('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai })
+  console.log('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai })
 
   const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit';
   if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
@@ -748,11 +726,11 @@ function onPaste(e) {
   if (_lastInternalCopy &&
       now - _lastInternalCopy.at < INTERNAL_COPY_TTL &&
       text === _lastInternalCopy.text) {
-    debugLog('[Colophon Content] Internal paste (text move within doc), skipping log.');
+    console.log('[Colophon Content] Internal paste (text move within doc), skipping log.');
     return;
   }
 
-  debugLog('[TWFF] Paste intercepted. Running Async Emitter...');
+  console.log('[TWFF] Paste intercepted. Running Async Emitter...');
   emitPaste(text);
 }
 
@@ -763,7 +741,7 @@ function onInput(e) {
   if (isTargetingFormInput(e.target)) return;
   const inputType = e.inputType ?? ''
   const insertedLength = e.data?.length ?? 0
-  debugLog('[Colophon Content] input event', {
+  console.log('[Colophon Content] input event', {
     inputType,
     dataLength: insertedLength,
     target: describeElement(e.target),
@@ -771,7 +749,7 @@ function onInput(e) {
 
   const { isBlock, origin, chars } = classifyInsertion({ inputType, insertedLength })
   if (isBlock && origin === 'unknown') {
-    debugLog('[Colophon Content] block insertion (unattributed)', { chars, inputType })
+    console.log('[Colophon Content] block insertion (unattributed)', { chars, inputType })
     send('LOG_EVENT', {
       timestamp: new Date().toISOString(),
       type: 'edit',
@@ -786,7 +764,47 @@ function onInput(e) {
     })
   }
 }
+// function onPaste(e) {
+//   if (!_active) return
+//   if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') {
+//     return;
+//   }
+//   const text = e.clipboardData?.getData('text/plain') ?? ''
+//   console.log('[Colophon Content] paste event', { charCount: text.length, target: describeElement(e.target) })
+//   markPaste(text)
+// }
 
+// function onBeforeInput(e) {
+//   if (!_active || e.inputType !== 'insertFromPaste') return
+//   const text = e.dataTransfer?.getData('text/plain') ?? e.data ?? ''
+//   console.log('[Colophon Content] beforeinput paste', { charCount: text.length, target: describeElement(e.target) })
+//   markPaste(text)
+// }
+
+// function onInput(e) {
+//   if (!_active) return
+//   console.log('[Colophon Content] input event', {
+//     inputType: e.inputType ?? '',
+//     dataLength: e.data?.length ?? 0,
+//     target: describeElement(e.target),
+//   })
+// }
+
+// function markPaste(text) {
+//   const now = Date.now()
+//   if (!_pendingPaste || now - _pendingPaste.startedAt >= PASTE_SUPPRESSION_MS) {
+//     _pendingPaste = { startedAt: now, text: '', logged: false }
+//   }
+
+//   _lastPasteAt = now
+//   if (text.length > _pendingPaste.text.length) {
+//     _pendingPaste.text = text
+//   }
+
+//   if (_pendingPaste.text && !_pendingPaste.logged) {
+//     emitPaste(_pendingPaste.text)
+//   }
+// }
 
 function _textSimilarity(a, b) {
   if (!a || !b) return 0;
@@ -799,6 +817,7 @@ function _textSimilarity(a, b) {
 
 async function emitPaste(text) {
   const charCount = text.length;
+  //if (typeof _pendingPaste !== 'undefined' && _pendingPaste) _pendingPaste.logged = true;
 
   const event = {
     timestamp: new Date().toISOString(),
@@ -852,18 +871,55 @@ async function emitPaste(text) {
           event.meta.acceptance = 'fully_accepted';
           event.meta.ai_chars = text.length;
           chrome.runtime.sendMessage({ action: 'CLEAR_PENDING_AI_OUTPUT' }).catch(() => {});
-          debugLog('[Colophon Content] Paste reclassified as AI paraphrase (similarity:', similarity, ')');
+          console.log('[Colophon Content] Paste reclassified as AI paraphrase (similarity:', similarity, ')');
         }
       }
     } catch { /* service worker unavailable */ }
 
-    debugLog("[Colophon Content] Final Event Ready:", event);
+    console.log("[Colophon Content] Final Event Ready:", event);
     send('LOG_EVENT', event);
 
     _rollingBaselineState = docStateAfter;
 
   }, 1000); 
 }
+
+// function emitPaste(text, fallbackCharCount = null) {
+//   const charCount = fallbackCharCount ?? text.length
+//   if (_pendingPaste) _pendingPaste.logged = true
+//   console.log('[Colophon Content] paste emit', {
+//     charCount,
+//     hasPreview: text.length > 0,
+//     fallback: fallbackCharCount !== null,
+//   })
+
+//   const event = {
+//     timestamp: new Date().toISOString(),
+//     type: 'paste',
+//     meta: {
+//       char_count:     charCount,
+//       source:         'external',
+//       position_start: 0,
+//       position_end:   charCount,
+//       output_preview: formatPreview(text),
+//     },
+//   }
+
+//   if (text.length > 0) {
+//     // Wait for the DOM to reflect the paste, then capture surrounding context
+//     setTimeout(() => {
+//       const doc = _getDocText()
+//       const idx = doc.indexOf(text.slice(0, 50))
+//       if (idx >= 0) {
+//         event.meta.content_before = doc.slice(Math.max(0, idx - 300), idx)
+//         event.meta.content_after  = doc.slice(idx + text.length, idx + text.length + 300)
+//       }
+//       send('LOG_EVENT', event)
+//     }, 200)
+//   } else {
+//     send('LOG_EVENT', event)
+//   }
+// }
 
 // ── Focus tracking ────────────────────────────────────────────────────────────
 
@@ -890,7 +946,7 @@ function onVisibilityChange() {
 // ── Messaging ─────────────────────────────────────────────────────────────────
 
 function send(type, payload = {}) {
-  debugLog('[Colophon Content] send message', { type, payloadType: payload?.type ?? null })
+  console.log('[Colophon Content] send message', { type, payloadType: payload?.type ?? null })
   try {
     chrome.runtime.sendMessage({ type, payload }).catch(() => {
       // SW may be inactive — Chrome will revive it on the next message
@@ -1060,6 +1116,8 @@ function getDocsTitle() {
  * in sync when Google reshuffles class names.
  */
 function findGeminiActionButton(actionType) {
+  const { classifyAction: classify } = /** @type {any} */ (window.__colophon_geminiSelectors || {});
+
   // Containers where the Gemini accept/reject buttons live.
   const CONTAINERS = [
     '.appsElementsSidekickBarkickTopBox',
@@ -1170,7 +1228,7 @@ async function insertTextIntoDocs(textToInsert) {
 
     targetElement.dispatchEvent(pasteEvent);
 
-    debugLog("[Colophon Content] Auto-paste executed successfully.");
+    console.log("[Colophon Content] Auto-paste executed successfully.");
     return true;
 
   } catch (error) {
@@ -1182,7 +1240,7 @@ async function insertTextIntoDocs(textToInsert) {
 // ── IN-PAGE TOAST NOTIFICATION ─────────────────────────────────
 
 async function checkAndInjectStartToast() {
-  debugLog("[Colophon] Checking if start toast is needed...");
+  console.log("[Colophon] Checking if start toast is needed...");
 
   let state;
   try {
@@ -1194,13 +1252,13 @@ async function checkAndInjectStartToast() {
   const isRecording = state?.session?.isRecording;
   
   if (isRecording) {
-    debugLog("[Colophon] Session already active. Skipping toast.");
+    console.log("[Colophon] Session already active. Skipping toast.");
     return; 
   }
 
   if (document.getElementById('colophon-inpage-toast')) return;
 
-  debugLog("[Colophon] Injecting Trusted-Type-safe toast into Google Docs.");
+  console.log("[Colophon] Injecting Trusted-Type safe toast into Google Docs!");
 
   const toast = document.createElement('div');
   toast.id = 'colophon-inpage-toast';
@@ -1269,9 +1327,7 @@ async function checkAndInjectStartToast() {
 
   const dismissBtn = document.createElement('button');
   dismissBtn.setAttribute('aria-label', 'Dismiss');
-  dismissBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-  dismissBtn.style.display = 'inline-flex';
-  dismissBtn.style.alignItems = 'center';
+  dismissBtn.textContent = '✕';
   dismissBtn.style.cssText = `
     background: none;
     border: none;
@@ -1298,7 +1354,7 @@ async function checkAndInjectStartToast() {
     }, 400); 
   };
 
-  const timeoutId = setTimeout(removeToast, 30000);
+  const timeoutId = setTimeout(removeToast, 6000);
 
   dismissBtn.addEventListener('click', () => { clearTimeout(timeoutId); removeToast(); });
   dismissBtn.addEventListener('mouseenter', () => dismissBtn.style.color = 'white');
@@ -1349,7 +1405,7 @@ function initGeminiObserver() {
           el.matches?.('.docs-material-surface, [data-feature-id], [jsname="QkNstf"]') ||
           el.querySelector?.('.docs-material-surface, [data-feature-id="smart-compose"]')
         ) {
-          debugLog('[Colophon Content] Gemini panel detected');
+          console.log('[Colophon Content] Gemini panel detected');
           _geminiPanelActive = true;
           // Auto-reset after 2 minutes to avoid false positives
           setTimeout(() => { _geminiPanelActive = false; }, 120000);
@@ -1423,7 +1479,7 @@ async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) 
   }
 
   const deadline = Date.now() + maxWaitMs;
-  debugLog('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
+  console.log('[Colophon Content] pollForDocChange started', { baselineChars: baseline.length, maxWaitMs });
   _pollActive = true;
 
   try {
@@ -1432,10 +1488,10 @@ async function pollForDocChange(baseline, maxWaitMs = 20000, intervalMs = 2000) 
       try {
         const newText = await getDocumentText();
         if (newText && newText !== baseline) {
-          debugLog('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
+          console.log('[Colophon Content] pollForDocChange: change detected', { newChars: newText.length });
           return newText;
         }
-        debugLog('[Colophon Content] pollForDocChange: no change yet, retrying...');
+        console.log('[Colophon Content] pollForDocChange: no change yet, retrying...');
       } catch {
         // transient fetch error — keep polling
       }

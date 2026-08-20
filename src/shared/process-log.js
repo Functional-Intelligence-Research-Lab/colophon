@@ -2,16 +2,11 @@
  * process-log.js — TWFF ProcessLog (JavaScript port)
  *
  * Ported from twff/glassbox/components/process_log.py.
- * Produces process-log.json conforming to TWFF v0.2 spec.
+ * Produces process-log.json conforming to TWFF v0.1 spec.
  * Hash chain follows SPEC §5.2 (SHA-256-CHAIN, per-event).
- *
- * `computeEventHash()` is the reference chain implementation, cross-checked
- * against the Python verifier (verify_process_log.py) by this file's own test
- * suite. lib/process-log.js's ProcessLog.export() — the live export path —
- * imports it directly rather than re-implementing the chain a second time.
  */
 
-export const SPEC_VERSION = '0.2.0'
+export const SPEC_VERSION = '0.1.0'
 
 /**
  * Recursively sort all object keys so JSON serialisation is deterministic.
@@ -38,7 +33,7 @@ function sortedJSON(value) {
  * hash_input = sortedJSON({ meta, timestamp, type })
  *            + "|" + previousHash + "|" + sessionId
  */
-export async function computeEventHash(event, previousHash, sessionId) {
+async function computeEventHash(event, previousHash, sessionId) {
   const payload = sortedJSON({
     meta:      event.meta,
     timestamp: event.timestamp,

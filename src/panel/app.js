@@ -1,7 +1,6 @@
 import { PANEL_CSS } from './panel.css.js'
 import { icons } from './icons.js'
 import { Composer, ProjectContext, TimelineItem } from './components.js'
-import { esc } from '../shared/esc.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +96,7 @@ function render(state) {
           <span>Colophon</span>
         </div>
         <div class="colophon-tools">
-          <button class="icon-btn" data-action="reset-panel" aria-label="Reset panel">${icons.refresh}</button>
+          <button class="icon-btn" data-action="reset-demo" aria-label="Reset panel">${icons.refresh}</button>
           ${state.mode === 'floating' ? `<button class="icon-btn" data-action="pin-panel" aria-label="Pin panel">${icons.pin}</button>` : ''}
           ${state.mode === 'floating' ? `<button class="icon-btn" data-action="close-panel" aria-label="Close panel">${icons.close}</button>` : ''}
         </div>
@@ -105,7 +104,7 @@ function render(state) {
 
       <div class="docbar">
         ${icons.doc}
-        <div class="doc-title">${esc(state.docTitle)}</div>
+        <div class="doc-title">${state.docTitle}</div>
         <button class="icon-btn doc-menu" data-action="more" aria-label="Panel menu">${icons.dots}</button>
       </div>
 
@@ -276,9 +275,8 @@ export function mountColophonPanel(host, options = {}) {
       return
     }
 
-    // Clears local UI-only state overrides (applying/applied/dismissed/replying)
-    // and re-renders straight from the raw event log.
-    if (action === 'reset-panel') {
+    // ── Dev / debug ──
+    if (action === 'reset-demo') {
       localOverrides.clear()
       applyEvents(_rawEvents)
       return

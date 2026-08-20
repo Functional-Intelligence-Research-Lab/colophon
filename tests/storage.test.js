@@ -13,8 +13,7 @@ import {
   getSession,
   saveSession,
   clearSession,
-  generateUserId,
-  ensureSessionUserId,
+  ensureUserId,
 } from '../src/shared/storage.js'
 
 beforeEach(() => resetStore())
@@ -27,6 +26,7 @@ describe('getSettings', () => {
     expect(s.aiPath).toBe('ollama')
     expect(s.ollamaEndpoint).toBe('http://localhost:11434')
     expect(s.outputFormat).toBe('twff')
+    expect(s.userId).toBe('')
   })
 })
 
@@ -76,39 +76,28 @@ describe('saveSession / clearSession', () => {
 
 // ── User ID ───────────────────────────────────────────────────────────────────
 
-describe('generateUserId', () => {
+describe('ensureUserId', () => {
   it('generates an anon- prefixed ID', async () => {
-    const id = await generateUserId()
+    const id = await ensureUserId()
     expect(id).toMatch(/^anon-[a-f0-9]{12}$/)
   })
 
-  it('generates a different ID on every call — no persistence, no reuse', async () => {
-    const id1 = await generateUserId()
-    const id2 = await generateUserId()
-    expect(id1).not.toBe(id2)
-  })
-})
-
-describe('ensureSessionUserId', () => {
-  it('attaches a fresh anon- ID to a session that has none', async () => {
-    const session = { sessionId: 'a', events: [] }
-    const id = await ensureSessionUserId(session)
-    expect(id).toMatch(/^anon-[a-f0-9]{12}$/)
-    expect(session.userId).toBe(id)
-  })
-
-  it('is idempotent within one session — same ID returned on every call', async () => {
-    const session = { sessionId: 'a', events: [] }
-    const id1 = await ensureSessionUserId(session)
-    const id2 = await ensureSessionUserId(session)
+  it('is idempotent — same ID returned on every call', async () => {
+    const id1 = await ensureUserId()
+    const id2 = await ensureUserId()
     expect(id1).toBe(id2)
   })
 
-  it('two different session objects get two different IDs — rotates per session', async () => {
-    const sessionA = { sessionId: 'a', events: [] }
-    const sessionB = { sessionId: 'b', events: [] }
-    const idA = await ensureSessionUserId(sessionA)
-    const idB = await ensureSessionUserId(sessionB)
-    expect(idA).not.toBe(idB)
+  it('persists the ID in settings', async () => {
+    const id = await ensureUserId()
+    const settings = await getSettings()
+    expect(settings.userId).toBe(id)
+  })
+
+  it('two calls in a fresh store generate exactly one ID', async () => {
+    await ensureUserId()
+    await ensureUserId()
+    const settings = await getSettings()
+    expect(settings.userId).toMatch(/^anon-/)
   })
 })

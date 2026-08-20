@@ -1,6 +1,19 @@
-/* Color tokens (--bg-*, --text-*, --border-color, --ai-color, --user-color,
-   --diff-*, --paste-color, --gemini-color, etc.) come from ../shared/theme.css,
-   loaded before this file — one palette shared with the popup and viewer. */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f9;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6b70;
+  --border-color: #e5e5e5;
+
+  --ai-color: #5c3ce6;
+  --ai-bg: #f2effc;
+
+  --user-color: #2b8a5d;
+  --user-bg: #e8f4ec;
+
+  --diff-red: #e04a4a;
+  --diff-green: #2b8a5d;
+}
 
 * {
   box-sizing: border-box;
@@ -134,6 +147,7 @@ body {
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
+  font-size: 0.85rem;
   line-height: 1;
   padding: 2px 4px;
   margin-left: auto;
@@ -142,7 +156,6 @@ body {
   transition: color 0.15s, background 0.15s;
   align-self: flex-start;
 }
-.banner-dismiss svg { width: 13px; height: 13px; }
 .banner-dismiss:hover {
   color: var(--text-primary);
   background: rgba(0,0,0,0.06);
@@ -320,16 +333,17 @@ body {
 }
 
 /* ──── Card Style ───────────────*/
-/* One clean card treatment shared by every card type below — a full subtle
-   border and rounded corners, not a colored left-border spine. Identity
-   (own/AI/gemini/etc.) is already carried by the timeline node icon that
-   sits to the card's left, so the card itself stays neutral. */
 .card {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-top: 8px;
-  background-color: var(--bg-secondary);
+  border: none;
+  border-left: 3px solid var(--border-color); 
+  border-radius: 0;
+  padding: 8px 0 8px 16px;
+  margin-top: 4px;
+  background-color: transparent;
+}
+
+.suggestion-card {
+  border-left-color: var(--ai-color);
 }
 
 .suggestion-card p {
@@ -346,7 +360,7 @@ body {
 
 .suggestion-warning {
   font-size: 0.78rem;
-  color: var(--status-warn-fg);
+  color: #b45309;
   margin-bottom: 8px;
   margin-top: -4px;
 }
@@ -391,6 +405,10 @@ body {
 
 .btn-dismiss:hover {
   background-color: var(--bg-secondary);
+}
+
+.diff-card {
+  border-left-color: var(--ai-color);
 }
 
 .diff-block {
@@ -452,10 +470,9 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px 14px;
+  background-color: transparent;
+  border-left: 3px solid var(--border-color);
+  padding: 8px 0 8px 16px;
   position: relative;
   cursor: pointer;
 }
@@ -481,11 +498,9 @@ body {
 }
 
 .image-card {
-  margin-top: 8px;
-  padding: 10px 14px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background-color: var(--bg-secondary);
+  margin-top: 4px;
+  padding-left: 16px;
+  border-left: 3px solid var(--user-color);
 }
 .img-placeholder {
   background-color: #e5e5e5;
@@ -625,7 +640,7 @@ body {
 }
 
 .app-footer .status .dot.available {
-  background-color: var(--status-warn-ico);
+  background-color: #f59e0b;
 }
 
 /* ───── Model status banner ─────────────── */
@@ -760,17 +775,17 @@ body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
+  font-size: 0.9rem;
   line-height: 1;
   padding: 2px 4px;
 }
-.sel-dismiss svg { width: 14px; height: 14px; }
 
 .sel-dismiss:hover {
   color: var(--text-primary);
 }
 
 /* ── Gemini event type ─────────────── */
-/* --gemini-color / --gemini-bg now come from ../shared/theme.css. */
+:root { --gemini-color: #1a73e8; --gemini-bg: #e8f0fe; }
 
 .timeline-event.gemini .node { color: var(--gemini-color); }
 .timeline-event.gemini .author {
@@ -778,23 +793,17 @@ body {
   border-color: #a8c7fa;
   background: var(--gemini-bg);
 }
+.gemini-card { border-left-color: var(--gemini-color) !important; }
+
 /* ── Doc context row ─────────────── */
 .doc-context-row {
   padding: 3px 0 6px;
 }
 
 #doc-context-indicator {
-  display: flex;
-  align-items: center;
-  gap: 5px;
   font-size: 0.72rem;
   opacity: 0.7;
   color: var(--text-secondary);
-}
-#doc-context-indicator svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
 }
 
 @keyframes spin {
@@ -820,7 +829,7 @@ body {
   flex-shrink: 0;
 }
 .status-icon.status-ok  { background: var(--user-bg); color: var(--user-color); }
-.status-icon.status-warn { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+.status-icon.status-warn { background: #fff8e1; color: #b45309; }
 .status-icon svg { width: 18px; height: 18px; }
 
 .status-body strong {
@@ -874,12 +883,10 @@ body {
   margin-bottom: 4px;
 }
 
-/* No colored left-border spine — the .suggestion-tag label above already
-   carries the category color, so a second accent on the card itself would
-   just repeat the same signal. */
 .suggestion-card-new {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
+  border-left: 3px solid var(--ai-color);
   border-radius: 8px;
   padding: 12px 14px;
   margin-top: 4px;
@@ -1079,7 +1086,7 @@ body {
 .ecc-user  { background: var(--user-bg);  color: var(--user-color); }
 .ecc-ai    { background: var(--ai-bg);    color: var(--ai-color); }
 .ecc-gemini { background: var(--gemini-bg, #e8f0fe); color: var(--gemini-color, #1a73e8); }
-.ecc-warn  { background: var(--status-warn-bg); color: var(--status-warn-fg); }
+.ecc-warn  { background: #fff8e1; color: #b45309; }
 
 .ecc-body {
   flex: 1;
@@ -1133,12 +1140,11 @@ body {
 .ecc-check svg { width: 16px; height: 16px; }
 
 /* ── Paraphrase card ─────────────── */
-/* No colored left-border spine — the .suggestion-tag label in the header
-   already carries the category color. */
 .paraphrase-card {
   margin: 0 20px 6px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
+  border-left: 3px solid var(--ai-color);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -1155,10 +1161,10 @@ body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
+  font-size: 0.85rem;
   padding: 0 2px;
   line-height: 1;
 }
-.btn-paraphrase-dismiss svg { width: 13px; height: 13px; }
 .btn-paraphrase-dismiss:hover { color: var(--text-primary); }
 
 .paraphrase-card textarea {

@@ -1,6 +1,4 @@
 import JSZip from '../lib/jszip.js';
-import { computeAnnotations, compositeKey } from '../lib/annotate.js';
-import { esc } from '../shared/esc.js';
 
 // ── File input / drag-drop ────────────────────────────────────────────────────
 
@@ -10,6 +8,7 @@ const viewerContent = document.getElementById('viewer-content');
 const errorBanner   = document.getElementById('error-banner');
 const pdfBtn        = document.getElementById('btn-annotated-pdf');
 
+const _liveXhtmlStr = '';   // kept empty for live sessions (no XHTML available until export)
 let _liveInterval = null;
 
 fileInput.addEventListener('change', (e) => {
@@ -280,6 +279,14 @@ function squareIcon() {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
 }
 
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function fmtTime(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -312,91 +319,246 @@ function hideError() {
 }
 
 // ── Annotated PDF ─────────────────────────────────────────────────────────────
-//
-// Drift-corrected: delegates to lib/annotate.js's computeAnnotations(), which
-// classifies each event's recorded offset as trustworthy or not, forward-maps
-// trustworthy offsets through later edits, verifies the result against the
-// event's own text snapshot, and only falls back to fuzzy search (disambiguated
-// by proximity) when that fails — instead of this viewer's old pure-fuzzy-search
-// approach, which had no way to detect or correct for drift at all.
 
-const LEGEND = {
-  paste: { label: 'Pasted from external source', bg: '#fef9c3', border: '#ca8a04' },
-  ai: { label: 'AI-generated, accepted', bg: '#ede9ff', border: '#7c3aed' },
-  'ai-partial': { label: 'AI-suggested, partially kept', bg: '#ccfbf1', border: '#0d9488' },
-  'ai-then-edited': { label: 'AI-generated, then human-edited', bg: '#dbeafe', border: '#3b82f6' },
-  'paste-then-ai': { label: 'Pasted, then AI-paraphrased', bg: '#fde7f3', border: '#c026d3' },
-  'human-then-ai': { label: 'Human draft, then AI-revised', bg: '#dbeafe', border: '#3b82f6' },
-};
-const DEFAULT_SWATCH = { label: 'Composite provenance — see tooltip', bg: '#e5e7eb', border: '#6b7280' };
+// Fuzzy prefix match
+function _fuzzyFind(haystack, needle, expectedLength, consumedRanges, ctxBefore = '', ctxAfter = '') {
+  const normN = needle.replace(/\s+/g, ' ').trim();
+  const normB = ctxBefore.replace(/\s+/g, ' ').trim();
+  const normA = ctxAfter.replace(/\s+/g, ' ').trim();
+  
+  const beforeCharCount = ctxBefore.replace(/\s+/g, '').length;
 
-function openAnnotatedView(log, meta, xhtmlStr) {
-  const docTitle = meta.title || log.title || 'Untitled document';
+  const escapeRe = (str) => str.split(/\s+/).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+  
+  for (const len of [80, 60, 40, 25, 15]) {
+    const prefix = normN.slice(0, len);
+    if (prefix.length < 10) break;
 
-  let computed;
-  try {
-    computed = computeAnnotations(xhtmlStr, log);
-  } catch (err) {
-    showError(`Could not annotate this document: ${err.message}`);
-    return;
-  }
+    // Build the regex for the start boundary
+    const startRegexParts = [];
+    if (normB) startRegexParts.push(escapeRe(normB));
+    startRegexParts.push(escapeRe(prefix));
+    const startRegexStr = startRegexParts.join('\\s*');
 
-  // Preserve the original Google Docs <style> block — Docs exports rich
-  // formatting (bold, headers) as CSS classes, not inline attributes, so
-  // without this the annotated report would lose most of its formatting.
-  let xhtmlStyles = '';
-  try {
-    const styleDom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
-    xhtmlStyles = Array.from(styleDom.querySelectorAll('style')).map(s => s.textContent).join('\n');
-    // Defensive: this string gets concatenated into a <style> block via a
-    // template literal, not a DOM API, so a literal "</style" would break
-    // out of the block — can't actually occur from a real <style> element's
-    // textContent, but escape it anyway as cheap insurance.
-    xhtmlStyles = xhtmlStyles.replace(/<\/style/gi, '<\\/style');
-  } catch { /* no preserved styles */ }
+    try {
+      const regex = new RegExp(startRegexStr, 'gi');
+      let match;
 
-  const usedKeys = [];
-  const seenKeys = new Set();
-  for (const r of computed.provenanceRanges) {
-    const key = compositeKey(r.history);
-    if (key !== 'human' && !seenKeys.has(key)) {
-      seenKeys.add(key);
-      usedKeys.push(key);
+      while ((match = regex.exec(haystack)) !== null) {
+        let currentPos = match.index;
+        
+        // Advance past the contextBefore characters
+        let charsSeen = 0;
+        while (currentPos < haystack.length && charsSeen < beforeCharCount) {
+          if (!/\s/.test(haystack[currentPos])) charsSeen++;
+          currentPos++;
+        }
+        // Advance past any immediate spaces to hit the exact first char of the text
+        while (currentPos < haystack.length && /\s/.test(haystack[currentPos])) {
+          currentPos++;
+        }
+
+        const startPos = currentPos;
+        let endPos = -1;
+
+        if (normA) {
+          const afterPrefix = normA.slice(0, 30);
+          const endRegex = new RegExp(escapeRe(afterPrefix), 'gi');
+          endRegex.lastIndex = startPos; // Start looking forward from the paste start
+          const endMatch = endRegex.exec(haystack);
+
+          if (endMatch && endMatch.index <= startPos + (expectedLength * 2) + 1000) {
+            endPos = endMatch.index;
+          }
+        }
+
+        // Fallback: If context_after is empty or deleted, use expectedLength
+        if (endPos === -1) {
+          const targetLength = expectedLength || needle.length;
+          endPos = startPos + targetLength;
+          endPos = Math.min(endPos, haystack.length);
+        }
+
+        // Trim trailing whitespace from the highlight bounds
+        while (endPos > startPos && /\s/.test(haystack[endPos - 1])) {
+          endPos--;
+        }
+
+        const finalLength = endPos - startPos;
+
+        // Memory check
+        const isConsumed = consumedRanges.some(range => 
+          startPos < range.end && endPos > range.start
+        );
+
+        if (!isConsumed && finalLength > 0) {
+          return { pos: startPos, length: finalLength };
+        }
+      }
+    } catch (e) {
+      continue;
     }
   }
+  return null;
+}
 
+// Walk all text nodes under root and wrap the first match in a <mark>.
+// Returns true if a match was found and wrapped.
+function _wrapFirstMatch(docDom, root, needle, annType, label, expectedLength, consumedRanges, ctxBefore, ctxAfter) {
+  const walker = docDom.createTreeWalker(root, 0x4 /* NodeFilter.SHOW_TEXT */);
+  const nodes = [];
+  let node;
+  while ((node = walker.nextNode())) nodes.push(node);
+
+  let concat = '';
+  const offsets = []; 
+  for (const n of nodes) {
+    offsets.push(concat.length);
+    concat += n.textContent;
+  }
+
+  // Pass context to the scout
+  const matchData = _fuzzyFind(concat, needle, expectedLength, consumedRanges, ctxBefore, ctxAfter);
+  if (!matchData) return false;
+
+  const startPos = matchData.pos;
+  const endPos = matchData.pos + matchData.length;
+  let wrapped = false;
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const nodeStart = offsets[i];
+    const nodeEnd = nodeStart + n.textContent.length;
+
+    if (nodeEnd > startPos && nodeStart < endPos) {
+      const localStart = Math.max(0, startPos - nodeStart);
+      const localEnd = Math.min(n.textContent.length, endPos - nodeStart);
+
+      const before = n.textContent.slice(0, localStart);
+      const matchText = n.textContent.slice(localStart, localEnd);
+      const after = n.textContent.slice(localEnd);
+
+      if (matchText) {
+        const parent = n.parentNode;
+        if (before) parent.insertBefore(docDom.createTextNode(before), n);
+        
+        const mark = docDom.createElement('mark');
+        mark.className = `ann-${annType}`;
+        mark.title = label;
+        mark.textContent = matchText;
+        parent.insertBefore(mark, n);
+        
+        if (after) parent.insertBefore(docDom.createTextNode(after), n);
+        parent.removeChild(n);
+        wrapped = true;
+      }
+    }
+  }
+  
+  // Save spatial coordinates to memory
+  if (wrapped) consumedRanges.push({ start: startPos, end: endPos });
+  return wrapped;
+}
+
+function openAnnotatedView(log, meta, xhtmlStr) {
   const events   = log.events ?? [];
-  const startEvt = events.find(e => e.type === 'session_start');
-  const endEvt   = events.find(e => e.type === 'session_end');
-  const startTs  = startEvt?.timestamp ?? log.startTime ?? null;
-  const endTs    = endEvt?.timestamp ?? null;
-  const durationMs = startTs && endTs ? new Date(endTs) - new Date(startTs) : null;
+  const docTitle = meta.title || log.title || 'Untitled document';
+
+  let docDom = null;
+  let xhtmlStyles = '';
+  if (xhtmlStr) {
+    try {
+      docDom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
+       // Extract <style> blocks from XHTML head to preserve Google Docs formatting
+      const styleTags = docDom.querySelectorAll('style');
+      xhtmlStyles = Array.from(styleTags).map(s => s.textContent).join('\n');
+    } catch { docDom = null; }
+  }
+
+  // Collect annotations from events
+  const annotations = [];
+  for (const evt of events) {
+    let annType = null, label = null, searchText = null, expectedLength = 0;
+    
+    // Extract context fields, defaulting to empty strings for backward compatibility
+    const ctxBefore = evt.meta?.context_before || '';
+    const ctxAfter = evt.meta?.context_after || '';
+
+    if (evt.type === 'ai_interaction') {
+      const acc = evt.meta?.acceptance;
+      if (acc === 'fully_accepted')          { annType = 'ai-accepted'; label = 'AI accepted'; }
+      else if (acc === 'partially_modified') { annType = 'ai-partial';  label = 'AI (partial)'; }
+      else continue;
+      searchText = evt.meta?.output_preview;
+      expectedLength = evt.meta?.ai_chars ?? (searchText ? searchText.length : 0);
+    } else if (evt.type === 'gemini_suggestion' && evt.meta?.output_preview) {
+      annType = 'gemini'; label = 'Gemini';
+      searchText = evt.meta.output_preview;
+      expectedLength = evt.meta?.char_count ?? searchText.length;
+    } else if (evt.type === 'paste' && evt.meta?.output_preview) {
+      annType = 'paste'; label = 'Pasted';
+      searchText = evt.meta.output_preview;
+      expectedLength = evt.meta?.char_count ?? searchText.length;
+    } else { continue; }
+    
+    if (!searchText || searchText.length < 10) continue;
+
+    // Strip trailing ellipses from truncated previews
+    searchText = searchText.replace(/\.{3}$|…$/, '').trim();
+    annotations.push({ type: annType, label, text: searchText, expectedLength, ctxBefore, ctxAfter });
+  }
+
+  // Inject marks into the parsed DOM
+  const unlocated = [];
+  const consumedRanges = []; // Initialize the memory array
+  
+  if (docDom) {
+    for (const ann of annotations) {
+      // Pass the context and memory down to the wrapper
+      const found = _wrapFirstMatch(
+        docDom, docDom.body, ann.text, ann.type, ann.label, 
+        ann.expectedLength, consumedRanges, ann.ctxBefore, ann.ctxAfter
+      );
+      if (!found) unlocated.push(ann);
+    }
+  } else {
+    unlocated.push(...annotations);
+  }
+
+  const annotatedBodyHTML = docDom
+    ? docDom.body.innerHTML
+    : '<p style="color:#888">No document content found in this TWFF file.</p>';
+
+  // Session stats for seal
+  const startEvt    = events.find(e => e.type === 'session_start');
+  const endEvt      = events.find(e => e.type === 'session_end');
+  const startTs     = startEvt?.timestamp ?? log.startTime ?? null;
+  const endTs       = endEvt?.timestamp ?? null;
+  const durationMs  = startTs && endTs ? new Date(endTs) - new Date(startTs) : null;
+  const editCount   = events.filter(e => e.type === 'edit').length;
+  const aiAccepted  = events.filter(e => e.type === 'ai_interaction' && e.meta?.acceptance === 'fully_accepted').length;
+  const aiPartial   = events.filter(e => e.type === 'ai_interaction' && e.meta?.acceptance === 'partially_modified').length;
+  const aiDismissed = events.filter(e => e.type === 'ai_interaction' && e.meta?.acceptance === 'rejected').length;
+  const pasteCount  = events.filter(e => e.type === 'paste').length;
+  const checkpointCount = events.filter(e => e.type === 'checkpoint').length;
 
   const html = _buildAnnotatedPageHTML({
-    docTitle,
-    annotatedBodyHTML: computed.annotatedDom.innerHTML,
-    xhtmlStyles,
-    stats: computed.stats,
-    supersededList: computed.supersededList,
-    unlocatedList: computed.unlocatedList,
-    usedKeys,
-    log, startTs, durationMs,
+    docTitle, annotatedBodyHTML, xhtmlStyles, unlocated,
+    log, editCount, aiAccepted, aiPartial, aiDismissed, pasteCount, checkpointCount,
+    startTs, durationMs,
   });
 
   const blob = new Blob([html], { type: 'text/html' });
   const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, '_blank');
-  if (!win) {
-    showError('Could not open the annotated report — your browser may have blocked the pop-up. Allow pop-ups for this page and try again.');
-    URL.revokeObjectURL(url);
-    return;
-  }
+  window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 120_000);
 }
 
 function _buildAnnotatedPageHTML({
-  docTitle, annotatedBodyHTML, xhtmlStyles, stats, supersededList, unlocatedList, usedKeys,
-  log, startTs, durationMs,
+  docTitle, annotatedBodyHTML, xhtmlStyles, unlocated,
+  log,
+  editCount, aiAccepted, aiPartial, aiDismissed, pasteCount, checkpointCount,
+  startTs, durationMs,
 }) {
   const exportedAt = new Date().toLocaleString([], {
     year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -405,30 +567,18 @@ function _buildAnnotatedPageHTML({
   const duration  = durationMs !== null ? fmtDuration(durationMs) : '—';
   const sessionId = log.sessionId ? log.sessionId.slice(0, 8) : '—';
 
-  const legendRows = usedKeys.map((key) => {
-    const sw = LEGEND[key] ?? DEFAULT_SWATCH;
-    return `<div class="legend-item"><span class="swatch" style="background:${sw.bg};border-color:${sw.border}"></span> ${esc(sw.label)}</div>`;
-  }).join('');
+  const driftNote = unlocated.length > 0
+    ? `(${unlocated.length} annotation${unlocated.length > 1 ? 's' : ''} could not be located — possible drift, see appendix)`
+    : '';
 
-  const supersededSection = !supersededList.length ? '' : `
-    <div class="page appendix-page">
-      <div class="appendix-banner superseded-banner">
-        <h2 class="appendix-title">Superseded content (${supersededList.length})</h2>
-        <p class="appendix-note">This content was recorded at the time, then later fully deleted or overwritten before the session ended — it no longer appears in the final document, so it isn't highlighted above.</p>
+  const unlocatedSection = unlocated.length === 0 ? '' : `
+    <div class="page unlocated-page">
+      <div class="unlocated-banner">
+        <h2 class="unlocated-title">Unlocated annotations (${unlocated.length})</h2>
+        <p class="unlocated-note">These could not be matched to the stored document text. This indicates the text was edited after the event was recorded (positional drift).</p>
       </div>
       <ul>
-        ${supersededList.map((s) => `<li><span class="pill superseded">${esc(s.event.type)}</span> ${esc(s.reason)}</li>`).join('')}
-      </ul>
-    </div>`;
-
-  const unlocatedSection = !unlocatedList.length ? '' : `
-    <div class="page appendix-page">
-      <div class="appendix-banner unlocated-banner">
-        <h2 class="appendix-title">Unlocated events (${unlocatedList.length})</h2>
-        <p class="appendix-note">These couldn't be matched to the final document text with confidence — likely edited beyond recognition, or with too little surrounding context to search for.</p>
-      </div>
-      <ul>
-        ${unlocatedList.map((u) => `<li><span class="pill unlocated">${esc(u.event.type)}</span> ${esc(u.reason)}</li>`).join('')}
+        ${unlocated.map(a => `<li><span class="pill ${esc(a.type)}">${esc(a.label)}</span> <span class="unlocated-text">${esc(a.text.slice(0, 140))}${a.text.length > 140 ? '…' : ''}</span></li>`).join('')}
       </ul>
     </div>`;
 
@@ -443,49 +593,53 @@ ${xhtmlStyles}
 
 /* ── App UI & Base Setup ── */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body {
+body { 
   background: #f8f9fa; /* Google Docs gray workspace */
-  font-family: Arial, sans-serif;
+  font-family: Arial, sans-serif; 
   color: #202124;
 }
 
 /* ── Sticky Toolbar ── */
 .app-header {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: #fff;
+  position: sticky; 
+  top: 0; 
+  z-index: 100; 
+  background: #fff; 
   border-bottom: 1px solid #dadce0;
 }
-.toolbar {
-  padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.toolbar { 
+  padding: 12px 24px; 
+  display: flex; 
+  align-items: center; 
+  gap: 16px; 
 }
-.toolbar button {
-  padding: 8px 24px;
+.toolbar button { 
+  padding: 8px 24px; 
   background: #1a73e8; /* Google Material Blue */
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  font-size: 10pt;
+  color: #fff; 
+  border: none; 
+  border-radius: 4px; 
+  font-size: 10pt; 
   font-weight: 500;
-  cursor: pointer;
+  cursor: pointer; 
   transition: background 0.2s;
 }
 .toolbar button:hover { background: #1557b0; }
 .toolbar .tip { font-size: 9.5pt; color: #5f6368; }
 
 /* ── Legend ── */
-.legend {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-  padding: 0 24px 12px;
+.legend { 
+  display: flex; 
+  gap: 20px; 
+  flex-wrap: wrap; 
+  padding: 0 24px 12px; 
 }
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 9.5pt; color: #3c4043; }
-.legend-item .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1.5px solid; }
+.legend-item .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.swatch.ai-accepted { background: #ede9ff; border: 1.5px solid #7c3aed; }
+.swatch.ai-partial  { background: #ccfbf1; border: 1.5px solid #0d9488; }
+.swatch.paste       { background: #fef9c3; border: 1.5px solid #ca8a04; }
+.swatch.gemini      { background: #e8f0fe; border: 1.5px solid #1a73e8; }
 
 /* ── Document "Paper" Layout ── */
 .workspace {
@@ -504,13 +658,19 @@ body {
   font-family: Arial, sans-serif;
   line-height: 1.6;
 }
-.doc-title-banner {
-  font-size: 18pt;
-  font-weight: 400;
-  color: #000;
-  margin-bottom: 24px;
+.doc-title-banner { 
+  font-size: 18pt; 
+  font-weight: 400; 
+  color: #000; 
+  margin-bottom: 4px;
   border-bottom: 1px solid #dadce0;
   padding-bottom: 12px;
+}
+.drift-note { 
+  font-size: 10pt; 
+  color: #b31412; 
+  margin-bottom: 24px;
+  font-style: italic;
 }
 
 /* ── Document Content Formatting ── */
@@ -522,26 +682,23 @@ body {
 .document-content img { max-width: 100%; height: auto; }
 
 /* ── Highlighting ── */
-.ann { border-radius: 2px; padding: 0 1px; }
-.ann-paste          { background: ${LEGEND.paste.bg}; border-bottom: 2px solid ${LEGEND.paste.border}; }
-.ann-ai             { background: ${LEGEND.ai.bg}; border-bottom: 2px solid ${LEGEND.ai.border}; }
-.ann-ai-partial     { background: ${LEGEND['ai-partial'].bg}; border-bottom: 2px solid ${LEGEND['ai-partial'].border}; }
-.ann-ai-then-edited { background: ${LEGEND['ai-then-edited'].bg}; border-bottom: 2px solid ${LEGEND['ai-then-edited'].border}; }
-.ann-paste-then-ai  { background: ${LEGEND['paste-then-ai'].bg}; border-bottom: 2px solid ${LEGEND['paste-then-ai'].border}; }
-.ann-human-then-ai  { background: ${LEGEND['human-then-ai'].bg}; border-bottom: 2px solid ${LEGEND['human-then-ai'].border}; }
-.ann-composite      { background: ${DEFAULT_SWATCH.bg}; border-bottom: 2px solid ${DEFAULT_SWATCH.border}; }
+mark.ann-ai-accepted { background: #ede9ff; border-bottom: 2px solid #7c3aed; border-radius: 2px; padding: 0 1px; }
+mark.ann-ai-partial  { background: #ccfbf1; border-bottom: 2px solid #0d9488; border-radius: 2px; padding: 0 1px; }
+mark.ann-paste       { background: #fef9c3; border-bottom: 2px solid #ca8a04; border-radius: 2px; padding: 0 1px; }
+mark.ann-gemini      { background: #e8f0fe; border-bottom: 2px solid #1a73e8; border-radius: 2px; padding: 0 1px; }
 
-/* ── Appendix pages (superseded / unlocated) ── */
-.appendix-banner { padding: 16px 24px; margin-bottom: 24px; }
-.superseded-banner { background: #eff6ff; border-left: 4px solid #60a5fa; }
-.unlocated-banner { background: #fefce8; border-left: 4px solid #fde047; }
-.appendix-title { font-size: 12pt; font-weight: 600; margin-bottom: 6px; }
-.appendix-note { font-size: 10pt; color: #444; }
-.appendix-page ul { padding-left: 24px; }
-.appendix-page li { margin-bottom: 12px; font-size: 10.5pt; }
-.pill { font-size: 8.5pt; font-family: sans-serif; padding: 2px 8px; border-radius: 12px; font-weight: 600; display: inline-block; margin-right: 6px; }
-.pill.superseded { background: #dbeafe; color: #1d4ed8; }
-.pill.unlocated  { background: #fef9c3; color: #854d0e; }
+/* ── Unlocated Page ── */
+.unlocated-banner { background: #fefce8; border-left: 4px solid #fde047; padding: 16px 24px; margin-bottom: 24px; }
+.unlocated-title { font-size: 12pt; font-weight: 600; color: #854d0e; margin-bottom: 6px; }
+.unlocated-note { font-size: 10pt; color: #78350f; }
+.unlocated-page ul { padding-left: 24px; }
+.unlocated-page li { margin-bottom: 12px; font-size: 10.5pt; color: #202124; }
+.unlocated-text { font-family: 'Courier New', monospace; font-size: 9.5pt; background: #f1f3f4; padding: 2px 4px; border-radius: 4px; }
+.pill { font-size: 8.5pt; font-family: sans-serif; padding: 2px 8px; border-radius: 12px; font-weight: 600; display: inline-block; margin-bottom: 4px; }
+.pill.ai-accepted { background: #ede9ff; color: #6d28d9; }
+.pill.ai-partial  { background: #ccfbf1; color: #0f766e; }
+.pill.paste       { background: #fef9c3; color: #92400e; }
+.pill.gemini      { background: #e8f0fe; color: #1558b0; }
 
 /* ── Colophon Seal Page ── */
 .seal-page { font-family: 'Courier New', monospace; font-size: 10.5pt; color: #202124; }
@@ -557,13 +714,13 @@ body {
   body { background: #fff; }
   .app-header { display: none !important; }
   .workspace { padding: 0; gap: 0; display: block; }
-  .page {
-    width: auto;
-    min-height: auto;
-    padding: 0;
-    margin: 0;
-    box-shadow: none;
-    page-break-after: always;
+  .page { 
+    width: auto; 
+    min-height: auto; 
+    padding: 0; 
+    margin: 0; 
+    box-shadow: none; 
+    page-break-after: always; 
   }
   .page:last-child { page-break-after: auto; }
 }
@@ -576,19 +733,24 @@ body {
     <button onclick="window.print()">Print / Save as PDF</button>
     <span class="tip">Choose "Save as PDF" in the print dialog.</span>
   </div>
-  <div class="legend">${legendRows}</div>
+  <div class="legend">
+    <div class="legend-item"><span class="swatch ai-accepted"></span> AI accepted</div>
+    <div class="legend-item"><span class="swatch ai-partial"></span> AI partial</div>
+    <div class="legend-item"><span class="swatch paste"></span> Pasted from external source</div>
+    <div class="legend-item"><span class="swatch gemini"></span> Gemini (Help me write)</div>
+  </div>
 </div>
 
 <div class="workspace">
   <div class="page">
     <div class="doc-title-banner">${esc(docTitle)}</div>
-
+    ${driftNote ? `<div class="drift-note">${esc(driftNote)}</div>` : ''}
+    
     <div class="document-content">
       ${annotatedBodyHTML}
     </div>
   </div>
 
-  ${supersededSection}
   ${unlocatedSection}
 
   <div class="page seal-page">
@@ -602,31 +764,38 @@ body {
       <tr><td>Exported</td><td>${esc(exportedAt)}</td></tr>
       <tr><td>Version</td><td>TWFF v0.2.0</td></tr>
     </table>
-
+    
     <div class="section-head">EVENT SUMMARY</div>
     <table>
-      <tr><td>Edits</td><td>${stats.editCount}</td></tr>
-      <tr><td>AI accepted/modified</td><td>${stats.aiAccepted}</td></tr>
-      <tr><td>AI dismissed</td><td>${stats.aiDismissed}</td></tr>
-      <tr><td>External pastes</td><td>${stats.pasteCount}</td></tr>
-      <tr><td>AI-derived coverage</td><td>${stats.aiCoveragePct}%</td></tr>
-      <tr><td>Pasted-content coverage</td><td>${stats.pasteCoveragePct}%</td></tr>
+      <tr><td>Edits</td><td>${editCount}</td></tr>
+      <tr><td>AI accepted</td><td>${aiAccepted}</td></tr>
+      <tr><td>AI partial</td><td>${aiPartial}</td></tr>
+      <tr><td>AI dismissed</td><td>${aiDismissed}</td></tr>
+      <tr><td>External pastes</td><td>${pasteCount}</td></tr>
+      <tr><td>Checkpoints</td><td>${checkpointCount}</td></tr>
     </table>
-
+    
     <div class="section-head">ANNOTATION KEY</div>
     <table>
-      ${usedKeys.map((key) => {
-        const sw = LEGEND[key] ?? DEFAULT_SWATCH;
-        return `<tr><td><span class="ann ann-${key}">Highlight</span></td><td>${esc(sw.label)}</td></tr>`;
-      }).join('')}
-      <tr><td style="padding-left: 2px;">Not highlighted</td><td>Original human authorship</td></tr>
-      ${supersededList.length ? `<tr>
-        <td><span class="pill superseded">Superseded</span></td>
-        <td>Recorded, later deleted — see appendix</td>
-      </tr>` : ''}
-      ${unlocatedList.length ? `<tr>
-        <td><span class="pill unlocated">Unlocated</span></td>
-        <td>Could not be matched — see appendix</td>
+      <tr>
+        <td><mark class="ann-ai-accepted">Purple highlight</mark></td>
+        <td>AI-accepted text</td>
+      </tr>
+      <tr>
+        <td><mark class="ann-ai-partial">Teal highlight</mark></td>
+        <td>AI partially-modified text</td>
+      </tr>
+      <tr>
+        <td><mark class="ann-paste">Amber highlight</mark></td>
+        <td>Pasted from external source</td>
+      </tr>
+      <tr>
+        <td style="padding-left: 2px;">Not highlighted</td>
+        <td>User-written text</td>
+      </tr>
+      ${unlocated.length ? `<tr>
+        <td><span class="unlocated-text">Unlocated (${unlocated.length})</span></td>
+        <td>Text edited after recording — see appendix</td>
       </tr>` : ''}
     </table>
   </div>

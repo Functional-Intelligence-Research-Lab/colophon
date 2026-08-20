@@ -1,17 +1,10 @@
 /**
  * edit-velocity.js — Typing-speed (edit velocity) helper.
  *
- * Computes chars-per-minute for a burst of real keystrokes and marks bursts
- * too fast to be plausibly human-typed. This is a weak, aggregate-only signal
- * — "unusually fast for sustained typing" — not proof of any specific
- * behavior. In particular, it CANNOT detect someone reading AI output in a
- * separate tab/window and retyping it: that would require observing another
- * tab or window, which this extension deliberately does not do (no cross-
- * tab/window signal exists anywhere in Colophon). Don't read too_fast_for_human
- * as "caught someone disguising a paste" — it only means the measured cadence
- * was implausibly fast; treat it as one input among several, never a verdict.
+ * Computes chars-per-minute for a burst of real keystrokes and flags bursts too
+ * fast to be human-typed — a signal for AI text pasted then disguised as typing.
  *
- * Noise handling:
+ * Noise handling (per team-lead spec):
  *   - PAUSES: gaps longer than PAUSE_GAP_MS between keystrokes are NOT counted
  *     as typing time. Otherwise a 2-minute think-pause would make real typing
  *     look artificially slow. We sum only "active" inter-keystroke time.
@@ -23,18 +16,12 @@
  * pasted text never reaches the velocity counter. Velocity and paste logging
  * stay fully independent.
  *
- * PRIVACY: this only ever produces an aggregate rate (chars-per-minute over a
- * debounced edit burst) — never a per-keystroke timestamp array or any
- * keystroke content. It is not, and must not become, a keystroke-dynamics
- * biometric profile of an individual.
- *
  * Extracted into its own module (rather than living inside the content script)
  * so the math is unit-testable.
  */
 
-// Above this chars-per-minute a burst is implausibly fast for sustained human
-// typing (~250 wpm ≈ 1250 cpm is near the world record) — a coarse plausibility
-// check, not a detector of any particular behavior.
+// Above this chars-per-minute a burst is implausibly fast for human typing
+// (~250 wpm ≈ 1250 cpm is near the world record), so we flag it for review.
 export const HUMAN_CPM_CEILING = 1500
 
 // Inter-keystroke gaps longer than this are treated as a pause, not typing

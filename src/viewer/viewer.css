@@ -1,6 +1,19 @@
-/* Color tokens (--bg-*, --text-*, --border-color, --ai-color, --user-color,
-   --diff-*, --paste-color, --gemini-color, etc.) come from ../shared/theme.css,
-   loaded before this file — one palette shared with the popup and side panel. */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f7f9;
+  --text-primary: #1a1a1a;
+  --text-secondary: #6b6b70;
+  --border-color: #e5e5e5;
+
+  --ai-color: #5c3ce6;
+  --ai-bg: #f2effc;
+
+  --user-color: #2b8a5d;
+  --user-bg: #e8f4ec;
+
+  --diff-red: #e04a4a;
+  --diff-green: #2b8a5d;
+}
 
 * {
   box-sizing: border-box;
@@ -39,9 +52,9 @@ body {
 }
 
 .brand .logo {
-  display: block;
   width: 22px;
   height: 22px;
+  color: var(--text-primary);
 }
 
 .brand-name {
@@ -237,8 +250,8 @@ body {
 
 .tl-event.ai .tl-node { color: var(--ai-color); }
 .tl-event.user .tl-node { color: var(--user-color); }
-.tl-event.gemini .tl-node { color: var(--gemini-color); }
-.tl-event.gemini .tl-author { color: var(--gemini-color); background: var(--gemini-bg); border-color: #a8c7fa; }
+.tl-event.gemini .tl-node { color: #1a73e8; }
+.tl-event.gemini .tl-author { color: #1a73e8; background: #e8f0fe; border-color: #a8c7fa; }
 
 .tl-node.solid {
   background: var(--user-color);

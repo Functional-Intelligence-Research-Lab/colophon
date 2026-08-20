@@ -25,8 +25,6 @@
  * helpers without touching the rest of content.js.
  */
 
-import { debugLog } from '../shared/debug.js'
-
 /**
  * Accessible names (button labels / aria-labels) that indicate the user is
  * ACCEPTING a Gemini suggestion into the document. Matched case-insensitively
@@ -169,6 +167,9 @@ export function findSuggestionContainer(root = document) {
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
 
+  // To avoid false positives from empty prompt boxes, settings dialogs, or 
+  // the initial "Refine" options menu, the container must have an "accept" button 
+  // (e.g. Insert, Replace, Accept, or checkmark) indicating a suggestion is ready to be applied.
   const buttons = container.querySelectorAll?.('button, [role="button"], .docosAiPreviewDiffVisibleSuggestionViewAcceptButton, .appsElementsSidekickResponseOptionsActionBarButtonPrimary') ?? []
   let hasAccept = false
   for (const b of buttons) {
@@ -177,28 +178,19 @@ export function looksLikeGeminiSuggestion(container) {
       break
     }
   }
+  if (!hasAccept) return false
 
-  // The generic sidekick/canvas classList signals also match the initial
-  // "Refine" options menu before any suggestion is ready to apply — only
-  // trust them once an accept affordance (Insert, Replace, checkmark, etc.)
-  // is actually present, to avoid false positives from empty prompt boxes,
-  // settings dialogs, or that options menu.
-  if (hasAccept && (
-      container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
+  if (container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
       container.classList?.contains('docos-anchoreddocoview') ||
       container.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewContent') ||
       container.querySelector?.('.docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ||
       container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ||
-      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer'))) {
+      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer')) {
     return true
   }
-
-  // "help me write" is a specific-enough feature label to trust on its own,
-  // even before an accept button has rendered for that prompt yet.
   const name = accessibleName(container)
   if (name.includes('help me write')) return true
-
   for (const b of buttons) {
     const bn = accessibleName(b)
     if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS) || bn.startsWith('accept') || bn.startsWith('reject')) return true
@@ -286,7 +278,7 @@ export function extractGeminiProposedDiff(root = document) {
   let insertedText = '';
   let deletedText = '';
 
-  debugLog('[Colophon Canvas Inspection] Starting suggestion diff extraction...');
+  console.log('[Colophon Canvas Inspection] Starting suggestion diff extraction...');
 
   // ── Strategy 1: explicit tracked-change / suggestion DOM elements ────────────
   // These exist when Docs renders suggestions in "Suggesting" mode.
@@ -298,11 +290,11 @@ export function extractGeminiProposedDiff(root = document) {
   ));
 
   if (insertEls.length > 0) {
-    debugLog('[Colophon Canvas Inspection] Explicit insert elements:', insertEls.map(e => e.textContent));
+    console.log('[Colophon Canvas Inspection] Explicit insert elements:', insertEls.map(e => e.textContent));
     insertedText = insertEls.map(e => e.textContent).join(' ').trim();
   }
   if (deleteEls.length > 0) {
-    debugLog('[Colophon Canvas Inspection] Explicit delete elements:', deleteEls.map(e => e.textContent));
+    console.log('[Colophon Canvas Inspection] Explicit delete elements:', deleteEls.map(e => e.textContent));
     deletedText = deleteEls.map(e => e.textContent).join(' ').trim();
   }
 
@@ -324,7 +316,7 @@ export function extractGeminiProposedDiff(root = document) {
       }).filter(t => t.length > 2);
       if (cardTexts.length > 0) {
         insertedText = cardTexts.join(' ');
-        debugLog('[Colophon Canvas Inspection] Diff card text extracted:', insertedText);
+        console.log('[Colophon Canvas Inspection] Diff card text extracted:', insertedText);
       }
     }
   }
@@ -353,13 +345,13 @@ export function extractGeminiProposedDiff(root = document) {
       if (raw.length > 10) {
         // Strip leading meta-commentary lines before the actual generated text.
         const cleaned = stripMetaLines(raw);
-        debugLog('[Colophon Canvas Inspection] Sidebar response text (cleaned):', cleaned.slice(0, 80));
+        console.log('[Colophon Canvas Inspection] Sidebar response text (cleaned):', cleaned.slice(0, 80));
         insertedText = cleaned;
         break;
       }
     }
   }
 
-  debugLog('[Colophon Canvas Inspection] Final result:', { insertedText: insertedText.slice(0, 80), deletedText: deletedText.slice(0, 80) });
+  console.log('[Colophon Canvas Inspection] Final result:', { insertedText: insertedText.slice(0, 80), deletedText: deletedText.slice(0, 80) });
   return { insertedText, deletedText };
 }

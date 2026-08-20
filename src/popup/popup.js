@@ -1,17 +1,19 @@
 /**
- * popup.js — Colophon popup
+ * popup.js — Colophon popup (issue #30: 5 states)
  *
- * Layout: header (doc title + settings gear), a plain recording-status
- * banner (no verdict, no judgment), breakdown card (Own writing / AI
- * Paraphrase / External Source bars — the actual evidence), Recent Activity
- * timeline (3 most recent events), Start/Stop, View full log, Export,
- * footer ("Private and local" + TWFF link).
+ * Visual layout matches the approved Sprint 1 design:
+ *   - Header: doc title + settings gear
+ *   - Originality verdict banner (good / warn / bad)
+ *   - Breakdown card: Own writing / AI Paraphrase / External Source bars
+ *   - Recent Activity timeline (3 most recent events)
+ *   - Start/Stop, View full log, Export
+ *   - Footer: "Private and local" + TWFF link
  *
  * Five rendered states:
- *   1. No session                — banner "Nothing recorded yet", breakdown empty, timeline empty
- *   2. Recording, no activity    — banner "Nothing recorded yet", bars at 0%
- *   3. Recording with activity   — banner "recorded" + bars + timeline populated
- *   4. Stopped, has events       — banner "recorded" + bars + timeline; Export enabled
+ *   1. No session                — verdict hidden, breakdown empty, timeline empty
+ *   2. Recording, no activity    — verdict "neutral" tone, bars at 0%
+ *   3. Recording with activity   — verdict + bars + timeline populated
+ *   4. Stopped, has events       — verdict + bars + timeline; Export enabled
  *   5. Error / SW unreachable    — notice banner shown
  */
 
@@ -22,6 +24,8 @@ const $ = id => document.getElementById(id)
 const ACTIVITY_FALLBACK = [
   { type: 'info', title: 'No activity yet', meta: ['Start recording in Google Docs to watch events.'] },
 ]
+
+const TWFF_REPO = 'https://github.com/Functional-Intelligence-Research-Lab/twff'
 
 // Keep popup data live while open
 let _refreshTimer = null
@@ -77,22 +81,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const exportButton = $('btn-export')
   if (exportButton) {
-    const exportLabel = exportButton.querySelector('.btn-label')
     exportButton.addEventListener('click', async () => {
-      const originalText = exportLabel.textContent;
-      exportLabel.textContent = 'Exporting…';
+      const originalText = exportButton.textContent;
+      exportButton.textContent = 'Exporting…';
       exportButton.disabled = true;
       try {
         const result = await exportTwff()
-        exportLabel.textContent = 'Exported ✓';
+        exportButton.textContent = 'Exported ✓';
         showNotice(`Exported ${result.filename}`, false)
         setTimeout(() => {
-          exportLabel.textContent = originalText;
+          exportButton.textContent = originalText;
           exportButton.disabled = false;
         }, 2000);
       } catch (err) {
         console.error('[Colophon] Export failed:', err.message)
-        exportLabel.textContent = originalText;
+        exportButton.textContent = originalText;
         exportButton.disabled = false;
         showNotice('Start recording before exporting.')
       }
@@ -144,9 +147,20 @@ async function refresh() {
   renderScores(session)
   renderActivity(session)
   renderRecordButton(session, tab)
+  renderTooltip(session)
 
   const eventCount = session?.events?.length ?? 0
   $('btn-export').disabled = eventCount < 2
+}
+
+function renderTooltip(session) {
+  const tooltipInfo = $('tooltip-info')
+  if (!tooltipInfo) return
+
+  const isRecording = session?.isRecording
+  tooltipInfo.textContent = isRecording
+    ? 'Recording active — tracking document edits'
+    : 'Start recording before you edit the document'
 }
 
 function renderRecordButton(session, tab) {
@@ -174,7 +188,6 @@ function renderScores(session) {
     (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_modified' || event.meta?.acceptance === 'modified')
   ).length
   const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
-  const hasData = editCount + aiCount + sourceCount > 0
   const total = Math.max(1, editCount + aiCount + sourceCount)
 
   const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 0
@@ -184,28 +197,6 @@ function renderScores(session) {
   setScore('own', own)
   setScore('ai', ai)
   setScore('source', source)
-  renderSummaryBanner(hasData)
-}
-
-// Single filled path (not stroke-based, since .leaf-mark svg forces
-// fill:currentColor; stroke:none) — a plain document mark, not a judgment
-// icon. The own/AI/source breakdown below is the actual evidence; this
-// banner only states whether anything's been recorded yet.
-const DOC_ICON_PATH = '<path d="M19.5 4.5C11.8 4.5 6 8.9 6 15.5c0 1.1.3 2.1.8 3 1-.7 2.1-1.3 3.4-1.8 3-1.1 5.1-3 6.2-5.7-2.4 2-5.1 3-8.1 3.1 1.9-4 5.6-6.1 11.2-6.4v-3.2Z"/>'
-
-// Deliberately no verdict tiers here — no "mostly original" / "mostly
-// AI-assisted" framing, no color-coded good/warn states. Just whether
-// there's anything recorded yet; the breakdown bars carry the real data.
-function renderSummaryBanner(hasData) {
-  const banner = $('summary-banner')
-  const icon = $('verdict-icon')
-  const title = $('summary-title')
-  if (!banner || !icon || !title) return
-
-  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${DOC_ICON_PATH}</svg>`
-  title.innerHTML = hasData
-    ? 'Writing activity <strong>recorded</strong>'
-    : 'Nothing recorded <strong>yet</strong>'
 }
 
 function setScore(id, value) {
@@ -325,3 +316,5 @@ function showNotice(message, isError = true) {
   }, 2600)
 }
 
+refresh()
+setInterval(refresh, 1200)

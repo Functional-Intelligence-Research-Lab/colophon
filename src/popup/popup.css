@@ -18,17 +18,40 @@
 }
 
 /* ── Reset ──────────────────────────────────────────────────── */
-/* Color tokens (--own-color, --ai-color, --paste-color, --bg-*, --text-*,
-   --border-color, --status-*) come from ../shared/theme.css, loaded before
-   this file. */
 *, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --c-bg:        #ffffff;
+  --c-text:      #111111;
+  --c-mute:      #6b7280;
+  --c-soft:      #9ca3af;
+  --c-line:      #e5e7eb;
+  --c-card:      #f9fafb;
+
+  --c-own:       #16a34a;   /* green */
+  --c-ai:        #6366f1;   /* indigo */
+  --c-source:    #f59e0b;   /* amber */
+
+  --c-good-bg:   #dcfce7;
+  --c-good-fg:   #166534;
+  --c-good-ico:  #16a34a;
+
+  --c-warn-bg:   #fef3c7;
+  --c-warn-fg:   #92400e;
+  --c-warn-ico:  #d97706;
+
+  --c-bad-bg:    #fee2e2;
+  --c-bad-fg:    #991b1b;
+  --c-bad-ico:   #dc2626;
+}
+
 
 body {
   width: 390px;
   margin: 0;
   overflow: hidden;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: #fff;
+  color: #171719;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
@@ -51,18 +74,6 @@ button {
   margin-bottom: 8px;
 }
 
-.brand-mark {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.brand-mark img {
-  display: block;
-  width: 20px;
-  height: 20px;
-}
-
 .tooltip-container {
   position: relative;
   display: inline-block;
@@ -77,8 +88,9 @@ button {
   transition: stroke 0.3s ease;
 }
 
-.tooltip-container:hover .tooltip-icon {
-  stroke: var(--ai-color);
+.tooltip-container:hover .tooltip-icon,
+.tooltip-container:focus-within .tooltip-icon {
+  stroke: #6749d7;
 }
 
 .tooltip-text {
@@ -91,24 +103,18 @@ button {
   color: white;
   padding: 8px 12px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: 13px;
   white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
 
   transition: opacity 0.3s ease, visibility 0.3s ease;
-
-  animation: showOnLoad 3s ease-in-out;
 }
 
-.tooltip-container:hover .tooltip-text {
+.tooltip-container:hover .tooltip-text,
+.tooltip-container:focus-within .tooltip-text {
   opacity: 1;
   visibility: visible;
-  animation: none;
-}
-
-@keyframes showOnLoad {
-  0%   { opacity: 1; visibility: visible; }
-  80%  { opacity: 1; visibility: visible; }
-  100% { opacity: 0; visibility: hidden; }
 }
 
 .topbar h1 {
@@ -160,16 +166,13 @@ svg {
 
 .score-card {
   overflow: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid #e9e9ed;
   border-radius: 9px;
-  background: var(--bg-primary);
+  background: #fff;
   box-shadow: 0 8px 20px rgba(23, 23, 32, 0.08);
   margin-bottom: 0px;
 }
 
-/* Recording-status banner — plain fact ("recorded" / "nothing yet"), no
-   verdict tiers or judgment coloring. The breakdown bars below are the
-   actual evidence this UI is built around. */
 .summary {
   display: grid;
   grid-template-columns: 46px 1fr;
@@ -177,7 +180,7 @@ svg {
   align-items: center;
   min-height: 68px;
   padding: 15px 18px;
-  background: var(--bg-secondary);
+  background: linear-gradient(180deg, #e5f6e8, #def2e2);
 }
 
 .leaf-mark {
@@ -187,7 +190,7 @@ svg {
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.52);
-  color: var(--text-secondary);
+  color: #2d9a66;
 }
 
 .leaf-mark svg {
@@ -203,12 +206,12 @@ svg {
 }
 
 .summary-title strong {
-  color: var(--text-primary);
+  color: #269660;
 }
 
 .summary-subtitle {
   margin: 0;
-  color: var(--text-primary);
+  color: #25252b;
   line-height: 1.25;
 }
 
@@ -233,7 +236,7 @@ svg {
 }
 
 .metric span {
-  color: var(--text-primary);
+  color: #202026;
   font-size: 12px;
 }
 
@@ -257,9 +260,9 @@ svg {
   border-radius: inherit;
 }
 
-.bar-fill--own { background: var(--own-color); }
-.bar-fill--ai { background: var(--ai-color); }
-.bar-fill--source { background: var(--paste-color); }
+.bar-fill--own { background: #39a36d; }
+.bar-fill--ai { background: #6749d7; }
+.bar-fill--source { background: #efa756; }
 
 .activity-section {
   padding: 0 10px;
@@ -288,21 +291,21 @@ svg {
 }
 
 .activity-mark--ai {
-  color: var(--ai-color);
-  background: var(--ai-bg);
-  box-shadow: 0 10px 20px rgba(74, 58, 167, 0.18);
+  color: #6d50d8;
+  background: #f3efff;
+  box-shadow: 0 10px 20px rgba(103, 73, 215, 0.18);
 }
 
 .activity-mark--edit {
-  color: var(--own-color);
-  background: var(--own-bg);
-  box-shadow: 0 10px 20px rgba(0, 131, 0, 0.18);
+  color: #41a978;
+  background: #ecf9ef;
+  box-shadow: 0 10px 20px rgba(65, 169, 120, 0.18);
 }
 
 .activity-mark--source {
-  color: var(--paste-color);
-  background: var(--paste-bg);
-  box-shadow: 0 10px 20px rgba(201, 133, 0, 0.2);
+  color: #e7a14c;
+  background: #fff7e8;
+  box-shadow: 0 10px 20px rgba(231, 161, 76, 0.2);
 }
 
 .activity-mark svg {
@@ -364,9 +367,9 @@ svg {
 .record-button {
   width: 100%;
   height: 30px;
-  border: 1px solid var(--ai-color);
+  border: 1px solid #5e45ce;
   border-radius: 5px;
-  background: var(--ai-color);
+  background: #5e45ce;
   color: #fff;
   font-weight: 700;
   cursor: pointer;
@@ -374,23 +377,23 @@ svg {
 }
 
 .record-button:hover {
-  background: color-mix(in srgb, var(--ai-color) 80%, black);
+  background: #4732a5;
 }
 
 .record-button:disabled {
-  background: color-mix(in srgb, var(--ai-color) 40%, white);
-  border-color: color-mix(in srgb, var(--ai-color) 40%, white);
+  background: #c3b8f2;
+  border-color: #c3b8f2;
   color: #fff;
   cursor: default;
 }
 
 .record-button--stop {
-  background: var(--status-bad-ico);
-  border-color: var(--status-bad-ico);
+  background: #d92f2f;
+  border-color: #d92f2f;
 }
 
 .record-button--stop:hover {
-  background: color-mix(in srgb, var(--status-bad-ico) 80%, black);
+  background: #b42222;
 }
 
 .doc-icon {
@@ -434,31 +437,20 @@ svg {
 }
 
 .export-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   border: 0;
   background: transparent;
-  color: var(--ai-color);
-  font-weight: 700;
-  font-size: 12px;
+  color: #5e45ce;
+  font-weight: 800;
   cursor: pointer;
   padding: 6px 4px;
-  white-space: nowrap;
-}
-
-.export-link svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
 }
 
 .export-link:hover {
-  color: color-mix(in srgb, var(--ai-color) 80%, black);
+  color: #4127aa;
 }
 
 .export-link:disabled {
-  color: color-mix(in srgb, var(--ai-color) 40%, white);
+  color: #aaa7bd;
   cursor: default;
 }
 
@@ -474,7 +466,7 @@ svg {
 
 .notice {
   margin: 8px 0 0;
-  color: var(--status-bad-fg);
+  color: #b42318;
   font-size: 11px;
   text-align: right;
 }

@@ -138,9 +138,9 @@ async function checkStorage() {
         : 'using defaults',
     })
     out.push({
-      label: 'Session author ID present',
-      status: data.session?.userId ? 'ok' : 'warn',
-      detail: data.session?.userId ?? 'no active session — generated on session_start',
+      label: 'User ID present',
+      status: data.settings?.userId ? 'ok' : 'warn',
+      detail: data.settings?.userId ?? 'not yet generated',
     })
   } catch (err) {
     out.push({
