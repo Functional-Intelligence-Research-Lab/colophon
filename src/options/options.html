@@ -34,11 +34,11 @@
           </span>
         </label>
 
-        <label class="radio-option">
-          <input type="radio" name="aiPath" value="gemini-api">
+        <label class="radio-option radio-option--soon">
+          <input type="radio" name="aiPath" value="gemini-api" disabled title="Coming soon">
           <span class="radio-label">
-            <strong>Gemini API key</strong>
-            <span class="radio-desc">Use your own Gemini API key. Optional — Sprint 3.</span>
+            <strong>Gemini API key <span class="soon-badge">Soon</span></strong>
+            <span class="radio-desc">Use your own Gemini API key.</span>
           </span>
         </label>
       </div>
@@ -102,10 +102,11 @@
     <section>
       <h2>Your anonymous ID</h2>
       <p class="mono" id="user-id">Loading…</p>
-      <button id="btn-rotate">Generate new ID</button>
       <p class="note">
-        Generated locally. Never transmitted. Appears in your exported logs.<br>
-        Rotating is permanent — old exports keep their original ID.
+        Generated locally, only once recording starts. Never transmitted.
+        Appears in your exported logs.<br>
+        Rotates automatically every session — a new recording always gets a
+        brand new ID, so nothing links one session to the next.
       </p>
     </section>
 

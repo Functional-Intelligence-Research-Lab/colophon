@@ -1,5 +1,7 @@
 dist/
 src/generated/
+native-host/build/
+__pycache__/
 .env
 *.pem
 *.key

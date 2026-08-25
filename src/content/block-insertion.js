@@ -1,9 +1,9 @@
 /**
  * block-insertion.js — Detect text that appears in a single input frame.
  *
- * Per team-lead spec: if a block larger than ~10–15 chars lands in one input
- * event (rather than arriving keystroke-by-keystroke), that wasn't typed — flag
- * it and classify the origin:
+ * If a block larger than ~10–15 chars lands in one input event (rather than
+ * arriving keystroke-by-keystroke), that wasn't typed — flag it and classify
+ * the origin:
  *
  *   - 'paste'   : a real clipboard paste (inputType insertFromPaste, or our
  *                 paste path already saw it).
@@ -18,8 +18,7 @@
  */
 
 // Minimum single-frame insertion size to treat as a block rather than typing.
-// 12 sits in the lead's 10–15 window: above an autocomplete word, below a
-// sentence.
+// 12 sits above an autocomplete word and below a sentence.
 export const BLOCK_MIN_CHARS = 12
 
 /**

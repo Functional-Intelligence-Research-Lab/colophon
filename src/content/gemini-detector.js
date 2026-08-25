@@ -2,15 +2,16 @@
  * gemini-detector.js — Detects native Google Docs Gemini ("Help me write" /
  * "Refine") suggestions and reports them as TWFF events.
  *
- * Scope (Sprint — Gemini detection)
- * ---------------------------------
+ * Scope
+ * -----
  *   IN:  detect when a Gemini suggestion popover appears; capture its text;
  *        detect whether the user accepted (Insert/Replace) or dismissed it;
  *        emit ai_suggestion + ai_interaction events for the timeline + sidebar.
  *   OUT: measuring how much of the suggestion survives in the final document
- *        ("humanised" / partially-modified scoring). That requires reading the
- *        canvas-rendered text (Annotated Canvas) and is a separate, later task.
- *        Until then accepted suggestions are recorded as 'fully_accepted'.
+ *        ("humanised" / partially-modified scoring) — this would require
+ *        reading the canvas-rendered text (Annotated Canvas), which this
+ *        module doesn't do. Accepted suggestions are recorded as
+ *        'fully_accepted' regardless of later edits.
  *
  * Design
  * ------

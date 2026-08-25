@@ -77,4 +77,36 @@ describe('aiSuggestionEvent / aiInteractionEvent fields', () => {
     expect(e.meta).not.toHaveProperty('text')
     expect(e.meta).not.toHaveProperty('source')
   })
+
+  it('carries similarity_score (0-1, spec v0.2 §4.4) when provided', () => {
+    const interaction = aiInteractionEvent({ model: 'x', similarity_score: 0.42 })
+    expect(interaction.meta.similarity_score).toBe(0.42)
+    const suggestion = aiSuggestionEvent({ model: 'x', similarity_score: 0 })
+    // 0 is a real, meaningful value (nothing survived) — must not be dropped
+    // the way `0 || {}`-style optional-spreads would silently drop it.
+    expect(suggestion.meta.similarity_score).toBe(0)
+  })
+
+  it('omits similarity_score when not provided, rather than defaulting to 0', () => {
+    const e = aiInteractionEvent({ model: 'x' })
+    expect(e.meta).not.toHaveProperty('similarity_score')
+  })
+
+  it('content_after_length survives truncation even though content_after itself is capped at 500', () => {
+    const long = 'y'.repeat(1800)
+    const interaction = aiInteractionEvent({ model: 'x', content_after: long })
+    expect(interaction.meta.content_after).toHaveLength(500)
+    expect(interaction.meta.content_after_length).toBe(1800)
+
+    const suggestion = aiSuggestionEvent({ model: 'x', content_before: long, content_after: long })
+    expect(suggestion.meta.content_before).toHaveLength(500)
+    expect(suggestion.meta.content_before_length).toBe(1800)
+    expect(suggestion.meta.content_after_length).toBe(1800)
+  })
+
+  it('content_before_length/content_after_length are 0 for empty/omitted content, never undefined', () => {
+    const e = aiInteractionEvent({ model: 'x' })
+    expect(e.meta.content_before_length).toBe(0)
+    expect(e.meta.content_after_length).toBe(0)
+  })
 })
