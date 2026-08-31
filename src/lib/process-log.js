@@ -216,7 +216,7 @@ export class ProcessLog {
      */
     async buildMetadata() {
         return {
-            title: this.title || 'colophone',
+            title: this.title || null,
             created: new Date().toISOString(),
             twff_version: ProcessLog.SPEC_VERSION,
             author_id: this.userId,

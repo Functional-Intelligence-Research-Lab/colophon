@@ -24,6 +24,7 @@ import {
 } from "../shared/storage.js";
 import { ProcessLog } from "../lib/process-log.js";
 import { debugLog } from "../shared/debug.js";
+import { formatDocTitle } from "../shared/doc-title.js";
 
 // ── Native Messaging (llamafile host) ─────────────────────────────────────────
 
@@ -342,7 +343,7 @@ async function handleMessage(msg, _sender) {
 
 // ── Session management ────────────────────────────────────────────────────────
 
-async function startSession({ tabId, docUrl } = {}) {
+async function startSession({ tabId, docUrl, title } = {}) {
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
   // The real (reversible) Google Docs id, distinct from the opaque docId hash
   // above — persisted so a background-triggered export (storage-quota
@@ -379,6 +380,10 @@ async function startSession({ tabId, docUrl } = {}) {
     session.isRecording = true;
     session.tabId = tabId ?? null;
     session.googleDocId = googleDocId ?? session.googleDocId ?? null;
+    // Keep whatever title the session already has; a resume's title (e.g. a
+    // stale tab title while the doc was loading) is never more reliable than
+    // one already captured at the original session_start.
+    session.title = session.title ?? title ?? null;
     session.events.push({ timestamp: now, type: "session_resume", meta: {} });
     debugLog("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
   } else {
@@ -391,6 +396,7 @@ async function startSession({ tabId, docUrl } = {}) {
       tabId: tabId ?? null,
       docId,
       googleDocId,
+      title: title ?? null,
       isRecording: true,
       events: [],
       userId,
@@ -443,8 +449,11 @@ async function autoStartSession(sender) {
   }
   const tabId = sender?.tab?.id ?? null;
   const docUrl = sender?.tab?.url ?? "";
+  // Best available signal here: the service worker has no DOM access, only
+  // whatever tab title Chrome already knew when this message arrived.
+  const title = sender?.tab?.title ? formatDocTitle(sender.tab.title) : null;
   debugLog("[Colophon SW] auto session_start", { tabId, hasUrl: !!docUrl });
-  return startSession({ tabId, docUrl });
+  return startSession({ tabId, docUrl, title });
 }
 
 async function stopSession() {
