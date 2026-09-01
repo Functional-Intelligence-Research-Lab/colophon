@@ -46,7 +46,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     fullLogButton.addEventListener('click', async () => {
       try {
         const win = await chrome.windows.getCurrent()
-        await chrome.sidePanel.open({ windowId: win.id })
+        // chrome.sidePanel is Chrome-only; Firefox uses sidebarAction.
+        if (chrome.sidePanel) {
+          await chrome.sidePanel.open({ windowId: win.id })
+        } else if (chrome.sidebarAction?.open) {
+          await chrome.sidebarAction.open()
+        }
         window.close()
       } catch (err) {
         console.error('[Colophon] Could not open side panel:', err.message)

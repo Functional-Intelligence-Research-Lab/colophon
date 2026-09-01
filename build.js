@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild'
-import { cp, mkdir, copyFile, access } from 'node:fs/promises'
+import { cp, mkdir, copyFile, access, readFile, writeFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 const watch = process.argv.includes('--watch')
@@ -82,7 +82,53 @@ async function build() {
 
   await ctx.rebuild()
   await ctx.dispose()
-  console.log('[colophon] Build complete → load dist/ as unpacked extension.')
+  await buildFirefoxVariant()
+  console.log('[colophon] Build complete → load dist/ (Chrome) or dist/firefox/ (Firefox) as unpacked extension.')
+}
+
+// Derive dist/firefox/ from the finished Chrome build: same bundles and assets,
+// plus a Firefox manifest generated from manifest.json so the two never drift.
+// Skipped in watch mode; dist/ stays the Chrome dev loop.
+async function buildFirefoxVariant() {
+  await rm('dist/firefox', { recursive: true, force: true })
+  await mkdir('dist/firefox', { recursive: true })
+  // Copy entry by entry (fs.cp cannot copy dist into its own subdirectory).
+  // native-host is excluded: Firefox host manifests are a separate follow-up,
+  // and this keeps the AMO package free of compiled binaries.
+  const { readdir } = await import('node:fs/promises')
+  for (const entry of await readdir('dist')) {
+    if (entry === 'firefox' || entry === 'native-host') continue
+    await cp(path.join('dist', entry), path.join('dist/firefox', entry), { recursive: true })
+  }
+
+  const manifest = JSON.parse(await readFile('manifest.json', 'utf8'))
+
+  // Firefox MV3 runs the background as an event page, not a service worker.
+  // The bundle is a plain IIFE, so the same file works for both.
+  manifest.background = { scripts: ['background/service-worker.js'] }
+
+  // sidebar_action is the Firefox equivalent of side_panel; the code shims
+  // chrome.sidePanel vs chrome.sidebarAction at the call sites.
+  delete manifest.side_panel
+  manifest.sidebar_action = {
+    default_panel: 'sidepanel/sidepanel.html',
+    default_title: 'Colophon',
+    default_icon: 'icons/icon48.png',
+  }
+
+  // sidePanel is a Chrome-only permission name.
+  manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel')
+
+  // Required for AMO signing and native messaging allowed_extensions.
+  manifest.browser_specific_settings = {
+    gecko: { id: 'colophon@firl.nl', strict_min_version: '128.0' },
+  }
+
+  // Firefox uses options_ui instead of options_page.
+  delete manifest.options_page
+  manifest.options_ui = { page: 'options/options.html', open_in_tab: true }
+
+  await writeFile('dist/firefox/manifest.json', JSON.stringify(manifest, null, 2) + '\n')
 }
 
 build().catch(err => { console.error(err); process.exit(1) })
