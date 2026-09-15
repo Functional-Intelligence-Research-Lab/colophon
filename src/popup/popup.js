@@ -43,19 +43,36 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const fullLogButton = $('btn-full-log')
   if (fullLogButton) {
-    fullLogButton.addEventListener('click', async () => {
+    fullLogButton.addEventListener('click', async (e) => {
+      e.preventDefault()
       try {
-        const win = await chrome.windows.getCurrent()
-        // chrome.sidePanel is Chrome-only; Firefox uses sidebarAction.
-        if (chrome.sidePanel) {
-          await chrome.sidePanel.open({ windowId: win.id })
-        } else if (chrome.sidebarAction?.open) {
-          await chrome.sidebarAction.open()
+        const sidebar = globalThis.browser?.sidebarAction ?? chrome.sidebarAction
+        // Firefox uses sidebarAction; must be called synchronously inside user gesture
+        if (sidebar?.open) {
+          await sidebar.open()
+          window.close()
+          return
         }
+
+        // Chrome uses sidePanel
+        if (chrome.sidePanel?.open) {
+          const win = await chrome.windows.getCurrent()
+          await chrome.sidePanel.open({ windowId: win.id })
+          window.close()
+          return
+        }
+
+        // Fallback: open side panel UI in a tab
+        chrome.tabs.create({ url: chrome.runtime.getURL('sidepanel/sidepanel.html') })
         window.close()
       } catch (err) {
-        console.error('[Colophon] Could not open side panel:', err.message)
-        showNotice('Side panel could not open.')
+        console.error('[Colophon] Could not open side panel:', err)
+        try {
+          chrome.tabs.create({ url: chrome.runtime.getURL('sidepanel/sidepanel.html') })
+          window.close()
+        } catch {
+          showNotice('Side panel could not open.')
+        }
       }
     })
   }
