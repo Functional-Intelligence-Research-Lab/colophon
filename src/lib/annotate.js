@@ -67,6 +67,7 @@ export function normalizeEvent(raw, index) {
     tsMs: Date.parse(raw.timestamp) || index, // fall back to index order if timestamp is unparseable
     type,
     source: f.source ?? null,
+    source_tool: f.source_tool ?? null,
     model: f.model ?? null,
     acceptance: f.acceptance ?? null, // preserved verbatim, including the real producer's non-spec "pending"
     posStart, posEnd,
@@ -308,7 +309,7 @@ export function tooltipText(history) {
     const c = classifyLayer(l);
     if (c === 'ai') return `AI (${l.model ?? 'unknown model'})`;
     if (c === 'ai-partial') return `AI-suggested, partially kept (${l.model ?? 'unknown model'})`;
-    if (c === 'paste') return `Pasted (${l.source ?? 'external'})`;
+    if (c === 'paste') return l.source_tool ? `Pasted (self-reported: ${l.source_tool})` : `Pasted (${l.source ?? 'external'})`;
     if (c === 'human') return 'Edited by author';
     return null;
   }).filter(Boolean);

@@ -213,6 +213,11 @@
           "maxLength": 100,
           "description": "First 100 characters of the pasted text, for audit and visualization purposes."
         },
+        "source_tool": {
+          "type": "string",
+          "enum": ["chatgpt", "claude", "copilot", "gemini", "perplexity", "deepseek", "other_ai", "not_ai"],
+          "description": "OPTIONAL. Self-reported origin tool of the pasted content selected by the author at paste time. Never automated or detected."
+        },
         "_hash": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"

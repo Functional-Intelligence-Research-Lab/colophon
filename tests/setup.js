@@ -12,7 +12,51 @@ export function resetStore() {
   _store = {}
 }
 
+global.location = {
+  pathname: '/document/d/test/edit',
+  href: 'https://docs.google.com/document/d/test/edit',
+}
+
+global.window = {
+  location: global.location,
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  getSelection: () => ({
+    toString: () => '',
+    removeAllRanges: () => {},
+  }),
+  innerWidth: 1024,
+  innerHeight: 768,
+}
+
+global.document = {
+  readyState: 'complete',
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  documentElement: { append: () => {} },
+  body: { appendChild: () => {}, removeChild: () => {} },
+  createElement: (tag) => ({
+    tagName: tag.toUpperCase(),
+    style: {},
+    dataset: {},
+    attributes: {},
+    children: [],
+    setAttribute: () => {},
+    getAttribute: () => null,
+    append: () => {},
+    appendChild: () => {},
+    replaceChildren: () => {},
+    addEventListener: () => {},
+  }),
+}
+
 global.chrome = {
+  runtime: {
+    sendMessage: () => Promise.resolve({}),
+    onMessage: { addListener: () => {} },
+  },
   storage: {
     local: {
       get(keys) {

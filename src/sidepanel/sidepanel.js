@@ -1,6 +1,7 @@
 import { complete } from '../lib/ai/ollama-client.js';
 import { esc } from '../shared/esc.js';
 import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js';
+import { getSourceToolLabel } from '../shared/source-tools.js';
 
 // ── Utility: Debounce Function ───────────────────────────────────────────────
 function debounce(func, wait) {
@@ -661,8 +662,10 @@ const TimelineRenderer = {
     if (evt.type === 'paste') {
       const wordCount = Math.round((evt.meta?.char_count ?? 0) / 5);
       iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-      title = 'Pasted content';
-      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}`;
+      const toolLabel = evt.meta?.source_tool ? getSourceToolLabel(evt.meta.source_tool) : null;
+      title = toolLabel ? `Pasted content (${toolLabel})` : 'Pasted content';
+      const selfReportTag = toolLabel ? ` · Self-reported` : '';
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag}`;
       if (evt.meta?.source !== 'internal') {
         actionHTML = evt.meta?.source_url
           ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
@@ -754,6 +757,9 @@ const TimelineRenderer = {
       authorLabel = 'You • Pasted';
       const sourceLabel = evt.meta.source === 'internal' ? 'within doc' : 'external';
       contentHTML = `<div class="text-only">${evt.meta.char_count || 0} chars from ${sourceLabel}</div>`;
+      if (evt.meta.source_tool) {
+        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--ai-color); margin-top: 2px;">Self-reported source: <strong>${esc(getSourceToolLabel(evt.meta.source_tool))}</strong></div>`;
+      }
       if (evt.meta.output_preview) {
         contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${esc(evt.meta.output_preview)}"</div>`;
       }

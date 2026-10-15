@@ -69,6 +69,34 @@ describe('ProcessLog.toDict() — export sanitization', () => {
     expect(edit.meta).toEqual({ source: 'human', position_start: 0, position_end: 10 })
   })
 
+  it('preserves self-reported source_tool on paste event in toDict() and hashes it', async () => {
+    const log = new ProcessLog('anon-test')
+    log.logPaste(120, 0, 120, 'external', 'Pasted snippet', 'chatgpt')
+
+    const dict = log.toDict()
+    const pasteEvt = dict.events.find(e => e.type === 'paste')
+    expect(pasteEvt).toBeDefined()
+    expect(pasteEvt.meta.source_tool).toBe('chatgpt')
+
+    await log._applyIntegrityChain(dict)
+    expect(pasteEvt._hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(dict._integrity.head_hash).toBe(dict.events[dict.events.length - 1]._hash)
+  })
+
+  it('handles paste event with skipped/omitted source_tool in toDict() and hashes it', async () => {
+    const log = new ProcessLog('anon-test')
+    log.logPaste(80, 0, 80, 'external', 'Untagged paste')
+
+    const dict = log.toDict()
+    const pasteEvt = dict.events.find(e => e.type === 'paste')
+    expect(pasteEvt).toBeDefined()
+    expect(pasteEvt.meta).not.toHaveProperty('source_tool')
+
+    await log._applyIntegrityChain(dict)
+    expect(pasteEvt._hash).toMatch(/^[a-f0-9]{64}$/)
+    expect(dict._integrity.head_hash).toBe(dict.events[dict.events.length - 1]._hash)
+  })
+
   it('does not mutate the original in-memory events (side panel still sees full text)', () => {
     const log = new ProcessLog('anon-test')
     const longText = 'D'.repeat(2000)
