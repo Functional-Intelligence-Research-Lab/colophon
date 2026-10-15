@@ -1,6 +1,7 @@
 import JSZip from '../lib/jszip.js';
 import { computeAnnotations, compositeKey } from '../lib/annotate.js';
 import { esc } from '../shared/esc.js';
+import { finiteNumber } from '../shared/num.js';
 
 // ── File input / drag-drop ────────────────────────────────────────────────────
 
@@ -196,12 +197,12 @@ function buildCard(evt) {
   }
   else if (evt.type === 'edit_block') {
     authorLabel = 'You • Edited';
-    const delta = evt.meta?.char_delta ?? 0;
+    const delta = finiteNumber(evt.meta?.char_delta);
     bodyHTML = `<p class="tl-text">${delta > 0 ? '+' : ''}${delta} characters</p>`;
   }
   else if (evt.type === 'paste') {
     authorLabel = 'You • Pasted';
-    const chars = evt.meta?.char_count ?? 0;
+    const chars = finiteNumber(evt.meta?.char_count);
     bodyHTML = `<p class="tl-text">${chars} chars from external source</p>`;
     if (evt.meta?.output_preview) {
       bodyHTML += `<p class="tl-preview">"${esc(evt.meta.output_preview)}"</p>`;
@@ -228,17 +229,17 @@ function buildCard(evt) {
   else if (evt.type === 'gemini_suggestion') {
     typeClass = 'gemini';
     authorLabel = 'Gemini • AI insert';
-    const chars = evt.meta?.char_count ?? 0;
-    const vel = evt.meta?.insertion_velocity;
+    const chars = finiteNumber(evt.meta?.char_count);
+    const vel = finiteNumber(evt.meta?.insertion_velocity, null);
     const preview = evt.meta?.output_preview ? esc(evt.meta.output_preview) : `${chars} chars inserted`;
     bodyHTML = `<p class="tl-text">${preview}${vel ? ` <span style="color:#888;font-size:0.85em">(${vel} chars/s)</span>` : ''}</p>`;
   }
   else if (evt.type === 'checkpoint') {
     typeClass = 'user';
     const note = evt.meta?.note ?? 'Checkpoint';
-    const wc = evt.meta?.word_count_total;
+    const wc = finiteNumber(evt.meta?.word_count_total, null);
     authorLabel = `Checkpoint`;
-    bodyHTML = `<p class="tl-text">${esc(note)}${wc !== null ? ` — ${wc.toLocaleString()} words` : ''}</p>`;
+    bodyHTML = `<p class="tl-text">${esc(note)}${wc !== null ? ` · ${wc.toLocaleString()} words` : ''}</p>`;
   }
   else {
     return null;
