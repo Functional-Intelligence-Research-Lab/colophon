@@ -182,3 +182,4 @@ describe('Paste Source Tagging UI Prompt', () => {
     expect(showPasteSourcePrompt(pasteEvt)).toBeNull()
   })
 })
+

@@ -44,3 +44,4 @@ Instead, a lightweight self-report mechanism gives students the agency to truthf
 
 ### 4. Honest Labeling Requirement
 In accordance with Colophon ethics guidelines, the tag must always be explicitly labeled as **self-reported** (e.g. `Self-reported source: ChatGPT`), and never described or implied as "detected", "flagged", or "AI-detected".
+

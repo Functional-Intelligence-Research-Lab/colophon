@@ -46,3 +46,4 @@ describe('source-tools specification and labeling', () => {
     expect(formatSelfReportedLabel('')).toBe('')
   })
 })
+

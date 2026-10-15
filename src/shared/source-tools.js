@@ -61,3 +61,4 @@ export function formatSelfReportedLabel(toolKey) {
   const label = getSourceToolLabel(toolKey);
   return `Self-reported source: ${label}`;
 }
+
