@@ -339,7 +339,6 @@ export const PANEL_CSS = `
   }
 
   .diff-line {
-    border-left: 3px solid;
     padding: 8px 9px;
     border-radius: 0 6px 6px 0;
     line-height: 1.38;
