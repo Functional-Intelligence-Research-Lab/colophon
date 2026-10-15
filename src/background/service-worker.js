@@ -143,7 +143,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const text = info.selectionText ?? '';
   if (!text) return;
 
-  await chrome.sidePanel.open({ tabId: tab.id });
+  // chrome.sidePanel is Chrome-only; Firefox uses sidebarAction.
+  const sidebar = globalThis.browser?.sidebarAction ?? chrome.sidebarAction;
+  if (chrome.sidePanel) {
+    await chrome.sidePanel.open({ tabId: tab.id });
+  } else if (sidebar?.open) {
+    await sidebar.open();
+  }
 
   // Small delay so sidepanel has time to mount before receiving the message
   setTimeout(() => {
