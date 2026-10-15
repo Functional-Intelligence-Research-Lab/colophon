@@ -120,8 +120,17 @@ async function buildFirefoxVariant() {
   manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel')
 
   // Required for AMO signing and native messaging allowed_extensions.
+  // AMO requires new add-ons to declare data collection. Colophon sends nothing
+  // to us or third parties: it reads the open Google Doc and talks only to
+  // local AI on the user's machine. Firefox 140 is the first version that
+  // shows this declaration in its own install prompt.
   manifest.browser_specific_settings = {
-    gecko: { id: 'colophon@firl.nl', strict_min_version: '128.0' },
+    gecko: {
+      id: 'colophon@firl.nl',
+      strict_min_version: '140.0',
+      data_collection_permissions: { required: ['none'] },
+    },
+    gecko_android: { strict_min_version: '142.0' },
   }
 
   // Firefox uses options_ui instead of options_page.
