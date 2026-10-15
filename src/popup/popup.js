@@ -17,6 +17,7 @@
 
 import { exportTwff } from '../lib/export.js'
 import { classifyEuLabel, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
+import { formatDocTitle } from '../shared/doc-title.js'
 
 const $ = id => document.getElementById(id)
 
@@ -91,7 +92,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           showNotice('Open a Google Docs document first.')
           return
         }
-        await chrome.runtime.sendMessage({ type: 'SESSION_START', tabId: tab.id, docUrl: tab.url })
+        await chrome.runtime.sendMessage({
+          type: 'SESSION_START', tabId: tab.id, docUrl: tab.url, title: formatDocTitle(tab.title),
+        })
       }
 
       await refresh()
@@ -167,9 +170,19 @@ async function refresh() {
   renderScores(session)
   renderActivity(session)
   renderRecordButton(session, tab)
+  renderTooltip(session)
 
   const eventCount = session?.events?.length ?? 0
   $('btn-export').disabled = eventCount < 2
+}
+
+function renderTooltip(session) {
+  const tooltipInfo = $('tooltip-info')
+  if (!tooltipInfo) return
+
+  tooltipInfo.textContent = session?.isRecording
+    ? 'Recording: your edits are being tracked'
+    : 'Start recording before you edit the document'
 }
 
 function renderRecordButton(session, tab) {
@@ -380,12 +393,6 @@ async function sendToContent(tabId, message) {
     })
     return chrome.tabs.sendMessage(tabId, message)
   }
-}
-
-function formatDocTitle(title = '') {
-  return title
-    .replace(/ - Google Docs$/i, '')
-    .trim() || 'Untitled document'
 }
 
 function relativeTime(timestamp) {

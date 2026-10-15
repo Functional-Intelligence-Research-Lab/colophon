@@ -157,3 +157,21 @@ describe('ProcessLog._applyIntegrityChain() — spec §5.2 hash chain', () => {
     expect(recomputed).toBe(_hash)
   })
 })
+
+describe('ProcessLog.buildMetadata() — document title', () => {
+  it('carries a real captured title through to the exported metadata', async () => {
+    const log = new ProcessLog('anon-test')
+    log.title = 'My Real Essay Title'
+    const meta = await log.buildMetadata()
+    expect(meta.title).toBe('My Real Essay Title')
+  })
+
+  it('is null, not a fabricated placeholder, when no title was ever captured', async () => {
+    const log = new ProcessLog('anon-test')
+    // log.title deliberately never set — exportSession() assigns it from
+    // session.title, which is null for a session that started before this
+    // fix, or if the doc genuinely never had a readable title.
+    const meta = await log.buildMetadata()
+    expect(meta.title).toBeNull()
+  })
+})

@@ -1047,7 +1047,12 @@ function getDocsTitle() {
   const fallbackTitle = document.title.replace(' - Google Docs', '').trim();
 
   if (!fallbackTitle || fallbackTitle === "Untitled document" || fallbackTitle === "Google Docs") {
-    return "Untitled Document";
+    // No real title anywhere — null, not a fabricated placeholder string, so
+    // callers that persist this (the exported .twff's metadata) can tell the
+    // difference between "no title" and a document actually named that.
+    // UI callers that want something to display already fall back themselves
+    // (see panel/app.js's `options.docTitle ?? 'Untitled document'`).
+    return null;
   }
 
   return fallbackTitle;
@@ -1300,7 +1305,7 @@ async function checkAndInjectStartToast() {
     }, 400); 
   };
 
-  const timeoutId = setTimeout(removeToast, 30000);
+  const timeoutId = setTimeout(removeToast, 6000);
 
   dismissBtn.addEventListener('click', () => { clearTimeout(timeoutId); removeToast(); });
   dismissBtn.addEventListener('mouseenter', () => dismissBtn.style.color = 'white');
@@ -1319,7 +1324,7 @@ async function checkAndInjectStartToast() {
     const currentUrl = window.location.href;
 
     try {
-      await chrome.runtime.sendMessage({ type: 'SESSION_START', docUrl: currentUrl });
+      await chrome.runtime.sendMessage({ type: 'SESSION_START', docUrl: currentUrl, title: getDocsTitle() });
     } catch {
       removeToast();
       return;

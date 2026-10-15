@@ -31,8 +31,8 @@ nothing is sent to any server unless you explicitly export and share the file yo
 
 ## Installing
 
-Not yet published to the Chrome Web Store. Until then, build from source (see below) and
-load it as an unpacked extension.
+Live on the Chrome Web Store: [Colophon](https://chromewebstore.google.com/detail/colophon/manpdfemofccpcppkiepppbineggdnka).
+For local development, build from source (see below) and load it as an unpacked extension instead.
 
 ---
 
