@@ -110,3 +110,19 @@ describe('aiSuggestionEvent / aiInteractionEvent fields', () => {
     expect(e.meta.content_after_length).toBe(0)
   })
 })
+
+describe('pasteEvent fields and self-reporting tag', () => {
+  it('carries self-reported source_tool into meta when provided', () => {
+    const e = pasteEvent({ char_count: 50, source_tool: 'chatgpt' })
+    expect(e.type).toBe('paste')
+    expect(e.meta.char_count).toBe(50)
+    expect(e.meta.source_tool).toBe('chatgpt')
+  })
+
+  it('omits source_tool from meta when skipped or not provided', () => {
+    const e = pasteEvent({ char_count: 50 })
+    expect(e.type).toBe('paste')
+    expect(e.meta).not.toHaveProperty('source_tool')
+  })
+})
+

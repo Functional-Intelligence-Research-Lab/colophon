@@ -118,14 +118,18 @@ export class ProcessLog {
         });
     }
 
-    logPaste(charCount, positionStart, positionEnd, source = "external", preview = "") {
-        return this.logEvent("paste", {
+    logPaste(charCount, positionStart, positionEnd, source = "external", preview = "", sourceTool = null) {
+        const meta = {
             char_count: charCount,
             source: source,
             position_start: positionStart,
             position_end: positionEnd,
             output_preview: preview.substring(0, 100),
-        });
+        };
+        if (sourceTool) {
+            meta.source_tool = sourceTool;
+        }
+        return this.logEvent("paste", meta);
     }
 
     logAiInteraction(

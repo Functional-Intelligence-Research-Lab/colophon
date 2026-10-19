@@ -2,6 +2,7 @@ import { PANEL_CSS } from './panel.css.js'
 import { icons } from './icons.js'
 import { Composer, ProjectContext, TimelineItem } from './components.js'
 import { esc } from '../shared/esc.js'
+import { getSourceToolLabel } from '../shared/source-tools.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -42,11 +43,15 @@ function eventToItem(evt) {
       }
     }
 
-    case 'paste':
+    case 'paste': {
+      const toolLabel = meta.source_tool ? getSourceToolLabel(meta.source_tool) : null
       return {
-        id, type: 'edit', kind: 'you', actor: 'You', label: 'Pasted', time,
+        id, type: 'edit', kind: 'you', actor: 'You',
+        label: toolLabel ? `Pasted (${toolLabel} — self-reported)` : 'Pasted',
+        time,
         copy: meta.content_preview || `${meta.char_count || 0} chars pasted`,
       }
+    }
 
     case 'image_upload':
       return { id, type: 'image', kind: 'you', actor: 'You', label: 'Added Image', time }

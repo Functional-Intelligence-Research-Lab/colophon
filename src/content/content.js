@@ -7,6 +7,7 @@ import { aiInteractionEvent } from '../lib/events.js'
 import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js'
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 import { debugLog } from '../shared/debug.js'
+import { SOURCE_TOOLS } from '../shared/source-tools.js'
 
 /**
  * content.js — Colophon content script
@@ -264,12 +265,14 @@ const _geminiDetector = createGeminiDetector({
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 
-debugLog('[Colophon] Content script injected on', location.pathname)
-debugLog('[Colophon Content] injected', {
-  path: location.pathname,
-  readyState: document.readyState,
-  hasEditor: !!document.querySelector(EDITOR_SELECTOR),
-})
+if (typeof location !== 'undefined' && typeof document !== 'undefined') {
+  debugLog('[Colophon] Content script injected on', location.pathname)
+  debugLog('[Colophon Content] injected', {
+    path: location.pathname,
+    readyState: document.readyState,
+    hasEditor: !!document.querySelector(EDITOR_SELECTOR),
+  })
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   try {
@@ -368,10 +371,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 })
 
 syncRecordingState()
-document.addEventListener('selectionchange', onSelectionChange)
-document.addEventListener('mouseup', onSelectionChange)
-document.addEventListener('keyup', _schedulePushDocContext)
-window.addEventListener('blur', _pushDocContext)
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('selectionchange', onSelectionChange)
+  document.addEventListener('mouseup', onSelectionChange)
+  document.addEventListener('keyup', _schedulePushDocContext)
+}
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('blur', _pushDocContext)
+}
 
 // ── Activation ────────────────────────────────────────────────────────────────
 
@@ -797,6 +804,165 @@ function _textSimilarity(a, b) {
   return union === 0 ? 0 : intersection / union;
 }
 
+let _activePastePrompt = null;
+let _activePastePromptTimer = null;
+
+export function dismissPasteSourcePrompt() {
+  if (_activePastePromptTimer) {
+    clearTimeout(_activePastePromptTimer);
+    _activePastePromptTimer = null;
+  }
+  if (!_activePastePrompt) return;
+  const el = _activePastePrompt;
+  _activePastePrompt = null;
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(10px)';
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, 250);
+}
+
+export function showPasteSourcePrompt(event) {
+  if (typeof document === 'undefined' || !document.body) return null;
+
+  dismissPasteSourcePrompt();
+
+  const host = document.createElement('div');
+  host.id = 'colophon-paste-tag-prompt';
+  host.setAttribute('role', 'region');
+  host.setAttribute('aria-label', 'Self-report pasted text source');
+
+  host.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #1e1e24;
+    color: #f1f3f4;
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    z-index: 2147483646;
+    max-width: 440px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
+  `;
+
+  // Top header row with title and dismiss button
+  const topRow = document.createElement('div');
+  topRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+
+  const titleSpan = document.createElement('span');
+  titleSpan.style.cssText = 'font-weight:500;color:#e8eaed;display:flex;align-items:center;gap:6px;';
+  titleSpan.textContent = 'Pasted text — was this from an AI tool? (Self-report)';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Skip self-reporting');
+  closeBtn.textContent = '✕';
+  closeBtn.style.cssText = `
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  `;
+  closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = '#fff'; });
+  closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = 'rgba(255, 255, 255, 0.6)'; });
+  closeBtn.addEventListener('click', () => {
+    debugLog('[Colophon Content] Paste source self-report skipped by student.');
+    dismissPasteSourcePrompt();
+  });
+
+  topRow.append(titleSpan, closeBtn);
+
+  // Chips container
+  const chipContainer = document.createElement('div');
+  chipContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+
+  SOURCE_TOOLS.forEach(tool => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = tool.label;
+    btn.dataset.toolId = tool.id;
+    btn.style.cssText = `
+      background: rgba(255, 255, 255, 0.08);
+      color: #e8eaed;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 14px;
+      padding: 4px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    `;
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = 'rgba(92, 60, 230, 0.35)';
+      btn.style.borderColor = 'rgba(92, 60, 230, 0.6)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = 'rgba(255, 255, 255, 0.08)';
+      btn.style.borderColor = 'rgba(255, 255, 255, 0.16)';
+    });
+    btn.addEventListener('click', () => {
+      event.meta.source_tool = tool.id;
+
+      try {
+        chrome.runtime.sendMessage({
+          type: 'UPDATE_EVENT_METADATA',
+          payload: {
+            eventTimestamp: event.timestamp,
+            key: 'source_tool',
+            value: tool.id,
+          },
+        }).catch(() => {});
+      } catch {
+        // SW might be temporarily sleeping
+      }
+
+      debugLog('[Colophon Content] Paste self-reported source_tool:', tool.id);
+
+      host.replaceChildren();
+      const confirmRow = document.createElement('div');
+      confirmRow.style.cssText = 'color:#81c995;font-size:12px;display:flex;align-items:center;gap:6px;';
+      confirmRow.textContent = `✓ Recorded self-report: ${tool.label}`;
+      host.append(confirmRow);
+
+      setTimeout(() => {
+        dismissPasteSourcePrompt();
+      }, 1200);
+    });
+
+    chipContainer.append(btn);
+  });
+
+  host.append(topRow, chipContainer);
+  document.body.appendChild(host);
+  _activePastePrompt = host;
+
+  requestAnimationFrame(() => {
+    host.style.opacity = '1';
+    host.style.transform = 'translateY(0)';
+  });
+
+  // Auto-dismiss after 10s if student ignores it (does not block writing)
+  _activePastePromptTimer = setTimeout(() => {
+    if (_activePastePrompt === host) {
+      dismissPasteSourcePrompt();
+    }
+  }, 10000);
+
+  return host;
+}
+
 async function emitPaste(text) {
   const charCount = text.length;
 
@@ -813,6 +979,8 @@ async function emitPaste(text) {
       content_after:  ""
     },
   };
+
+  showPasteSourcePrompt(event);
 
   const docStateBefore = _rollingBaselineState;
 
@@ -847,6 +1015,7 @@ async function emitPaste(text) {
       if (pendingRes?.text) {
         const similarity = _textSimilarity(text, pendingRes.text);
         if (similarity >= 0.8) {
+          dismissPasteSourcePrompt();
           event.type = 'ai_interaction';
           event.meta.model = pendingRes.model;
           event.meta.interaction_subtype = pendingRes.subtype;
@@ -1373,10 +1542,12 @@ function initColophonUI() {
   initGeminiObserver();
 }
 
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  initColophonUI();
-} else {
-  window.addEventListener('load', initColophonUI);
+if (typeof document !== 'undefined' && typeof window !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    initColophonUI();
+  } else {
+    window.addEventListener('load', initColophonUI);
+  }
 }
 
 /**
@@ -1543,20 +1714,22 @@ async function updateRollingBaseline(forceSendResponse = null) {
   }
 }
 
-document.addEventListener('keydown', (e) => {
-  if (!isContextValid()) return;
-  // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
-  // Don't race against an active Gemini acceptance poll
-  if (_pollActive) return;
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('keydown', (e) => {
+    if (!isContextValid()) return;
+    // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
+    // Don't race against an active Gemini acceptance poll
+    if (_pollActive) return;
 
-  clearTimeout(_baselineTimer);
-  
-  let delayMs = 1500; 
-  const docSizeKb = _rollingBaselineState.length / 1024;
-  
-  if (docSizeKb >= 50 && docSizeKb < 300) delayMs = 3000;
-  else if (docSizeKb >= 300) delayMs = 5000;
+    clearTimeout(_baselineTimer);
+    
+    let delayMs = 1500; 
+    const docSizeKb = _rollingBaselineState.length / 1024;
+    
+    if (docSizeKb >= 50 && docSizeKb < 300) delayMs = 3000;
+    else if (docSizeKb >= 300) delayMs = 5000;
 
-  _baselineTimer = setTimeout(updateRollingBaseline, delayMs); 
-});
+    _baselineTimer = setTimeout(updateRollingBaseline, delayMs); 
+  });
+}

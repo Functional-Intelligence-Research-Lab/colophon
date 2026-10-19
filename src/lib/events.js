@@ -48,18 +48,22 @@ export function editEvent({ content, source, position_start, position_end, conte
   }
 }
 
-export function pasteEvent({ char_count, source, position_start, position_end, content_preview } = {}) {
+export function pasteEvent({ char_count, source, position_start, position_end, content_preview, source_tool } = {}) {
+  const meta = {
+    source: source || 'external',
+    char_count: char_count || 0,
+    position_start: position_start || 0,
+    position_end: position_end || 0,
+    content_preview: clip(content_preview, 100),
+  };
+  if (source_tool) {
+    meta.source_tool = source_tool;
+  }
   return {
     type: 'paste',
     timestamp: now(),
-    meta: {
-      source: source || 'external',
-      char_count: char_count || 0,
-      position_start: position_start || 0,
-      position_end: position_end || 0,
-      content_preview: clip(content_preview, 100),
-    },
-  }
+    meta,
+  };
 }
 
 export function pasteLinkEvent({ url, link_scope, title, position } = {}) {
