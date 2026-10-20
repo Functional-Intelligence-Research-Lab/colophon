@@ -47,7 +47,7 @@ function eventToItem(evt) {
       const toolLabel = meta.source_tool ? getSourceToolLabel(meta.source_tool) : null
       return {
         id, type: 'edit', kind: 'you', actor: 'You',
-        label: toolLabel ? `Pasted (${toolLabel} — self-reported)` : 'Pasted',
+        label: toolLabel ? `Pasted (${toolLabel}, self-reported)` : 'Pasted',
         time,
         copy: meta.content_preview || `${meta.char_count || 0} chars pasted`,
       }

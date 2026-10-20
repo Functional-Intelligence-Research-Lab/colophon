@@ -1,5 +1,5 @@
 /**
- * source-tools.js — Shared definitions and helpers for paste source tagging.
+ * source-tools.js: Shared definitions and helpers for paste source tagging.
  *
  * Colophon records authentic student process logs. When text is pasted from an
  * external source, the student can self-report which tool (AI or non-AI) it

@@ -861,7 +861,7 @@ export function showPasteSourcePrompt(event) {
 
   const titleSpan = document.createElement('span');
   titleSpan.style.cssText = 'font-weight:500;color:#e8eaed;display:flex;align-items:center;gap:6px;';
-  titleSpan.textContent = 'Pasted text — was this from an AI tool? (Self-report)';
+  titleSpan.textContent = 'Pasted text: was this from an AI tool? (Self-report)';
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
