@@ -8,6 +8,15 @@
   padding: 0;
 }
 
+/* Visible focus for keyboard users — several inputs below explicitly
+   suppress the default outline with no replacement of their own; this
+   restores a visible indicator for every focusable element that doesn't
+   already define one. */
+:focus-visible {
+  outline: 2px solid var(--ai-color);
+  outline-offset: 1px;
+}
+
 body {
   font-family:
     "Atkinson Hyperlegible",
@@ -390,6 +399,27 @@ body {
 }
 
 .btn-dismiss:hover {
+  background-color: var(--bg-secondary);
+}
+
+/* No rule existed for these at all — the primary "Insert"/"Accept" action
+   in the main suggestion card rendered as unstyled native-browser-chrome
+   next to its properly-styled .btn-dismiss sibling above. Insert gets the
+   same solid primary treatment already used for .btn-apply elsewhere;
+   Copy gets the same secondary outline treatment as .btn-dismiss. */
+.btn-insert {
+  background-color: var(--ai-color);
+  color: #fff;
+  border: none;
+}
+.btn-insert:hover { opacity: 0.85; }
+
+.btn-copy-ai {
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+.btn-copy-ai:hover {
   background-color: var(--bg-secondary);
 }
 
@@ -1068,7 +1098,7 @@ body {
 .ecc-icon {
   width: 34px;
   height: 34px;
-  border-radius: 8px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;

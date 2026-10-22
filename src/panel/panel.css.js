@@ -17,6 +17,15 @@ export const PANEL_CSS = `
 
   *, *::before, *::after { box-sizing: border-box; }
 
+  /* Visible focus for keyboard users — a contenteditable field and the
+     composer input below explicitly suppress the default outline with no
+     replacement; this restores a visible indicator for every focusable
+     element in this shadow tree that doesn't already define one. */
+  :focus-visible {
+    outline: 2px solid var(--colophon-purple);
+    outline-offset: 1px;
+  }
+
   .colophon-panel {
     position: relative;
     width: 100%;
@@ -231,7 +240,9 @@ export const PANEL_CSS = `
 
   .mark--accepted::after { background: #bcecc8; }
 
-  .mark--quiet { background: #f4f4f6; color: #777782; }
+  /* Was #777782 on #f4f4f6 (~4.4:1, just under the 4.5:1 AA floor) —
+     reusing an already-darker gray from elsewhere in this file. */
+  .mark--quiet { background: #f4f4f6; color: #3f3f49; }
 
   .item-main { min-width: 0; padding-bottom: 14px; }
 
@@ -253,7 +264,9 @@ export const PANEL_CSS = `
   .actor--quiet { color: #767681; }
 
   .head-sep { color: rgba(93, 63, 211, 0.35); font-size: 10px; }
-  .time { margin-left: auto; font-size: 10px; color: #888894; }
+  /* Was #888894 (~3.7:1 on white at 10px, below WCAG AA for small text) —
+     reusing an already-darker gray from elsewhere in this file. */
+  .time { margin-left: auto; font-size: 10px; color: #3f3f49; }
 
   .card--ai .item-head .head-sep { color: rgba(93, 63, 211, 0.4); }
   .card--ai .item-head span:not(.time):not(.head-sep) { color: var(--colophon-purple); }
@@ -314,7 +327,10 @@ export const PANEL_CSS = `
   .button:hover { background: #f7f7fa; }
   .button--primary { background: transparent; border-color: rgba(93, 63, 211, 0.25); color: var(--colophon-purple); }
   .button--ghost { border-color: transparent; color: var(--colophon-purple); background: transparent; }
-  .button--dismiss { background: transparent; border-color: rgba(93, 63, 211, 0.25); color: var(--colophon-purple); }
+  /* Was byte-identical to .button--primary — a user couldn't tell "accept"
+     from "dismiss" apart by styling alone. Neutral gray (an existing token,
+     not a new color) differentiates it without changing .button--primary. */
+  .button--dismiss { background: transparent; border-color: var(--colophon-line); color: var(--colophon-muted); }
   .btn-check { width: 18px; height: 18px; border-radius: 50%; background: var(--colophon-purple); color: #fff; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
   .progress {
@@ -362,7 +378,7 @@ export const PANEL_CSS = `
   .source-icon {
     width: 30px;
     height: 30px;
-    border-radius: 7px;
+    border-radius: 50%;
     display: grid;
     place-items: center;
     background: var(--colophon-purple-soft);

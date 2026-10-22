@@ -2,7 +2,7 @@ import { icons } from './icons.js'
 import { esc } from '../shared/esc.js'
 
 function button(label, className, action, icon = '') {
-  return `<button class="button ${className}" data-action="${action}">${icon}${label}</button>`
+  return `<button type="button" class="button ${className}" data-action="${action}">${icon}${label}</button>`
 }
 
 function mark(item) {
@@ -43,7 +43,7 @@ function suggestionCard(item) {
         <div class="item-head"><span class="actor actor--you">${icons.check} AI</span><span class="head-sep">•</span><span>Applied</span><span class="time">${esc(item.time)}</span></div>
         <p class="card-copy">Concrete example added.</p>
         <p class="card-note">You can edit it anytime.</p>
-        <button class="button button--ghost" data-action="view-changes">View changes ${icons.chevron}</button>
+        <button type="button" class="button button--ghost" data-action="view-changes">View changes ${icons.chevron}</button>
       </div>
     `
   }
@@ -56,7 +56,7 @@ function suggestionCard(item) {
           <div class="diff-line diff-line--old">Many companies are looking at ways to reduce their environmental impact...</div>
           <div class="diff-line diff-line--new">For example, Patagonia redesigned its packaging in 2022, eliminating 80% of virgin plastic from shipments...</div>
         </div>
-        <button class="button button--ghost" data-action="collapse-applied">Back to latest</button>
+        <button type="button" class="button button--ghost" data-action="collapse-applied">Back to latest</button>
       </div>
     `
   }

@@ -618,11 +618,24 @@ async function _appendEventLocked(event, sender) {
     events: session.events
   }).catch(() => {});
 
+  // A long session made of many small events (e.g. plain edit_block/
+  // checkpoint events) can run for hours without ever nearing the storage
+  // quota below, so the quota trigger alone never fires — the in-memory
+  // session.events array (and the full array re-broadcast above) would grow
+  // unbounded. This independent, count-based trigger forces the same
+  // export+trim cycle periodically regardless of byte usage.
+  _eventsSinceLastExportCheck += 1;
+  let forceExportCheck = false;
+  if (_eventsSinceLastExportCheck >= EVENT_COUNT_EXPORT_TRIGGER) {
+    _eventsSinceLastExportCheck = 0;
+    forceExportCheck = true;
+  }
+
   // Fire-and-forget: chrome.storage.local has no unlimitedStorage permission
   // (Chrome's default ~10MB quota applies), so a very long session needs a
   // way to relieve pressure without ever losing data. Never awaited here —
   // exporting can be slow and must not block the LOG_EVENT response.
-  maybeAutoExportAndTrim().catch((err) =>
+  maybeAutoExportAndTrim(forceExportCheck).catch((err) =>
     console.warn("[Colophon SW] auto-export/trim check failed", err)
   );
 
@@ -631,6 +644,8 @@ async function _appendEventLocked(event, sender) {
 
 const STORAGE_QUOTA_WARN_RATIO = 0.8;
 let _autoExportInProgress = false;
+let _eventsSinceLastExportCheck = 0;
+const EVENT_COUNT_EXPORT_TRIGGER = 200;
 
 // When storage usage nears its quota, durably export the full session (never
 // deletes anything — the export is the safety net) and then aggregate old
@@ -640,17 +655,23 @@ let _autoExportInProgress = false;
 // with acceptance/provenance value (ai_interaction, ai_suggestion,
 // gemini_suggestion, paste, checkpoint, heuristic_suggestion) is never
 // touched, since those carry the pedagogical/legal-evidentiary value.
-async function maybeAutoExportAndTrim() {
+async function maybeAutoExportAndTrim(force = false) {
   if (_autoExportInProgress) return;
 
-  let usage;
-  try {
-    usage = await chrome.storage.local.getBytesInUse();
-  } catch {
-    return; // getBytesInUse unavailable — skip, don't risk a broken cycle
+  // `force` (the count-based trigger above) skips the quota check entirely
+  // — it exists specifically for sessions that will never trip the quota.
+  // Every other condition below (isRecording, googleDocId, the trim logic
+  // itself) still applies either way.
+  if (!force) {
+    let usage;
+    try {
+      usage = await chrome.storage.local.getBytesInUse();
+    } catch {
+      return; // getBytesInUse unavailable — skip, don't risk a broken cycle
+    }
+    const quota = chrome.storage.local.QUOTA_BYTES ?? 10_485_760;
+    if (usage < quota * STORAGE_QUOTA_WARN_RATIO) return;
   }
-  const quota = chrome.storage.local.QUOTA_BYTES ?? 10_485_760;
-  if (usage < quota * STORAGE_QUOTA_WARN_RATIO) return;
 
   // The whole export+trim cycle runs as one locked unit, including the
   // nested exportSession() call below — this (slow: it hashes and zips the

@@ -457,8 +457,8 @@ const SuggestionsManager = {
         ${excerpt ? `<div class="suggestion-preview-text">${esc(excerpt)}</div>` : ''}
         <div class="suggestion-actions">
           ${excerpt ? `<a href="#" class="btn-preview">Preview</a>` : ''}
-          <button class="btn-apply">Apply</button>
-          <button class="btn-ignore">Ignore</button>
+          <button type="button" class="btn-apply">Apply</button>
+          <button type="button" class="btn-ignore">Ignore</button>
         </div>
       </div>
     `;
@@ -674,15 +674,15 @@ const TimelineRenderer = {
       // auto-dismisses after 10s) can be set or corrected here at any time.
       const selfReportTag = toolLabel ? ` · Self-reported` : '';
       const tagBtnLabel = toolLabel ? 'Change' : 'Tag AI source';
-      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag} · <button class="ecc-link-btn btn-tag-source">${tagBtnLabel}</button>`;
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag} · <button type="button" class="ecc-link-btn btn-tag-source">${tagBtnLabel}</button>`;
       if (evt.meta?.source !== 'internal') {
         actionHTML = evt.meta?.source_url
           ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
-          : `<button class="ecc-btn btn-add-source">Add source</button>`;
+          : `<button type="button" class="ecc-btn btn-add-source">Add source</button>`;
       }
     } else if (evt.type === 'ai_interaction') {
       iconClass = 'ecc-ai';
-      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
       const isParaphrase = evt.meta?.source === 'paraphrase';
       title = evt.meta?.acceptance === 'fully_accepted' ? 'AI suggestion accepted' : 'AI interaction';
       meta = `${time}${isParaphrase ? ' · Paraphrased' : ''}`;
@@ -697,10 +697,10 @@ const TimelineRenderer = {
       meta = `${time}${excerpt ? ' · ' + excerpt : ''}`;
       actionHTML = evt.meta?.status === 'dismissed'
         ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
-        : `<button class="ecc-btn ecc-btn-review" data-ts="${evt.timestamp}">Review</button>`;
+        : `<button type="button" class="ecc-btn ecc-btn-review" data-ts="${evt.timestamp}">Review</button>`;
     } else if (evt.type === 'gemini_suggestion') {
       iconClass = 'ecc-gemini';
-      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
+      iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4L12 2z"/></svg>`;
       title = 'Gemini insert';
       meta = `${time} · ${evt.meta?.char_count ?? 0} chars`;
     } else if (evt.type === 'session_start') {
@@ -777,7 +777,7 @@ const TimelineRenderer = {
         if (evt.meta.source_url && /^https?:\/\//i.test(evt.meta.source_url)) {
           contentHTML += `<div class="paste-source-row"><span class="paste-source-display">Source: <a href="${esc(evt.meta.source_url)}" target="_blank" rel="noopener" style="color:var(--ai-color)">${esc(evt.meta.source_url)}</a></span></div>`;
         } else {
-          contentHTML += `<div class="paste-source-row"><button class="btn-add-source" style="background:none;border:1px dashed var(--text-secondary);color:var(--text-secondary);padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;margin-top:4px;">+ Add source</button></div>`;
+          contentHTML += `<div class="paste-source-row"><button type="button" class="btn-add-source" style="background:none;border:1px dashed var(--text-secondary);color:var(--text-secondary);padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;margin-top:4px;">+ Add source</button></div>`;
         }
       }
     }
@@ -792,7 +792,7 @@ const TimelineRenderer = {
           <p>${esc(tipText)}</p>
           ${excerpt}
           <div class="actions">
-            <button class="btn-dismiss">Dismiss</button>
+            <button type="button" class="btn-dismiss">Dismiss</button>
           </div>
         </div>
       `;
@@ -814,9 +814,9 @@ const TimelineRenderer = {
         <div class="card suggestion-card" data-gemini="${isGemini}" data-interaction-subtype="${esc(evt.meta.interaction_subtype || '')}">
           <p data-full-text="${esc(fullText)}" data-expanded="false">${preview}</p>
           <div class="actions">
-            <button class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
-            ${!isGemini ? '<button class="btn-copy-ai">Copy</button>' : ''}
-            <button class="btn-dismiss">Dismiss</button>
+            <button type="button" class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
+            ${!isGemini ? '<button type="button" class="btn-copy-ai">Copy</button>' : ''}
+            <button type="button" class="btn-dismiss">Dismiss</button>
           </div>
         </div>
       `;
@@ -856,7 +856,7 @@ const TimelineRenderer = {
             </div>
             <div class="card-footer">
               ${footerHTML}
-              <button class="icon-btn small"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+              <button type="button" class="icon-btn small" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
             </div>
           </div>
         `;
@@ -913,6 +913,15 @@ const TimelineRenderer = {
     const ref = evt.event_id ?? evt.timestamp;
     const node = domNode || document.querySelector(`.timeline-event[data-event-id="${ref}"]`);
     if (!node || !evt.meta.status) return;
+
+    // render() calls this for every already-rendered event on every single
+    // SYNC_TIMELINE broadcast (one per logged event), via the querySelector
+    // fallback above — for a long session this is an O(n) DOM scan per
+    // broadcast even when nothing about a given event actually changed.
+    // Skip the DOM mutation (and the scan that found this node, on the next
+    // call, since dataset survives) once a status has already been applied.
+    if (node.dataset.lastStatus === evt.meta.status) return;
+    node.dataset.lastStatus = evt.meta.status;
 
     if (evt.meta.status === 'dismissed') {
       const dismissBtn = node.querySelector('.btn-dismiss');
@@ -1516,8 +1525,8 @@ const ChatInput = {
           <div class="ecc-meta">${esc(errMeta.detail)}</div>
         </div>
         <div class="ecc-action" style="gap:4px;display:flex;">
-          ${(isTimeout || isNetworkErr) ? '<button class="ecc-btn ecc-btn-retry-ai">Retry</button>' : ''}
-          <button class="ecc-btn-close-err" title="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          ${(isTimeout || isNetworkErr) ? '<button type="button" class="ecc-btn ecc-btn-retry-ai">Retry</button>' : ''}
+          <button type="button" class="ecc-btn-close-err" title="Dismiss" aria-label="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
         </div>
       `;
       errCard.querySelector('.ecc-btn-close-err')?.addEventListener('click', () => errCard.remove());
@@ -1636,7 +1645,7 @@ const ModelStatus = {
     const c = configs[type] || configs.setup;
     this.bannerEl.innerHTML = `
       <span class="banner-text">${c.text}</span>
-      <button class="banner-btn">${c.actionLabel}</button>
+      <button type="button" class="banner-btn">${c.actionLabel}</button>
     `;
     this.bannerEl.querySelector('.banner-btn').addEventListener('click', c.actionFn);
   },
@@ -1796,7 +1805,7 @@ const ModelStatus = {
       this.bannerEl.style.display = 'flex';
       this.bannerEl.innerHTML = `
         <span class="banner-text error" style="white-space:pre-wrap;font-size:0.75rem;">${display}</span>
-        <button class="banner-btn" style="flex-shrink:0;align-self:flex-start;" id="err-retry-btn">Retry</button>
+        <button type="button" class="banner-btn" style="flex-shrink:0;align-self:flex-start;" id="err-retry-btn">Retry</button>
       `;
       this.bannerEl.querySelector('#err-retry-btn')?.addEventListener('click', () => {
         chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }).catch(() => {});
@@ -1857,8 +1866,8 @@ const SelectionContext = {
       <div class="sel-quote">"${esc(preview)}"</div>
       <div class="sel-row">
         <input class="sel-input" placeholder="Ask something about this…" type="text">
-        <button class="sel-ask banner-btn">Ask AI</button>
-        <button class="sel-dismiss" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <button type="button" class="sel-ask banner-btn">Ask AI</button>
+        <button type="button" class="sel-dismiss" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
     `;
 

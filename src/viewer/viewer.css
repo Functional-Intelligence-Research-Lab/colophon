@@ -8,6 +8,12 @@
   padding: 0;
 }
 
+/* Visible focus for keyboard users — see sidepanel.css for the same rule. */
+:focus-visible {
+  outline: 2px solid var(--ai-color);
+  outline-offset: 1px;
+}
+
 body {
   font-family: "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, Helvetica, Arial, sans-serif;

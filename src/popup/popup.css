@@ -23,6 +23,12 @@
    this file. */
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Visible focus for keyboard users — see sidepanel.css for the same rule. */
+:focus-visible {
+  outline: 2px solid var(--ai-color);
+  outline-offset: 1px;
+}
+
 body {
   width: 390px;
   margin: 0;
@@ -394,7 +400,9 @@ svg {
 }
 
 .activity-dot {
-  color: #9f9fa7;
+  /* Was #9f9fa7 (~2.5:1 on white, below WCAG AA) — the shared secondary-text
+     token used elsewhere in this file is already darker and AA-safer. */
+  color: var(--text-secondary);
 }
 
 .log-row {

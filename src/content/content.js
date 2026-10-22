@@ -556,6 +556,7 @@ function deactivate() {
   _observer?.disconnect()
   _observer = null
   clearTimeout(_debounce)
+  clearTimeout(_heuristicDebounce)
   clearInterval(_checkpointTimer)
   _checkpointTimer = null
   flushEdit() // flush anything buffered before stopping
@@ -1768,6 +1769,11 @@ async function updateRollingBaseline(forceSendResponse = null) {
 if (typeof document !== 'undefined' && document.addEventListener) {
   document.addEventListener('keydown', (e) => {
     if (!isContextValid()) return;
+    // Gated the same as every other handler in this file — without this,
+    // the rolling-baseline fetch (a full document export request) ran on
+    // every keystroke in any Google Doc regardless of whether recording was
+    // on, contradicting this file's own "dormant by default" design.
+    if (!_active) return;
     // Ignore Ctrl+V so we don't trigger a snapshot mid-paste
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return;
     // Don't race against an active Gemini acceptance poll
