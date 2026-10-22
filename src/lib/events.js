@@ -91,7 +91,7 @@ export function imageUploadEvent({ filename, file_type, position } = {}) {
   }
 }
 
-export function aiInteractionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, similarity_score, source, text, reason } = {}) {
+export function aiInteractionEvent({ model, model_version, context_window, output_preview, content_before, content_after, position_start, position_end, acceptance, ai_chars, similarity_score, source, text, reason, interaction_subtype, attribution_method } = {}) {
   return {
     type: 'ai_interaction',
     timestamp: now(),
@@ -115,6 +115,13 @@ export function aiInteractionEvent({ model, model_version, context_window, outpu
       ...(source ? { source } : {}),
       ...(text ? { text } : {}),
       ...(reason ? { reason } : {}),
+      // Which quick action produced this (paraphrase/grammar/brainstorm) —
+      // absent for raw chat/selection-feedback interactions.
+      ...(interaction_subtype ? { interaction_subtype } : {}),
+      // Present only when this event's classification came from a text-
+      // similarity heuristic (paste auto-reclassification) rather than being
+      // directly observed — a confidence/provenance marker, not a judgment.
+      ...(attribution_method ? { attribution_method } : {}),
     },
   }
 }

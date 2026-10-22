@@ -847,43 +847,46 @@ function findEventByRef(session, ref) {
   return session.events.find(e => e.event_id === ref) ?? session.events.find(e => e.timestamp === ref);
 }
 
-async function updateEventAcceptance(args) {
-  return withSessionLock(() => _updateEventAcceptanceLocked(args));
-}
-
-async function _updateEventAcceptanceLocked({ eventId, acceptance, similarity_score, content_before, content_after }) {
-  const session = await getSession();
-  if (!session) return { status: 'error' };
-
-  const event = findEventByRef(session, eventId);
-  if (event?.meta) {
-    event.meta.acceptance = acceptance;
-    // 0-1: how much of the AI's wording survived — spec v0.2 §4.4.
-    if (similarity_score !== undefined) event.meta.similarity_score = similarity_score;
-    if (content_before !== undefined) {
-      event.meta.content_before_length = content_before.length;
-      event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
-    }
-    if (content_after !== undefined) {
-      event.meta.content_after_length = content_after.length;
-      event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
-    }
-    await saveSession(session);
-    chrome.runtime.sendMessage({
-      action: 'SYNC_TIMELINE',
-      events: session.events,
-    }).catch(() => {});
-  }
-  return { status: 'success' };
-}
-
 // Bounded retry/backoff, ~1.1s total: covers emitPaste()'s own ~1000ms delay
 // between showing the self-report prompt and actually calling LOG_EVENT, so
 // a chip clicked quickly doesn't race the event's own creation. Previously
-// this looked up the event once, silently no-opped on a miss, and still
-// returned { status: 'success' } regardless — so a tag clicked during that
-// window appeared to save in the UI ("✓ Recorded") but was actually dropped.
+// updateEventAcceptance looked up the event once, silently no-opped on a
+// miss, and still returned { status: 'success' } regardless — so a quietly
+// wrong (or entirely dropped) acceptance/similarity_score write was
+// invisible, with no error and no retry. Shared with updateEventMetadata
+// below, which this mirrors exactly.
 const METADATA_UPDATE_RETRY_DELAYS_MS = [0, 150, 350, 600];
+
+async function updateEventAcceptance({ eventId, acceptance, similarity_score, content_before, content_after }) {
+  for (const delay of METADATA_UPDATE_RETRY_DELAYS_MS) {
+    if (delay) await new Promise(r => setTimeout(r, delay));
+    const result = await withSessionLock(async () => {
+      const session = await getSession();
+      if (!session) return null;
+      const event = findEventByRef(session, eventId);
+      if (!event?.meta) return null;
+      event.meta.acceptance = acceptance;
+      // 0-1: how much of the AI's wording survived — spec v0.2 §4.4.
+      if (similarity_score !== undefined) event.meta.similarity_score = similarity_score;
+      if (content_before !== undefined) {
+        event.meta.content_before_length = content_before.length;
+        event.meta.content_before = content_before.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+      }
+      if (content_after !== undefined) {
+        event.meta.content_after_length = content_after.length;
+        event.meta.content_after = content_after.slice(0, MAX_CONTENT_SNAPSHOT_CHARS);
+      }
+      await saveSession(session);
+      chrome.runtime.sendMessage({
+        action: 'SYNC_TIMELINE',
+        events: session.events,
+      }).catch(() => {});
+      return { status: 'success' };
+    });
+    if (result) return result;
+  }
+  return { status: 'error', reason: 'event not found' };
+}
 
 async function updateEventMetadata({ eventId, key, value }) {
   if (!key) return { status: 'error', reason: 'missing key' };

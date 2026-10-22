@@ -1053,6 +1053,15 @@ async function emitPaste(text) {
           event.meta.acceptance = acceptanceFromSimilarity(similarity);
           event.meta.similarity_score = similarity;
           event.meta.ai_chars = text.length;
+          // This classification came from a text-similarity heuristic, not
+          // direct observation — _pendingAIOutput is global and 5-minutes-
+          // lived, so a genuinely external paste (e.g. from a different AI
+          // tool's tab) that happens to overlap enough with a recent
+          // Colophon quick-action's own output lands here too. Marking it
+          // lets research analysis filter/exclude this lower-confidence
+          // case instead of trusting it as equal to a directly-observed
+          // interaction.
+          event.meta.attribution_method = 'similarity_heuristic';
           // content_before/content_after were set above (lines 1019-1021)
           // to the paste-style "surrounding document context," not real AI
           // content — correct for a plain paste, but wrong once this event

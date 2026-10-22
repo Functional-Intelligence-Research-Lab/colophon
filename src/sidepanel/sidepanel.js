@@ -811,7 +811,7 @@ const TimelineRenderer = {
         : esc(fullText);
 
       contentHTML = `
-        <div class="card suggestion-card" data-gemini="${isGemini}">
+        <div class="card suggestion-card" data-gemini="${isGemini}" data-interaction-subtype="${esc(evt.meta.interaction_subtype || '')}">
           <p data-full-text="${esc(fullText)}" data-expanded="false">${preview}</p>
           <div class="actions">
             <button class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
@@ -1092,6 +1092,7 @@ const TimelineRenderer = {
         const p = eventCard.querySelector('p');
         const textPreview = p.dataset.fullText ? p.dataset.fullText : p.textContent;
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
+        const subtype = eventCard.querySelector('[data-interaction-subtype]')?.dataset.interactionSubtype || null;
 
         TimelineRenderer.updateEventState({ event_id: cardEventId, meta: { status: 'dismissed' } });
         chrome.runtime.sendMessage({
@@ -1111,12 +1112,13 @@ const TimelineRenderer = {
           action: 'LOG_EVENT',
           payload: aiInteractionEvent({
             model: 'local/unknown',
-            output_preview: textPreview, 
+            output_preview: textPreview,
             position_start: 0,
             position_end: 0,
             acceptance: 'rejected',
             ai_chars: 0,
-            reason: 'User dismissed suggestion.'
+            reason: 'User dismissed suggestion.',
+            interaction_subtype: subtype,
           })
         }).catch(() => {});
         }
@@ -1131,6 +1133,7 @@ const TimelineRenderer = {
         const cardEventId = eventCard.dataset.eventId;
         const p = eventCard.querySelector('p');
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
+        const subtype = eventCard.querySelector('[data-interaction-subtype]')?.dataset.interactionSubtype || null;
 
         let textToInsert = p.dataset.fullText || p.textContent;
         textToInsert = textToInsert.replace(/Show$|Hide$/, '').replace(/\.\.\.$/,'').trim();
@@ -1145,23 +1148,28 @@ const TimelineRenderer = {
             payload: { eventId: cardEventId, status: 'used' }
           }).catch(() => {});
 
-          const interactionTimestamp = new Date().toISOString();
-          chrome.runtime.sendMessage({
-            action: 'LOG_EVENT',
-            payload: aiInteractionEvent({
-              model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
-              output_preview: textToInsert,
-              position_start: 0,
-              position_end: textToInsert.length,
-              acceptance: 'fully_accepted',
-              content_before: '[snapshot unavailable]',
-              content_after: textToInsert,
-              ai_chars: textToInsert.length
-            })
-          }).catch(() => {});
+          // Build the event first and use its own timestamp for the later
+          // scoreAcceptance/UPDATE_EVENT_ACCEPTANCE call, rather than an
+          // independently-captured `new Date().toISOString()` — two separate
+          // clock reads could land in different milliseconds, and since the
+          // sidepanel never learns the server-assigned event_id, that lookup
+          // keys on this timestamp string. Using the real event's own value
+          // eliminates the race instead of just retrying around it.
+          const event = aiInteractionEvent({
+            model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
+            output_preview: textToInsert,
+            position_start: 0,
+            position_end: textToInsert.length,
+            acceptance: 'fully_accepted',
+            content_before: '[snapshot unavailable]',
+            content_after: textToInsert,
+            ai_chars: textToInsert.length,
+            interaction_subtype: subtype,
+          });
+          chrome.runtime.sendMessage({ action: 'LOG_EVENT', payload: event }).catch(() => {});
 
           if (!isGemini && activeTabId) {
-            setTimeout(() => scoreAcceptance(interactionTimestamp, textToInsert, activeTabId), 1500);
+            setTimeout(() => scoreAcceptance(event.timestamp, textToInsert, activeTabId), 1500);
           }
         };
 
@@ -1445,8 +1453,12 @@ const ChatInput = {
       const { text: rawReply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
       const reply = _cleanAIResponse(rawReply);
 
-      // If triggered by a quick action (paraphrase/improve), store output so
-      // content.js can reclassify the next paste as an AI interaction.
+      // Capture which quick action (if any) produced this before
+      // notifyAIResponse() reads-then-clears it — needed below so the
+      // logged event (and later, an Insert/Dismiss on it) can carry
+      // interaction_subtype; notifyAIResponse()'s own job is unrelated
+      // (storing output so content.js can reclassify the next paste).
+      const subtype = QuickActions._pendingType;
       QuickActions.notifyAIResponse(reply, model);
 
       // Replace the placeholder card with the real suggestion
@@ -1458,7 +1470,7 @@ const ChatInput = {
       const suggestionEvent = {
         type: 'ai_suggestion',
         timestamp: now,
-        meta: { text: reply, model },
+        meta: { text: reply, model, interaction_subtype: subtype },
       };
 
       TimelineRenderer.render([suggestionEvent]);
@@ -1473,6 +1485,7 @@ const ChatInput = {
           position_end: 0,
           acceptance: 'rejected',
           ai_chars: reply.length,
+          interaction_subtype: subtype,
         })
       }).catch(() => {});
 
@@ -1899,24 +1912,27 @@ const SelectionContext = {
       if (existing) existing.remove();
       TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
 
-      const now = new Date().toISOString();
-      TimelineRenderer.render([{ type: 'ai_suggestion', timestamp: now, meta: { text: reply, model } }]);
+      // Build the event first and reuse its own timestamp everywhere below —
+      // same fix as logAcceptance() above: an independently-captured
+      // `new Date().toISOString()` could land in a different millisecond
+      // than the one aiInteractionEvent() generates internally, and since
+      // the sidepanel never learns the server-assigned event_id, the later
+      // scoreAcceptance/UPDATE_EVENT_ACCEPTANCE lookup keys on this string.
+      const event = aiInteractionEvent({
+        model: model,
+        output_preview: reply,
+        position_start: 0,
+        position_end: 0,
+        acceptance: 'rejected',
+        ai_chars: reply.length,
+        context_window: text,
+      });
+      TimelineRenderer.render([{ type: 'ai_suggestion', timestamp: event.timestamp, meta: { text: reply, model } }]);
 
-      chrome.runtime.sendMessage({
-        action: 'LOG_EVENT',
-        payload: aiInteractionEvent({
-          model: model,
-          output_preview: reply,
-          position_start: 0,
-          position_end: 0,
-          acceptance: 'rejected',
-          ai_chars: reply.length,
-          context_window: text,
-        })
-      }).catch(() => {});
+      chrome.runtime.sendMessage({ action: 'LOG_EVENT', payload: event }).catch(() => {});
 
       if (activeTabId) {
-        setTimeout(() => scoreAcceptance(now, reply, activeTabId), 1500);
+        setTimeout(() => scoreAcceptance(event.timestamp, reply, activeTabId), 1500);
       }
     } catch (err) {
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
