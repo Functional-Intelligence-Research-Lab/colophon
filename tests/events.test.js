@@ -111,6 +111,28 @@ describe('aiSuggestionEvent / aiInteractionEvent fields', () => {
   })
 })
 
+describe('aiInteractionEvent — interaction_subtype and attribution_method', () => {
+  it('carries interaction_subtype when a quick action produced it', () => {
+    const e = aiInteractionEvent({ model: 'x', interaction_subtype: 'grammar' })
+    expect(e.meta.interaction_subtype).toBe('grammar')
+  })
+
+  it('omits interaction_subtype for raw chat/selection-feedback interactions', () => {
+    const e = aiInteractionEvent({ model: 'x' })
+    expect(e.meta).not.toHaveProperty('interaction_subtype')
+  })
+
+  it('carries attribution_method when set by the similarity-heuristic paste reclassification', () => {
+    const e = aiInteractionEvent({ model: 'x', attribution_method: 'similarity_heuristic' })
+    expect(e.meta.attribution_method).toBe('similarity_heuristic')
+  })
+
+  it('omits attribution_method for directly-observed interactions (the common case)', () => {
+    const e = aiInteractionEvent({ model: 'x', acceptance: 'fully_accepted' })
+    expect(e.meta).not.toHaveProperty('attribution_method')
+  })
+})
+
 describe('pasteEvent fields and self-reporting tag', () => {
   it('carries self-reported source_tool into meta when provided', () => {
     const e = pasteEvent({ char_count: 50, source_tool: 'chatgpt' })

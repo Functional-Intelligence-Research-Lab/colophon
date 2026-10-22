@@ -29,6 +29,7 @@ import {
   pushEvent,
   findEventByRef,
   updateEventMetadata,
+  updateEventAcceptance,
   updateEventState,
 } from '../src/background/service-worker.js'
 import { getSession } from '../src/shared/storage.js'
@@ -132,6 +133,28 @@ describe('updateEventMetadata retry (silent paste-tag-drop race)', () => {
   it('returns a real error (not a false success) when the event never appears', async () => {
     await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
     const result = await updateEventMetadata({ eventId: 'does-not-exist', key: 'source_tool', value: 'claude' })
+    expect(result.status).toBe('error')
+  }, 10000)
+})
+
+describe('updateEventAcceptance — honest success/failure (was always {status:"success"})', () => {
+  it('succeeds and writes acceptance/similarity_score when the event exists', async () => {
+    await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
+    const interactionEvent = { timestamp: '2026-04-01T00:00:00.000Z', type: 'ai_interaction', meta: { acceptance: 'rejected' } }
+    await appendEvent(interactionEvent, { tab: { id: 1 } })
+
+    const result = await updateEventAcceptance({ eventId: '2026-04-01T00:00:00.000Z', acceptance: 'fully_accepted', similarity_score: 0.95 })
+    expect(result.status).toBe('success')
+
+    const session = await getSession()
+    const stored = session.events.find(e => e.type === 'ai_interaction')
+    expect(stored.meta.acceptance).toBe('fully_accepted')
+    expect(stored.meta.similarity_score).toBe(0.95)
+  })
+
+  it('returns a real error (not a false success) when the event never appears', async () => {
+    await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
+    const result = await updateEventAcceptance({ eventId: 'does-not-exist', acceptance: 'fully_accepted' })
     expect(result.status).toBe('error')
   }, 10000)
 })
