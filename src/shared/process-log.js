@@ -76,8 +76,12 @@ export async function computeEventHash(event, previousHash, sessionId) {
 export async function buildProcessLog(session, userId) {
   const endTime = new Date().toISOString()
 
-  // Deep-copy events so we don't mutate storage
-  const events = session.events.map(e => ({ ...e, meta: { ...e.meta } }))
+  // Deep-copy events so we don't mutate storage. event_id is an internal-only
+  // identity (added so UPDATE_EVENT_ACCEPTANCE/_METADATA/_STATE have a real,
+  // collision-free key instead of reusing `timestamp`) — not part of the TWFF
+  // v0.2 event schema, so it's stripped here rather than exported into
+  // process-log.json and hashed into the integrity chain.
+  const events = session.events.map(({ event_id: _event_id, ...e }) => ({ ...e, meta: { ...e.meta } }))
 
   // Compute per-event hash chain (SPEC §5.2)
   let previousHash = ''

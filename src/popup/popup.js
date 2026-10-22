@@ -18,6 +18,7 @@
 import { exportTwff } from '../lib/export.js'
 import { classifyEuLabel, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
 import { formatDocTitle } from '../shared/doc-title.js'
+import { esc } from '../shared/esc.js'
 
 const $ = id => document.getElementById(id)
 
@@ -348,15 +349,21 @@ function eventToActivity(event) {
 }
 
 function ActivityItem(item) {
+  // title/meta are hardcoded literals for every real event type today (the
+  // 'info' branch in eventToActivity() that passes raw event.title/
+  // event.meta through is currently dead code, no producer emits it) — but
+  // escaping here means that stays true if that ever changes, rather than
+  // this privileged extension page becoming a stored-XSS sink the moment it
+  // does.
   const meta = item.meta.map((part, index) => (
-    index === 0 ? `<span>${part}</span>` : `<span class="activity-dot">•</span><span>${part}</span>`
+    index === 0 ? `<span>${esc(part)}</span>` : `<span class="activity-dot">•</span><span>${esc(part)}</span>`
   )).join('')
 
   return `
     <article class="activity-item">
       <div class="activity-mark activity-mark--${item.type}">${activityIcon(item.type)}</div>
       <div class="activity-copy">
-        <p class="activity-title">${item.title}</p>
+        <p class="activity-title">${esc(item.title)}</p>
         <p class="activity-meta">${meta}</p>
       </div>
     </article>
@@ -419,4 +426,7 @@ function showNotice(message, isError = true) {
     notice.hidden = true
   }, 2600)
 }
+
+// Test seam only.
+export { ActivityItem, eventToActivity }
 

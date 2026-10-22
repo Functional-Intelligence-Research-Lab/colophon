@@ -2,7 +2,7 @@ import { complete } from '../lib/ai/ollama-client.js';
 import { esc } from '../shared/esc.js';
 import {aiInteractionEvent} from '../lib/events.js'
 import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js';
-import { getSourceToolLabel } from '../shared/source-tools.js';
+import { getSourceToolLabel, SOURCE_TOOLS } from '../shared/source-tools.js';
 
 // ── Utility: Debounce Function ───────────────────────────────────────────────
 function debounce(func, wait) {
@@ -377,7 +377,7 @@ const SuggestionsManager = {
     try {
       chrome.runtime.sendMessage({
         action: 'UPDATE_EVENT_STATE',
-        payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+        payload: { eventId: item.event.event_id ?? item.event.timestamp, status: 'dismissed' },
       }).catch(() => {});
     } catch {}
     this._queue.splice(this._pointer, 1);
@@ -396,7 +396,7 @@ const SuggestionsManager = {
       try {
         chrome.runtime.sendMessage({
           action: 'UPDATE_EVENT_STATE',
-          payload: { eventTimestamp: item.event.timestamp, status: 'dismissed' },
+          payload: { eventId: item.event.event_id ?? item.event.timestamp, status: 'dismissed' },
         }).catch(() => {});
       } catch {}
     }
@@ -657,6 +657,10 @@ const TimelineRenderer = {
     const wrapper = document.createElement('div');
     wrapper.className = 'timeline-event-compact';
     wrapper.dataset.timestamp = evt.timestamp;
+    // Real, collision-free identity for the action buttons below (Add
+    // source, Tag source, Review) to key their UPDATE_EVENT_* messages on —
+    // falls back to the timestamp for events that predate event_id.
+    wrapper.dataset.eventId = evt.event_id ?? evt.timestamp;
 
     let iconSvg = '', iconClass = 'ecc-user', title = '', meta = '', actionHTML = '';
 
@@ -665,8 +669,12 @@ const TimelineRenderer = {
       iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
       const toolLabel = evt.meta?.source_tool ? getSourceToolLabel(evt.meta.source_tool) : null;
       title = toolLabel ? `Pasted content (${toolLabel})` : 'Pasted content';
+      // Always editable, not just settable once — a self-report tag made in
+      // the paste-time modal (or missed entirely, since that modal
+      // auto-dismisses after 10s) can be set or corrected here at any time.
       const selfReportTag = toolLabel ? ` · Self-reported` : '';
-      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag}`;
+      const tagBtnLabel = toolLabel ? 'Change' : 'Tag AI source';
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag} · <button class="ecc-link-btn btn-tag-source">${tagBtnLabel}</button>`;
       if (evt.meta?.source !== 'internal') {
         actionHTML = evt.meta?.source_url
           ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
@@ -727,6 +735,7 @@ const TimelineRenderer = {
     const wrapper = document.createElement('div');
 
     wrapper.dataset.timestamp = evt.timestamp;
+    wrapper.dataset.eventId = evt.event_id ?? evt.timestamp;
 
     let typeClass = 'user';
     let authorLabel = '';
@@ -901,7 +910,8 @@ const TimelineRenderer = {
   },
 
   updateEventState(evt, domNode = null) {
-    const node = domNode || document.querySelector(`.timeline-event[data-timestamp="${evt.timestamp}"]`);
+    const ref = evt.event_id ?? evt.timestamp;
+    const node = domNode || document.querySelector(`.timeline-event[data-event-id="${ref}"]`);
     if (!node || !evt.meta.status) return;
 
     if (evt.meta.status === 'dismissed') {
@@ -938,7 +948,7 @@ const TimelineRenderer = {
         const btn = e.target;
         const row = btn.parentElement;
         const eventCard = btn.closest('.timeline-event') || btn.closest('.timeline-event-compact');
-        const cardTimestamp = eventCard?.dataset.timestamp;
+        const cardEventId = eventCard?.dataset.eventId;
 
         const input = document.createElement('input');
         input.type = 'text';
@@ -959,16 +969,74 @@ const TimelineRenderer = {
             ? `<a href="${esc(val)}" target="_blank" rel="noopener" style="color:var(--ai-color)">${esc(val)}</a>`
             : esc(val);
           row.innerHTML = `<span class="paste-source-display" style="font-size:0.8rem;color:var(--text-secondary);">Source: ${displayHref}</span>`;
-          if (cardTimestamp) {
+          if (cardEventId) {
             chrome.runtime.sendMessage({
               action: 'UPDATE_EVENT_METADATA',
-              payload: { eventTimestamp: cardTimestamp, key: 'source_url', value: val },
+              payload: { eventId: cardEventId, key: 'source_url', value: val },
             }).catch(() => {});
           }
         };
 
         saveBtn.addEventListener('click', save);
         input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') row.replaceChildren(btn); });
+        return;
+      }
+
+      // ── TAG / CHANGE AI SOURCE (paste self-report, retroactive) ──
+      // Reuses UPDATE_EVENT_METADATA, same as .btn-add-source above. Always
+      // offered, whether or not a tag already exists — the paste-time modal
+      // auto-dismisses after 10s with no fallback before this control
+      // existed, and even when a tag was set, it may be wrong (e.g. the
+      // wrong chip was clicked) and must stay changeable, not just settable
+      // once.
+      if (e.target.classList.contains('btn-tag-source')) {
+        const btn = e.target;
+        const row = btn.closest('.ecc-meta');
+        const eventCard = btn.closest('.timeline-event-compact');
+        const cardEventId = eventCard?.dataset.eventId;
+        if (!row || !cardEventId) return;
+
+        const picker = document.createElement('span');
+        picker.className = 'source-tool-picker';
+
+        SOURCE_TOOLS.forEach(tool => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'ecc-chip-btn';
+          chip.textContent = tool.label;
+          chip.addEventListener('click', async (ev2) => {
+            ev2.stopPropagation();
+            picker.querySelectorAll('button').forEach(b => { b.disabled = true; });
+            let confirmed = false;
+            try {
+              const response = await chrome.runtime.sendMessage({
+                action: 'UPDATE_EVENT_METADATA',
+                payload: { eventId: cardEventId, key: 'source_tool', value: tool.id },
+              });
+              confirmed = response?.status === 'success';
+            } catch { /* SW might be temporarily sleeping */ }
+            // On success the SW's SYNC_TIMELINE broadcast re-renders the
+            // whole panel with the new tag; nothing further to do here. On
+            // failure, surface it inline rather than leaving the picker
+            // looking like it silently did nothing.
+            if (!confirmed) {
+              picker.innerHTML = '<span style="color:#f28b82;font-size:0.72rem;">Could not save — try again</span>';
+            }
+          });
+          picker.appendChild(chip);
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'ecc-chip-btn';
+        cancelBtn.textContent = '✕';
+        cancelBtn.addEventListener('click', (ev2) => {
+          ev2.stopPropagation();
+          row.replaceChild(btn, picker);
+        });
+        picker.appendChild(cancelBtn);
+
+        row.replaceChild(picker, btn);
         return;
       }
 
@@ -1020,15 +1088,15 @@ const TimelineRenderer = {
       const dismissBtn = e.target.closest('.btn-dismiss');
       if (dismissBtn) {
         const eventCard = dismissBtn.closest('.timeline-event');
-        const cardTimestamp = eventCard.dataset.timestamp;
+        const cardEventId = eventCard.dataset.eventId;
         const p = eventCard.querySelector('p');
         const textPreview = p.dataset.fullText ? p.dataset.fullText : p.textContent;
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
 
-        TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'dismissed' } });
+        TimelineRenderer.updateEventState({ event_id: cardEventId, meta: { status: 'dismissed' } });
         chrome.runtime.sendMessage({
           action: 'UPDATE_EVENT_STATE',
-          payload: { eventTimestamp: cardTimestamp, status: 'dismissed' }
+          payload: { eventId: cardEventId, status: 'dismissed' }
         }).catch(() => {});
 
         if (isGemini) {
@@ -1060,7 +1128,7 @@ const TimelineRenderer = {
       const useBtn = e.target.closest('.btn-insert');
       if (useBtn) {
         const eventCard = useBtn.closest('.timeline-event');
-        const cardTimestamp = eventCard.dataset.timestamp;
+        const cardEventId = eventCard.dataset.eventId;
         const p = eventCard.querySelector('p');
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
 
@@ -1071,10 +1139,10 @@ const TimelineRenderer = {
         useBtn.disabled = true;
 
         const logAcceptance = () => {
-          TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'used' } });
+          TimelineRenderer.updateEventState({ event_id: cardEventId, meta: { status: 'used' } });
           chrome.runtime.sendMessage({
             action: 'UPDATE_EVENT_STATE',
-            payload: { eventTimestamp: cardTimestamp, status: 'used' }
+            payload: { eventId: cardEventId, status: 'used' }
           }).catch(() => {});
 
           const interactionTimestamp = new Date().toISOString();
@@ -1107,10 +1175,10 @@ const TimelineRenderer = {
             const response = await chrome.tabs.sendMessage(activeTabId, { action: 'GEMINI_ACCEPT' });
             if (response?.status === 'ok' || response?.status === 'error') {
               // Just update the card visual — detector handles the event log.
-              TimelineRenderer.updateEventState({ timestamp: cardTimestamp, meta: { status: 'used' } });
+              TimelineRenderer.updateEventState({ event_id: cardEventId, meta: { status: 'used' } });
               chrome.runtime.sendMessage({
                 action: 'UPDATE_EVENT_STATE',
-                payload: { eventTimestamp: cardTimestamp, status: 'used' },
+                payload: { eventId: cardEventId, status: 'used' },
               }).catch(() => {});
             }
           } catch (err) {
@@ -1287,26 +1355,41 @@ async function _buildSystemPrompt() {
 // with content.js/gemini-detector.js's diff-based acceptance path so both
 // produce a comparable similarity_score (TWFF spec v0.2 §4.4).
 
-async function scoreAcceptance(eventTimestamp, suggestionText, tabId) {
+async function scoreAcceptance(eventId, suggestionText, tabId) {
   try {
     const res = await chrome.tabs.sendMessage(tabId, { action: 'GET_EDITOR_TEXT' });
     if (!res?.text) return;
-    const similarity_score = jaccardSimilarity(suggestionText, res.text);
-    const acceptance = acceptanceFromSimilarity(similarity_score);
 
-    // Locate suggestion in doc and extract surrounding context
-    let content_before = '';
-    let content_after = '';
-    const searchKey = suggestionText.slice(0, 50);
-    const idx = res.text.indexOf(searchKey);
-    if (idx >= 0) {
-      content_before = res.text.slice(Math.max(0, idx - 300), idx);
-      content_after  = res.text.slice(idx + suggestionText.length, idx + suggestionText.length + 300);
+    // Locate where the suggestion landed (prefix match, shrinking on miss —
+    // the end of a long suggestion is more likely to have been edited than
+    // the start). Comparing against the whole document here (instead of just
+    // this local window) would deflate the score for any non-trivial
+    // document, since Jaccard's denominator is the full word union —
+    // misclassifying untouched, fully-accepted insertions as modified/
+    // rejected purely as a function of document length, not actual editing.
+    let idx = -1;
+    for (const keyLen of [50, 20]) {
+      idx = res.text.indexOf(suggestionText.slice(0, keyLen));
+      if (idx >= 0) break;
     }
 
+    // Not found at all (even a short prefix) — the suggestion was removed or
+    // rewritten beyond recognition near its start. No reasonable local
+    // window exists to compare against, so treat it as rejected rather than
+    // falling back to the misleading whole-document score.
+    const similarity_score = idx >= 0
+      ? jaccardSimilarity(suggestionText, res.text.slice(idx, idx + suggestionText.length))
+      : 0;
+    const acceptance = acceptanceFromSimilarity(similarity_score);
+
+    // content_before/content_after are left untouched here — logAcceptance()
+    // already set them correctly to the real inserted text when the
+    // suggestion was first logged; recomputing them from a "surrounding
+    // document context" slice (as this function used to) would overwrite
+    // the correct values with the wrong field semantics.
     chrome.runtime.sendMessage({
       action: 'UPDATE_EVENT_ACCEPTANCE',
-      payload: { eventTimestamp, acceptance, similarity_score, content_before, content_after },
+      payload: { eventId, acceptance, similarity_score },
     });
   } catch {
     // Content script not available (not on a Docs page); skip

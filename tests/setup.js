@@ -56,20 +56,36 @@ global.chrome = {
   runtime: {
     sendMessage: () => Promise.resolve({}),
     onMessage: { addListener: () => {} },
+    onInstalled: { addListener: () => {} },
+  },
+  // Only enough to let service-worker.js's top-level listener registrations
+  // run without throwing when it's imported directly in a test — none of
+  // these are expected to actually fire in tests that don't simulate a real
+  // context-menu click.
+  contextMenus: {
+    create: () => {},
+    onClicked: { addListener: () => {} },
   },
   storage: {
     local: {
+      // Real chrome.storage.local crosses an IPC boundary, so every get()
+      // returns a structured-clone copy, never the live stored object — two
+      // concurrent reads get two independent snapshots, and whichever set()
+      // finishes last wins outright. Cloning here too (instead of handing
+      // back shared references) is what makes the session read-modify-write
+      // lock's tests meaningful — without it, "concurrent" mutations in a
+      // test would invisibly share one object and never actually race.
       get(keys) {
         if (typeof keys === 'string') {
-          return Promise.resolve({ [keys]: _store[keys] })
+          return Promise.resolve({ [keys]: structuredClone(_store[keys]) })
         }
         const result = {}
         const ks = Array.isArray(keys) ? keys : Object.keys(keys)
-        for (const k of ks) result[k] = _store[k]
+        for (const k of ks) result[k] = structuredClone(_store[k])
         return Promise.resolve(result)
       },
       set(items) {
-        Object.assign(_store, items)
+        Object.assign(_store, structuredClone(items))
         return Promise.resolve()
       },
       remove(keys) {
