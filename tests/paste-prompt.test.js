@@ -151,7 +151,7 @@ describe('Paste Source Tagging UI Prompt', () => {
     expect(sentMessages).toContainEqual({
       type: 'UPDATE_EVENT_METADATA',
       payload: {
-        eventTimestamp: '2026-10-15T10:00:00.000Z',
+        eventId: '2026-10-15T10:00:00.000Z',
         key: 'source_tool',
         value: 'claude',
       },

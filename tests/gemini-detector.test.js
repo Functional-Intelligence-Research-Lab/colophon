@@ -6,7 +6,7 @@
  * matching lives in gemini-selectors.js and is covered separately.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createGeminiDetector } from '../src/content/gemini-detector.js'
 import {
   classifyAction,
@@ -22,6 +22,7 @@ function fakeEl({ ariaLabel = '', text = '', buttons = [] } = {}) {
     getAttribute: name => (name === 'aria-label' ? ariaLabel : null),
     textContent: text,
     querySelectorAll: () => buttons,
+    cloneNode: () => ({ textContent: text, querySelectorAll: () => [] }),
     parentElement: null,
   }
 }
@@ -42,7 +43,7 @@ describe('gemini-selectors classification', () => {
     expect(classifyAction(fakeEl({ text: 'Something else' }))).toBe(null)
   })
 
-  it('only treats a container as Gemini when it has a Gemini cue', () => {
+  it('only treats a container as Gemini when it has a Gemini-specific cue', () => {
     // "Gemini" alone is too broad (matches Ask Gemini button, menu items, etc.)
     const withGeminiOnly = fakeEl({ ariaLabel: 'Gemini suggestion' })
     expect(looksLikeGeminiSuggestion(withGeminiOnly)).toBe(false)
@@ -51,11 +52,17 @@ describe('gemini-selectors classification', () => {
     const withHelpMeWrite = fakeEl({ ariaLabel: 'Help me write' })
     expect(looksLikeGeminiSuggestion(withHelpMeWrite)).toBe(true)
 
-    const withAcceptButton = fakeEl({
+    // A bare "Insert" button with no Gemini-specific class/label is NOT
+    // enough on its own — this exact shape is also how a plain human
+    // Suggest-mode comment ("Accept suggestion") and Docs' many ordinary
+    // insert-table/insert-image/insert-link dialogs render, and treating it
+    // as Gemini was the root cause of real false "Gemini proposed changes"
+    // notifications firing with no actual Gemini suggestion present.
+    const withBareAcceptButton = fakeEl({
       text: 'Some draft text',
       buttons: [fakeEl({ text: 'Insert' })],
     })
-    expect(looksLikeGeminiSuggestion(withAcceptButton)).toBe(true)
+    expect(looksLikeGeminiSuggestion(withBareAcceptButton)).toBe(false)
 
     const unrelated = fakeEl({ text: 'A normal dialog', buttons: [fakeEl({ text: 'OK' })] })
     expect(looksLikeGeminiSuggestion(unrelated)).toBe(false)
@@ -152,6 +159,48 @@ describe('createGeminiDetector emission', () => {
     detector._onSuggestionAppeared('Draft')
     detector._onClickCapture({ target: fakeClickEl('Bold') })
     expect(emitted.filter(e => e.type === 'ai_interaction')).toHaveLength(0)
+  })
+})
+
+describe('scan() false-notification regression', () => {
+  const realDocument = global.document
+
+  afterEach(() => {
+    global.document = realDocument
+  })
+
+  it('emits nothing for an empty "Help me write" box with no draft yet', () => {
+    // Before this fix, extractSuggestionText() unconditionally substituted
+    // the literal string "Gemini proposed changes" whenever no real prose
+    // was found, which scan() then treated as a genuine suggestion and
+    // emitted — a real, reported false notification with no actual Gemini
+    // suggestion behind it.
+    const emptyBox = fakeEl({ ariaLabel: 'Help me write', text: '' })
+    global.document = {
+      querySelector: sel => (sel === '[aria-label*="Help me write" i]' ? emptyBox : null),
+    }
+
+    const emitted = []
+    const detector = createGeminiDetector({ emit: e => emitted.push(e) })
+    detector._scan()
+
+    expect(emitted).toHaveLength(0)
+  })
+
+  it('emits nothing for an ordinary human Suggest-mode comment bubble', () => {
+    const humanComment = fakeEl({
+      text: 'Maybe cite a source here?',
+      buttons: [fakeEl({ text: 'Accept suggestion' }), fakeEl({ text: 'Reject suggestion' })],
+    })
+    global.document = {
+      querySelector: sel => (sel === '.docos-anchoreddocoview' ? humanComment : null),
+    }
+
+    const emitted = []
+    const detector = createGeminiDetector({ emit: e => emitted.push(e) })
+    detector._scan()
+
+    expect(emitted).toHaveLength(0)
   })
 })
 
