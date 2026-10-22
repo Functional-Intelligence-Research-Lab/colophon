@@ -44,12 +44,20 @@ export const ANNOTATION_TYPES = {
 const EXPORT_TEXT_CAP = 500;
 
 function sanitizeEventForExport(event) {
-    const meta = event.meta;
-    if (!meta) return event;
+    // event_id is an internal-only identity (added so UPDATE_EVENT_ACCEPTANCE/
+    // _METADATA/_STATE have a real, collision-free key instead of reusing
+    // `timestamp`) — not part of the TWFF v0.2 event schema, so it's always
+    // stripped here, before toDict()'s hash chain is computed over this
+    // function's output, regardless of whether any meta field also needs
+    // sanitizing below.
+    const { event_id: _event_id, ...rest } = event;
+
+    const meta = rest.meta;
+    if (!meta) return rest;
     const hasSanitizableField = meta.text !== undefined || meta.reason !== undefined
         || meta.insertion_velocity !== undefined || meta.likely_ai !== undefined
         || meta.too_fast_for_human !== undefined;
-    if (!hasSanitizableField) return event;
+    if (!hasSanitizableField) return rest;
     const sanitizedMeta = { ...meta };
     if (typeof sanitizedMeta.text === 'string') {
         sanitizedMeta.text = sanitizedMeta.text.slice(0, EXPORT_TEXT_CAP);
@@ -60,7 +68,7 @@ function sanitizeEventForExport(event) {
     delete sanitizedMeta.insertion_velocity;
     delete sanitizedMeta.likely_ai;
     delete sanitizedMeta.too_fast_for_human;
-    return { ...event, meta: sanitizedMeta };
+    return { ...rest, meta: sanitizedMeta };
 }
 
     /**

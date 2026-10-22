@@ -19,7 +19,7 @@ function relativeTime(isoString) {
 
 function eventToItem(evt) {
   const time = relativeTime(evt.timestamp)
-  const id = evt.timestamp
+  const id = evt.event_id ?? evt.timestamp
   const meta = evt.meta ?? {}
 
   switch (evt.type) {
@@ -237,7 +237,7 @@ export function mountColophonPanel(host, options = {}) {
       localOverrides.set(suggId, { state: 'applying' })
       applyEvents(_rawEvents)
       options.onUseSuggestion?.(suggestion.copy)
-      sendToSW({ action: 'UPDATE_EVENT_STATE', payload: { eventTimestamp: suggId, status: 'used' } })
+      sendToSW({ action: 'UPDATE_EVENT_STATE', payload: { eventId: suggId, status: 'used' } })
       setTimeout(() => {
         localOverrides.set(suggId, { state: 'applied' })
         applyEvents(_rawEvents)
@@ -248,7 +248,7 @@ export function mountColophonPanel(host, options = {}) {
     if (action === 'dismiss-suggestion' && suggId) {
       localOverrides.set(suggId, { state: 'dismissed' })
       applyEvents(_rawEvents)
-      sendToSW({ action: 'UPDATE_EVENT_STATE', payload: { eventTimestamp: suggId, status: 'dismissed' } })
+      sendToSW({ action: 'UPDATE_EVENT_STATE', payload: { eventId: suggId, status: 'dismissed' } })
       return
     }
 

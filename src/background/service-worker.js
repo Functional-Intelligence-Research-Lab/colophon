@@ -109,8 +109,13 @@ function broadcastModelStatus(extra = {}) {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-// Restore in-memory snapshot timestamp from persisted session metadata on SW startup
-getSession().then(session => {
+// Restore in-memory snapshot timestamp from persisted session metadata on SW
+// startup. Kept as an awaitable promise (not fire-and-forget) — a
+// GET_SNAPSHOT_AGE message arriving in the brief window right after a cold
+// start, before this resolved, used to see _lastSnapshotTimestamp still at
+// its initial 0 and answer "Infinity ms since last snapshot" even when a
+// real, recent snapshot was already on disk.
+const _snapshotRestorePromise = getSession().then(session => {
   const ts = session?.metadata?.last_snapshot_timestamp;
   if (ts) _lastSnapshotTimestamp = ts;
 }).catch(() => {});
@@ -119,6 +124,19 @@ getSession().then(session => {
 chrome.storage.local.get('llamafilePort').then(res => {
   if (res.llamafilePort) {
     _llamafilePort = res.llamafilePort;
+  }
+}).catch(() => {});
+
+// Restore pending AI output (set by a sidepanel paraphrase/improve quick
+// action, consumed by the next matching paste) from storage on SW startup —
+// previously in-memory only, so an MV3 idle-termination between the two
+// (realistic: the whole point of this flow is the user alt-tabbing out to
+// an AI tool and back, which easily outlasts the SW's idle timeout) lost
+// it, and a paste that really was that AI's output silently logged as a
+// plain, un-self-reported paste instead of an ai_interaction.
+chrome.storage.local.get('pendingAIOutput').then(res => {
+  if (res.pendingAIOutput && Date.now() < res.pendingAIOutput.expiresAt) {
+    _pendingAIOutput = res.pendingAIOutput;
   }
 }).catch(() => {});
 
@@ -163,6 +181,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 // ── Message routing ───────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Defense-in-depth: not currently exploitable (no externally_connectable,
+  // no onMessageExternal in the manifest, so chrome.runtime.onMessage only
+  // ever fires for this extension's own pages/content scripts regardless of
+  // this check), but cheap insurance against a future manifest change that
+  // would make it exploitable. A message truly from this extension always
+  // carries sender.id === chrome.runtime.id; one that doesn't is rejected
+  // rather than processed.
+  if (sender.id && sender.id !== chrome.runtime.id) {
+    sendResponse({ error: 'Rejected: sender is not this extension.' });
+    return;
+  }
   handleMessage(message, sender)
     .then(sendResponse)
     .catch((err) => {
@@ -197,7 +226,7 @@ async function handleMessage(msg, _sender) {
       return stopSession();
 
     case "LOG_EVENT":
-      return appendEvent(msg.payload);
+      return appendEvent(msg.payload, _sender);
 
     case "GET_STATE":
     case "getSession":
@@ -280,6 +309,7 @@ async function handleMessage(msg, _sender) {
     }
 
     case 'GET_SNAPSHOT_AGE': {
+      await _snapshotRestorePromise;
       const ageMs = _lastSnapshotTimestamp ? Date.now() - _lastSnapshotTimestamp : Infinity;
       return { ok: true, ageMs };
     }
@@ -291,6 +321,7 @@ async function handleMessage(msg, _sender) {
         model: msg.payload?.model ?? null,
         expiresAt: Date.now() + 5 * 60 * 1000,
       };
+      chrome.storage.local.set({ pendingAIOutput: _pendingAIOutput }).catch(() => {});
       return { ok: true };
 
     case 'GET_PENDING_AI_OUTPUT':
@@ -298,10 +329,12 @@ async function handleMessage(msg, _sender) {
         return { ok: true, text: _pendingAIOutput.text, subtype: _pendingAIOutput.subtype, model: _pendingAIOutput.model };
       }
       _pendingAIOutput = null;
+      chrome.storage.local.remove('pendingAIOutput').catch(() => {});
       return { ok: true, text: null, subtype: null, model: null };
 
     case 'CLEAR_PENDING_AI_OUTPUT':
       _pendingAIOutput = null;
+      chrome.storage.local.remove('pendingAIOutput').catch(() => {});
       return { ok: true };
 
     case 'SELECTION_CHANGED':
@@ -349,7 +382,43 @@ async function handleMessage(msg, _sender) {
 
 // ── Session management ────────────────────────────────────────────────────────
 
-async function startSession({ tabId, docUrl, title } = {}) {
+// `chrome.storage.local.set()` fully replaces the stored session object,
+// with no locking of its own. Every function below that does
+// getSession() … mutate … saveSession() must run as one atomic unit
+// relative to every other one, or whichever write finishes last silently
+// discards the other's changes — the mechanism behind a real bug: a paste
+// tag, acceptance update, or dismiss/review state could disappear because
+// it raced maybeAutoExportAndTrim()'s own two-phase read-modify-write cycle
+// (slow, since it exports and hashes the whole session in between its read
+// and its write). A plain promise-chain mutex is enough here — MV3 service
+// workers are single-threaded, so this only needs to serialize interleaved
+// async cycles, never real concurrent threads.
+let _sessionLock = Promise.resolve();
+
+function withSessionLock(fn) {
+  const run = _sessionLock.then(fn, fn);
+  _sessionLock = run.then(() => {}, () => {});
+  return run;
+}
+
+// `event.timestamp` used to double as every event's de facto unique ID
+// throughout the codebase (UPDATE_EVENT_ACCEPTANCE/_METADATA/_STATE all did
+// `session.events.find(e => e.timestamp === eventTimestamp)`, and the UI
+// keyed its own DOM cards off it too) — but it's a real millisecond
+// timestamp, not a true ID, and two events can land in the same millisecond
+// (confirmed: runHeuristics() can flag two heuristic_suggestion tips in one
+// synchronous pass). `event_id` is the real, collision-free identity;
+// internal/storage-only — stripped in buildProcessLog() before export so the
+// TWFF schema and hash chain are unaffected by this field's existence.
+function pushEvent(session, event) {
+  session.events.push({ event_id: crypto.randomUUID(), ...event });
+}
+
+async function startSession(args = {}) {
+  return withSessionLock(() => _startSessionLocked(args));
+}
+
+async function _startSessionLocked({ tabId, docUrl, title } = {}) {
   const docId = docUrl ? await hashDocUrl(docUrl) : "";
   // The real (reversible) Google Docs id, distinct from the opaque docId hash
   // above — persisted so a background-triggered export (storage-quota
@@ -390,7 +459,7 @@ async function startSession({ tabId, docUrl, title } = {}) {
     // stale tab title while the doc was loading) is never more reliable than
     // one already captured at the original session_start.
     session.title = session.title ?? title ?? null;
-    session.events.push({ timestamp: now, type: "session_resume", meta: {} });
+    pushEvent(session, { timestamp: now, type: "session_resume", meta: {} });
     debugLog("[Colophon SW] session_resume", { tabId: tabId ?? null, docId });
   } else {
     // Fresh, session-scoped anon ID — never persisted outside this session, so
@@ -411,7 +480,7 @@ async function startSession({ tabId, docUrl, title } = {}) {
         assignment_prompt: ""
       }
     };
-    session.events.push({ timestamp: now, type: "session_start", meta: {} });
+    pushEvent(session, { timestamp: now, type: "session_start", meta: {} });
     debugLog("[Colophon SW] session_start", { tabId: tabId ?? null, docId });
   }
   await saveSession(session);
@@ -424,7 +493,7 @@ async function startSession({ tabId, docUrl, title } = {}) {
       const snap = await chrome.tabs.sendMessage(tabId, { action: 'GET_EDITOR_TEXT' });
       if (snap?.text) {
         const words = snap.text.trim().split(/\s+/).filter(Boolean).length;
-        session.events.push({
+        pushEvent(session, {
           timestamp: new Date().toISOString(),
           type: 'checkpoint',
           meta: {
@@ -449,25 +518,31 @@ async function startSession({ tabId, docUrl, title } = {}) {
  * session, so it's safe to call on every Doc load.
  */
 async function autoStartSession(sender) {
-  const existing = await getSession();
-  if (existing?.isRecording) {
-    return { ok: true, alreadyRecording: true, sessionId: existing.sessionId };
-  }
   const tabId = sender?.tab?.id ?? null;
   const docUrl = sender?.tab?.url ?? "";
   // Best available signal here: the service worker has no DOM access, only
   // whatever tab title Chrome already knew when this message arrived.
   const title = sender?.tab?.title ? formatDocTitle(sender.tab.title) : null;
   debugLog("[Colophon SW] auto session_start", { tabId, hasUrl: !!docUrl });
+  // Delegate entirely to startSession(), which already compares the real
+  // docId (not just "is anything recording") before deciding to reattach to
+  // the existing session vs. switch to/create one for this doc. A bare
+  // "already recording something" check here used to silently attach a
+  // second, different Google Doc's real events to whichever doc's session
+  // happened to be active first.
   return startSession({ tabId, docUrl, title });
 }
 
 async function stopSession() {
+  return withSessionLock(_stopSessionLocked);
+}
+
+async function _stopSessionLocked() {
   const session = await getSession();
   if (!session) return { ok: false, reason: "no session" };
 
   session.isRecording = false;
-  session.events.push({
+  pushEvent(session, {
     timestamp: new Date().toISOString(),
     type: "session_end",
     meta: {},
@@ -487,7 +562,11 @@ async function stopSession() {
   return { ok: true };
 }
 
-async function appendEvent(event) {
+async function appendEvent(event, sender) {
+  return withSessionLock(() => _appendEventLocked(event, sender));
+}
+
+async function _appendEventLocked(event, sender) {
   const session = await getSession();
   if (!session?.isRecording) {
     debugLog("[Colophon SW] LOG_EVENT rejected", {
@@ -495,6 +574,23 @@ async function appendEvent(event) {
       reason: "not recording",
     });
     return { ok: false };
+  }
+  // The active session is pinned to one tab (session.tabId, set by
+  // startSession/autoStartSession). A different tab's content script — e.g.
+  // a second Google Doc that was opened and auto-started earlier, then
+  // superseded as "active" when a third doc opened — must not have its real
+  // edits silently folded into this session. Without this check, switching
+  // between two open Docs tabs bleeds both documents' events into whichever
+  // session happens to be active at the moment each event arrives.
+  const senderTabId = sender?.tab?.id;
+  if (session.tabId != null && senderTabId != null && senderTabId !== session.tabId) {
+    debugLog("[Colophon SW] LOG_EVENT rejected", {
+      type: event?.type ?? "unknown",
+      reason: "sender tab is not the active session's tab",
+      senderTabId,
+      sessionTabId: session.tabId,
+    });
+    return { ok: false, reason: "inactive tab" };
   }
   if (isNoOpEditEvent(event)) {
     debugLog("[Colophon SW] LOG_EVENT ignored", {
@@ -509,7 +605,7 @@ async function appendEvent(event) {
   // in-memory session events (popup, sidepanel, panel, storage.js) only ever
   // sees 'edit_block', regardless of which content-script version sent it.
   const normalizedType = event.type === 'edit' ? 'edit_block' : event.type;
-  session.events.push({ author_id: userId, ...event, type: normalizedType });
+  pushEvent(session, { author_id: userId, ...event, type: normalizedType });
   debugLog("[Colophon SW] LOG_EVENT stored", {
     type: event.type,
     meta: event.meta,
@@ -556,6 +652,16 @@ async function maybeAutoExportAndTrim() {
   const quota = chrome.storage.local.QUOTA_BYTES ?? 10_485_760;
   if (usage < quota * STORAGE_QUOTA_WARN_RATIO) return;
 
+  // The whole export+trim cycle runs as one locked unit, including the
+  // nested exportSession() call below — this (slow: it hashes and zips the
+  // entire session) read-modify-write cycle used to run unlocked, so any
+  // paste tag, acceptance update, or dismiss/review state change that
+  // completed its own read-modify-write in the gap between this function's
+  // two reads was silently discarded by whichever saveSession() landed last.
+  return withSessionLock(_maybeAutoExportAndTrimLocked);
+}
+
+async function _maybeAutoExportAndTrimLocked() {
   const session = await getSession();
   if (!session?.isRecording) return;
   if (!session.googleDocId) return; // no tab-independent doc id — skip rather than risk a broken export
@@ -732,11 +838,24 @@ async function updateMetadata({ key, value }) {
 // documented cost of this cap (see SPEC.md §4.4/§6.1) — not a bug.
 const MAX_CONTENT_SNAPSHOT_CHARS = 500;
 
-async function updateEventAcceptance({ eventTimestamp, acceptance, similarity_score, content_before, content_after }) {
+// `ref` is normally a real event_id (assigned by pushEvent() above). Falls
+// back to a timestamp match for events that predate this field — an
+// in-flight session started before an extension update can still contain
+// events with no event_id at all.
+function findEventByRef(session, ref) {
+  if (!ref) return undefined;
+  return session.events.find(e => e.event_id === ref) ?? session.events.find(e => e.timestamp === ref);
+}
+
+async function updateEventAcceptance(args) {
+  return withSessionLock(() => _updateEventAcceptanceLocked(args));
+}
+
+async function _updateEventAcceptanceLocked({ eventId, acceptance, similarity_score, content_before, content_after }) {
   const session = await getSession();
   if (!session) return { status: 'error' };
 
-  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  const event = findEventByRef(session, eventId);
   if (event?.meta) {
     event.meta.acceptance = acceptance;
     // 0-1: how much of the AI's wording survived — spec v0.2 §4.4.
@@ -758,15 +877,40 @@ async function updateEventAcceptance({ eventTimestamp, acceptance, similarity_sc
   return { status: 'success' };
 }
 
-async function updateEventMetadata({ eventTimestamp, key, value }) {
-  const session = await getSession();
-  if (!session) return { status: 'error' };
-  const event = session.events.find(e => e.timestamp === eventTimestamp);
-  if (event?.meta && key) {
-    event.meta[key] = value;
-    await saveSession(session);
+// Bounded retry/backoff, ~1.1s total: covers emitPaste()'s own ~1000ms delay
+// between showing the self-report prompt and actually calling LOG_EVENT, so
+// a chip clicked quickly doesn't race the event's own creation. Previously
+// this looked up the event once, silently no-opped on a miss, and still
+// returned { status: 'success' } regardless — so a tag clicked during that
+// window appeared to save in the UI ("✓ Recorded") but was actually dropped.
+const METADATA_UPDATE_RETRY_DELAYS_MS = [0, 150, 350, 600];
+
+async function updateEventMetadata({ eventId, key, value }) {
+  if (!key) return { status: 'error', reason: 'missing key' };
+  for (const delay of METADATA_UPDATE_RETRY_DELAYS_MS) {
+    if (delay) await new Promise(r => setTimeout(r, delay));
+    // Each attempt is its own short locked section — NOT the whole retry
+    // loop — so the wait between attempts happens outside the lock. The
+    // event this is retrying for is very often about to be created by a
+    // pending appendEvent() call; holding the lock across the delay would
+    // block that very appendEvent() from ever running, turning every retry
+    // into a guaranteed, self-inflicted miss.
+    const result = await withSessionLock(async () => {
+      const session = await getSession();
+      if (!session) return null;
+      const event = findEventByRef(session, eventId);
+      if (!event?.meta) return null;
+      event.meta[key] = value;
+      await saveSession(session);
+      chrome.runtime.sendMessage({
+        action: 'SYNC_TIMELINE',
+        events: session.events,
+      }).catch(() => {});
+      return { status: 'success' };
+    });
+    if (result) return result;
   }
-  return { status: 'success' };
+  return { status: 'error', reason: 'event not found' };
 }
 
 // ── Setup script builders ──────────────────────────────────────────────────────
@@ -885,20 +1029,46 @@ read -p "Press Enter to close..."
   return TEMPLATE.replace('__EXTID__', extId);
 }
 
-async function updateEventState({ eventTimestamp, status }) {
+async function updateEventState(args) {
+  return withSessionLock(() => _updateEventStateLocked(args));
+}
+
+async function _updateEventStateLocked({ eventId, status }) {
   const session = await getSession();
   if (!session) return { status: 'error' };
 
-  const event = session.events.find(e => e.timestamp === eventTimestamp);
+  const event = findEventByRef(session, eventId);
   if (event) {
     if (!event.meta) event.meta = {};
     event.meta.status = status;
     await saveSession(session);
     
-    chrome.runtime.sendMessage({ 
-      action: 'SYNC_TIMELINE', 
-      events: session.events 
+    chrome.runtime.sendMessage({
+      action: 'SYNC_TIMELINE',
+      events: session.events
     }).catch(() => {});
   }
   return { status: 'success' };
 }
+
+// Test seam only — this file has no other imports/exports since it's loaded
+// as the MV3 background service worker entry point, never itself imported.
+// Exporting these specific functions lets their logic (session-identity
+// handling, event-ID collision resolution, the metadata-update retry) be
+// unit tested directly against the same chrome.storage.local mock
+// shared/storage.js's own tests already use, without needing to simulate
+// the full onMessage/sender/tab machinery around them.
+export {
+  startSession,
+  autoStartSession,
+  stopSession,
+  appendEvent,
+  pushEvent,
+  findEventByRef,
+  updateEventAcceptance,
+  updateEventMetadata,
+  updateEventState,
+  maybeAutoExportAndTrim,
+  withSessionLock,
+  handleMessage,
+};

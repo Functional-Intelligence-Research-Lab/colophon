@@ -49,11 +49,17 @@ const CONTEXT_LIMIT = 300
 // before assuming it was abandoned (ms). Abandoned suggestions are recorded as
 // rejected so the timeline reflects that nothing was inserted.
 const ABANDON_MS = 5 * 60 * 1000
+// How long to let a burst of related mutations settle before evaluating the
+// DOM — Docs populates a Gemini dialog's text across several mutation
+// records in the same render pass, so scanning on the very first record can
+// see a container that has matched but not yet received its prose.
+const SCAN_DEBOUNCE_MS = 200
 
 export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, onResolve = () => {}, emitInteractions = true, onSuggestionWillAppear = () => {} }) {
   let _observer = null
   let _active = false
   let _clickHandler = null
+  let _scanDebounceTimer = null
 
   // The suggestion currently shown in the popover, if any.
   // { id, text, appearedAt, resolved }
@@ -70,7 +76,10 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     _everDetected = false
     _geminiSeenAvailable = false
 
-    _observer = new MutationObserver(scan)
+    _observer = new MutationObserver(() => {
+      clearTimeout(_scanDebounceTimer)
+      _scanDebounceTimer = setTimeout(scan, SCAN_DEBOUNCE_MS)
+    })
     _observer.observe(document.body, { childList: true, subtree: true })
 
     // Capture-phase click listener catches Insert/Replace/Close before Docs
@@ -88,6 +97,8 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
     _active = false
     _observer?.disconnect()
     _observer = null
+    clearTimeout(_scanDebounceTimer)
+    _scanDebounceTimer = null
     if (_clickHandler) {
       document.removeEventListener('click', _clickHandler, true)
       _clickHandler = null
@@ -269,7 +280,12 @@ export function createGeminiDetector({ emit, log = () => {}, warn = () => {}, on
       'button, [role="button"], textarea, input, .appsElementsSidekickBarkickTopBoxResponseTopRow, .appsElementsSidekickBarkickTopBoxResponseControlsContainer, .appsElementsSidekickBarkickTopBoxResponseControlsEndContainer'
     ).forEach(n => n.remove())
     const text = (clone.textContent ?? '').trim().replace(/\s+/g, ' ')
-    return text || 'Gemini proposed changes'
+    // No real prose found (e.g. an empty "Help me write" prompt box before
+    // any draft exists) — return empty rather than a fabricated placeholder.
+    // A non-empty return here is treated as a genuine suggestion by scan()'s
+    // caller, so substituting fake text used to produce a real notification
+    // ("Gemini proposed changes") with nothing behind it.
+    return text
   }
 
   function preview(text) {

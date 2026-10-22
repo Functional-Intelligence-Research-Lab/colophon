@@ -1,4 +1,5 @@
 import JSZip from '../lib/jszip.js';
+import DOMPurify from 'dompurify';
 import { computeAnnotations, compositeKey } from '../lib/annotate.js';
 import { esc } from '../shared/esc.js';
 import { finiteNumber } from '../shared/num.js';
@@ -392,7 +393,17 @@ function openAnnotatedView(log, meta, xhtmlStr) {
     log, startTs, durationMs,
   });
 
-  const blob = new Blob([html], { type: 'text/html' });
+  // annotatedBodyHTML above came from a DOM node DOMPurify already sanitized
+  // IN_PLACE (annotate.js's computeAnnotations()) — but it's then serialized
+  // back to a string and concatenated into this larger page template, which
+  // the browser will parse as a brand new document a second time via
+  // window.open() below. Serializing sanitized DOM and re-inserting it as a
+  // string without re-sanitizing is exactly DOMPurify's own documented
+  // mutation-XSS (mXSS) precondition — content that was safe as a live DOM
+  // tree can behave differently once serialized and re-parsed. Re-sanitize
+  // the fully assembled string, in string mode, right before it's used.
+  const safeHtml = DOMPurify.sanitize(html, { WHOLE_DOCUMENT: true });
+  const blob = new Blob([safeHtml], { type: 'text/html' });
   const url  = URL.createObjectURL(blob);
   const win  = window.open(url, '_blank');
   if (!win) {

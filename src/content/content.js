@@ -53,6 +53,7 @@ let _editBuffer = null
 let _debounce   = null
 let _blurredAt  = null
 let _lastPasteAt = 0
+let _lastPasteText = ''
 let _listenerTargets = []
 let _lastInternalCopy = null  // tracks text copied from within the doc to skip internal paste logging
 let _heuristicDebounce = null
@@ -599,7 +600,15 @@ function onKeydown(e) {
   const isDelete = (e.key === 'Backspace' || e.key === 'Delete')
   const delta = isDelete ? -1 : 1
   debugLog('[Colophon Content] keydown captured', { code: e.code, delta, target: describeElement(e.target) })
-  bufferEdit(delta, isDelete)
+  // A real keydown is unambiguous evidence of genuine human typing — never
+  // a paste/AI-insert echo, which lands via DOM mutation only (Google Docs'
+  // canvas renderer means typing itself never touches the visible DOM; see
+  // this file's header comment). The paste-suppression window below exists
+  // specifically to stop onMutation() from double-logging the DOM mutation
+  // a paste/AI-insert itself produces, so it must not apply here — without
+  // this, typing immediately after a paste (an extremely ordinary pattern)
+  // silently lost up to 1.5s of real keystrokes from the record.
+  bufferEdit(delta, isDelete, { fromKeydown: true })
   scheduleHeuristics()
 }
 
@@ -667,8 +676,8 @@ function onMutation(mutations) {
 
 // ── Shared buffer + debounce ──────────────────────────────────────────────────
 
-function bufferEdit(delta, isDelete = false) {
-  if (Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
+function bufferEdit(delta, isDelete = false, { fromKeydown = false } = {}) {
+  if (!fromKeydown && Date.now() - _lastPasteAt < PASTE_SUPPRESSION_MS) {
     debugLog('[Colophon Content] Edit suppressed after paste', { delta })
     return;
   }
@@ -739,16 +748,23 @@ function onPaste(e) {
   if (isTargetingFormInput(e.target)) return;
 
   const now = Date.now();
-  if (now - _lastPasteAt < 100) {
+  const text = e.clipboardData?.getData('text/plain') ?? '';
+
+  // Docs sometimes fires the paste event twice for one real user action
+  // (observed within ~100ms). Only treat the second firing as a ghost
+  // duplicate to destroy if its content also matches the first — a purely
+  // time-based check here used to also silently drop a genuine second,
+  // fast, but DIFFERENT paste just for landing in the same narrow window.
+  if (now - _lastPasteAt < 100 && text === _lastPasteText) {
     console.warn('[Colophon Content] Ghost paste detected and destroyed.');
     return;
   }
 
   _lastPasteAt = now;
+  _lastPasteText = text;
 
   if (e.clipboardData && e.clipboardData.getData('application/x-colophon-ai') === 'true') return;
 
-  const text = e.clipboardData?.getData('text/plain') ?? '';
   if (!text) return;
 
   // If the pasted text matches something the user copied from within this doc, skip logging
@@ -912,33 +928,48 @@ export function showPasteSourcePrompt(event) {
       btn.style.background = 'rgba(255, 255, 255, 0.08)';
       btn.style.borderColor = 'rgba(255, 255, 255, 0.16)';
     });
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       event.meta.source_tool = tool.id;
 
+      // The service worker hasn't necessarily stored this paste event yet
+      // (emitPaste's own LOG_EVENT send is itself delayed ~1s) — await the
+      // real response instead of assuming success, so a genuine failure
+      // (the SW's bounded retry still finds nothing) shows as a failure
+      // rather than a false "✓ Recorded". `eventId` is sent as this event's
+      // timestamp since content.js never learns the real event_id the SW
+      // assigns on storage — the SW's lookup falls back to a timestamp
+      // match for exactly this case.
+      let confirmed = false;
       try {
-        chrome.runtime.sendMessage({
+        const response = await chrome.runtime.sendMessage({
           type: 'UPDATE_EVENT_METADATA',
           payload: {
-            eventTimestamp: event.timestamp,
+            eventId: event.timestamp,
             key: 'source_tool',
             value: tool.id,
           },
-        }).catch(() => {});
+        });
+        confirmed = response?.status === 'success';
       } catch {
         // SW might be temporarily sleeping
       }
 
-      debugLog('[Colophon Content] Paste self-reported source_tool:', tool.id);
+      debugLog('[Colophon Content] Paste self-reported source_tool:', tool.id, { confirmed });
 
       host.replaceChildren();
       const confirmRow = document.createElement('div');
-      confirmRow.style.cssText = 'color:#81c995;font-size:12px;display:flex;align-items:center;gap:6px;';
-      confirmRow.textContent = `✓ Recorded self-report: ${tool.label}`;
+      if (confirmed) {
+        confirmRow.style.cssText = 'color:#81c995;font-size:12px;display:flex;align-items:center;gap:6px;';
+        confirmRow.textContent = `✓ Recorded self-report: ${tool.label}`;
+      } else {
+        confirmRow.style.cssText = 'color:#f28b82;font-size:12px;display:flex;align-items:center;gap:6px;';
+        confirmRow.textContent = `Could not save here — you can still tag this paste from the side panel.`;
+      }
       host.append(confirmRow);
 
       setTimeout(() => {
         dismissPasteSourcePrompt();
-      }, 1200);
+      }, confirmed ? 1200 : 3500);
     });
 
     chipContainer.append(btn);
@@ -1022,6 +1053,17 @@ async function emitPaste(text) {
           event.meta.acceptance = acceptanceFromSimilarity(similarity);
           event.meta.similarity_score = similarity;
           event.meta.ai_chars = text.length;
+          // content_before/content_after were set above (lines 1019-1021)
+          // to the paste-style "surrounding document context," not real AI
+          // content — correct for a plain paste, but wrong once this event
+          // is reclassified as an ai_interaction, where content_after is
+          // supposed to be the actual kept/AI-generated text. There's no
+          // "replaced" text for a pasted insertion, so content_before
+          // follows the same '[snapshot unavailable]' convention used by
+          // the other no-removal insertion path (sidepanel.js's
+          // logAcceptance()).
+          event.meta.content_before = '[snapshot unavailable]';
+          event.meta.content_after = text;
           chrome.runtime.sendMessage({ action: 'CLEAR_PENDING_AI_OUTPUT' }).catch(() => {});
           debugLog('[Colophon Content] Paste reclassified as AI paraphrase (similarity:', similarity, ')');
         }
@@ -1723,13 +1765,23 @@ if (typeof document !== 'undefined' && document.addEventListener) {
     if (_pollActive) return;
 
     clearTimeout(_baselineTimer);
-    
-    let delayMs = 1500; 
+
+    let delayMs = 1500;
     const docSizeKb = _rollingBaselineState.length / 1024;
-    
+
     if (docSizeKb >= 50 && docSizeKb < 300) delayMs = 3000;
     else if (docSizeKb >= 300) delayMs = 5000;
 
-    _baselineTimer = setTimeout(updateRollingBaseline, delayMs); 
+    _baselineTimer = setTimeout(updateRollingBaseline, delayMs);
   });
 }
+
+// Test seam only — lets the edit-suppression-after-paste exemption logic be
+// unit tested directly against bufferEdit()/flushEdit()'s real behavior,
+// without needing a real MutationObserver/keydown DOM simulation.
+export {
+  bufferEdit,
+  flushEdit,
+  _setLastPasteAtForTest as __setLastPasteAtForTest,
+};
+function _setLastPasteAtForTest(ts) { _lastPasteAt = ts; }

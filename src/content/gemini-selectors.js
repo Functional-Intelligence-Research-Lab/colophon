@@ -161,49 +161,46 @@ export function findSuggestionContainer(root = document) {
   return null
 }
 
-/**
- * Guard against false positives from generic `[role="dialog"]` matches: only
- * treat a container as a Gemini suggestion if it actually holds an accept/refine
- * affordance or a Gemini reference. Keeps non-Gemini Docs dialogs out.
- */
+// Class/structure signals tied specifically to Gemini's own UI — never to
+// Docs' many other dialogs and comment/suggestion surfaces, which also use
+// generic "Insert"/"Accept"/[role="dialog"] markup (an ordinary human
+// Suggest-mode comment bubble has its own real "Accept suggestion"/"Reject
+// suggestion" buttons, for instance). A bare accept-button-label match, or a
+// bare `.docos-anchoreddocoview`/`[role="dialog"]` class match, is NOT
+// Gemini-specific on its own — confirmed reachable via both a plain human
+// tracked-change suggestion and Docs' generic insert-table/insert-image/
+// insert-link dialogs, all of which expose a button literally labelled
+// "Insert". Trust those container classes only once one of these markers is
+// also present.
+const GEMINI_SPECIFIC_SELECTORS = [
+  '.docosAiPreviewDiffVisibleSuggestionViewContent',
+  '.docosAiPreviewDiffVisibleSuggestionViewAcceptButton',
+  '.appsElementsSidekickBarkickTopBox',
+  '.appsElementsSidekickBarkickSparkIconContainer',
+  '.appsElementsSidekickResponseOptionsActionBarButtonPrimary',
+  '.appsElementsGenerativeaiAstAnimated',
+]
+
 export function looksLikeGeminiSuggestion(container) {
   if (!container) return false
 
-  const buttons = container.querySelectorAll?.('button, [role="button"], .docosAiPreviewDiffVisibleSuggestionViewAcceptButton, .appsElementsSidekickResponseOptionsActionBarButtonPrimary') ?? []
-  let hasAccept = false
-  for (const b of buttons) {
-    if (classifyAction(b) === 'accept') {
-      hasAccept = true
-      break
+  const hasGeminiClassSignal = GEMINI_SPECIFIC_SELECTORS.some(sel => {
+    try {
+      return container.matches?.(sel) || !!container.querySelector?.(sel)
+    } catch {
+      return false
     }
-  }
-
-  // The generic sidekick/canvas classList signals also match the initial
-  // "Refine" options menu before any suggestion is ready to apply — only
-  // trust them once an accept affordance (Insert, Replace, checkmark, etc.)
-  // is actually present, to avoid false positives from empty prompt boxes,
-  // settings dialogs, or that options menu.
-  if (hasAccept && (
-      container.classList?.contains('appsElementsSidekickBarkickTopBox') ||
-      container.classList?.contains('docos-anchoreddocoview') ||
-      container.classList?.contains('docosAiPreviewDiffVisibleSuggestionViewContent') ||
-      container.querySelector?.('.docosAiPreviewDiffVisibleSuggestionViewAcceptButton') ||
-      container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseOneSystem') ||
-      container.querySelector?.('.appsElementsSidekickBarkickTopBoxResponseTextOneSystem') ||
-      container.querySelector?.('.appsElementsSidekickBarkickSparkIconContainer'))) {
-    return true
-  }
+  })
+  if (hasGeminiClassSignal) return true
 
   // "help me write" is a specific-enough feature label to trust on its own,
-  // even before an accept button has rendered for that prompt yet.
+  // even before a draft has rendered — ordinary Docs dialogs never carry
+  // this label. Bare "gemini" is deliberately NOT trusted here: it also
+  // appears on the "Ask Gemini" entry-point button and other chrome that
+  // merely indicates Gemini is *available*, not that a suggestion is
+  // currently showing (that's GEMINI_PRESENCE_SELECTORS' job, not this one's).
   const name = accessibleName(container)
-  if (name.includes('help me write')) return true
-
-  for (const b of buttons) {
-    const bn = accessibleName(b)
-    if (matchesAny(bn, ACCEPT_LABELS) || matchesAny(bn, REFINE_LABELS) || bn.startsWith('accept') || bn.startsWith('reject')) return true
-  }
-  return false
+  return name.includes('help me write')
 }
 
 /** True if any Gemini entry point is present in the document chrome. */

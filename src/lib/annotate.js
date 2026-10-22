@@ -84,6 +84,26 @@ function numOrNull(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/**
+ * Picks the text snapshot computeAnnotations() searches the final document
+ * for, from an already-normalized event (see normalizeEvent() above).
+ *
+ * For paste events specifically, `contentAfter` (content_after) holds the
+ * 300 characters of surrounding document context that followed the paste
+ * (content.js's emitPaste()), never the pasted text itself — `preview`
+ * (content_preview) is the field that actually holds it. Using
+ * content_after as the match snapshot meant that once the real pasted text
+ * was deleted but its trailing context survived untouched, the matcher
+ * found that context and mislabeled it as still being the pasted content.
+ * Every other length-changing event type's content_after IS the real
+ * kept/generated text, so this only reorders the fallback for 'paste'.
+ */
+export function selectSnapshot(e) {
+  return e.type === 'paste'
+    ? (e.preview ?? e.contentAfter ?? null)
+    : (e.contentAfter ?? e.preview ?? null);
+}
+
 // ── 2. Linearize the document into plain text + text-node offset table ──
 export function linearizeDom(bodyEl) {
   const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
@@ -364,7 +384,7 @@ export function computeAnnotations(xhtmlStr, log) {
       if (!['fully_accepted', 'partially_accepted', 'modified'].includes(e.acceptance)) continue; // Edge case 8
     }
 
-    const snapshot = e.contentAfter ?? e.preview ?? null;
+    const snapshot = selectSnapshot(e);
     const expectedLength = e.charCount ?? e.contentAfterLength ?? (e.posEnd != null && e.posStart != null ? e.posEnd - e.posStart : null);
     let range = null;
     let locatedVia = null;

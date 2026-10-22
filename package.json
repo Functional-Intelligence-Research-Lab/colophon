@@ -1,6 +1,6 @@
 {
   "name": "colophon",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "description": "Browser extension that records AI writing interactions as a TWFF process log.",
@@ -17,9 +17,10 @@
     "@types/node": "^25.9.1",
     "esbuild": "^0.25.0",
     "eslint": "^9.0.0",
-    "vitest": "^4.1.5"
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
   },
   "dependencies": {
-    "dompurify": "^3.4.11"
+    "dompurify": "^3.4.17"
   }
 }
