@@ -16,7 +16,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { normalizeEvent, selectSnapshot } from '../src/lib/annotate.js'
+import {
+  normalizeEvent, selectSnapshot, classifyReliability, classifyLayer, fuzzyLocate,
+} from '../src/lib/annotate.js'
 
 describe('selectSnapshot — paste vs. other event types', () => {
   it('prefers content_preview (the real pasted text) over content_after (surrounding context) for paste events', () => {
@@ -62,6 +64,67 @@ describe('selectSnapshot — paste vs. other event types', () => {
     const raw = { timestamp: '2026-01-01T00:00:00.000Z', type: 'paste', meta: {} }
     const e = normalizeEvent(raw, 0)
     expect(selectSnapshot(e)).toBeNull()
+  })
+})
+
+describe('classifyReliability — paste vs. other event types', () => {
+  it('trusts a paste\'s own posStart/posEnd even when they differ wildly from content_after\'s length', () => {
+    // A real 500-char paste: content_after is ~300 chars of trailing
+    // document context, not the pasted text, so comparing their lengths is
+    // meaningless for a paste — it used to wrongly downgrade this to
+    // 'length-only', routing every real paste through the weaker
+    // fuzzy-search-only path instead of trusting its own accurate offset.
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'paste',
+      meta: { position_start: 100, position_end: 600, content_after: 'x'.repeat(300) },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyReliability(e, 1000)).toBe('position')
+  })
+
+  it('still downgrades a non-paste event when its length disagrees with content_after', () => {
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'edit_block',
+      meta: { source: 'human', position_start: 100, position_end: 600, content_after: 'x'.repeat(300) },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyReliability(e, 1000)).toBe('length-only')
+  })
+})
+
+describe('fuzzyLocate — short needles', () => {
+  it('matches a needle under 10 characters on the first (full-length) attempt', () => {
+    // The loop used to `break` on its very first iteration whenever the
+    // needle itself was under 10 characters, so short pastes were never
+    // even attempted via fuzzy search at all.
+    const finalText = 'Some document text with a short snippet in the middle of it.'
+    const found = fuzzyLocate(finalText, 'snippet', 7, 0, [])
+    expect(found).not.toBeNull()
+    expect(finalText.slice(found.start, found.end)).toBe('snippet')
+  })
+})
+
+describe('classifyLayer — self-reported AI pastes', () => {
+  it('classifies a paste with source_tool as paste-ai-disclosed, not plain paste', () => {
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'paste',
+      meta: { source: 'external', source_tool: 'ChatGPT' },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyLayer(e)).toBe('paste-ai-disclosed')
+  })
+
+  it('classifies an ordinary paste with no source_tool as plain paste', () => {
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'paste',
+      meta: { source: 'external' },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyLayer(e)).toBe('paste')
   })
 })
 

@@ -402,8 +402,17 @@ function openAnnotatedView(log, meta, xhtmlStr) {
   // mutation-XSS (mXSS) precondition — content that was safe as a live DOM
   // tree can behave differently once serialized and re-parsed. Re-sanitize
   // the fully assembled string, in string mode, right before it's used.
-  const safeHtml = DOMPurify.sanitize(html, { WHOLE_DOCUMENT: true });
-  const blob = new Blob([safeHtml], { type: 'text/html' });
+  // ADD_TAGS: ['meta'] keeps <meta charset="UTF-8"> alive as defense in
+  // depth — DOMPurify's WHOLE_DOCUMENT mode doesn't add 'meta' to its tag
+  // allow-list by default (confirmed against this project's own
+  // purify.min.js), so it would otherwise be silently stripped here. The
+  // Blob's own explicit charset below is the real fix either way, since
+  // that's what actually governs decoding once this becomes a blob: URL —
+  // with neither, the browser has zero encoding signal and falls back to a
+  // legacy single-byte encoding, corrupting every multi-byte UTF-8
+  // character (the mojibake seen in "Duration: —").
+  const safeHtml = DOMPurify.sanitize(html, { WHOLE_DOCUMENT: true, ADD_TAGS: ['meta'] });
+  const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const win  = window.open(url, '_blank');
   if (!win) {
@@ -431,25 +440,31 @@ function _buildAnnotatedPageHTML({
   }).join('');
 
   const supersededSection = !supersededList.length ? '' : `
-    <div class="page appendix-page">
       <div class="appendix-banner superseded-banner">
         <h2 class="appendix-title">Superseded content (${supersededList.length})</h2>
         <p class="appendix-note">This content was recorded at the time, then later fully deleted or overwritten before the session ended — it no longer appears in the final document, so it isn't highlighted above.</p>
       </div>
       <ul>
         ${supersededList.map((s) => `<li><span class="pill superseded">${esc(s.event.type)}</span> ${esc(s.reason)}</li>`).join('')}
-      </ul>
-    </div>`;
+      </ul>`;
 
   const unlocatedSection = !unlocatedList.length ? '' : `
-    <div class="page appendix-page">
       <div class="appendix-banner unlocated-banner">
         <h2 class="appendix-title">Unlocated events (${unlocatedList.length})</h2>
         <p class="appendix-note">These couldn't be matched to the final document text with confidence — likely edited beyond recognition, or with too little surrounding context to search for.</p>
       </div>
       <ul>
         ${unlocatedList.map((u) => `<li><span class="pill unlocated">${esc(u.event.type)}</span> ${esc(u.reason)}</li>`).join('')}
-      </ul>
+      </ul>`;
+
+  // Both sections share one printed page instead of each forcing its own —
+  // .page gets page-break-after: always under @media print, so two
+  // separate .appendix-page divs always meant two sheets even when their
+  // combined content was a few lines.
+  const appendixSection = (!supersededList.length && !unlocatedList.length) ? '' : `
+    <div class="page appendix-page">
+      ${supersededSection}
+      ${unlocatedSection}
     </div>`;
 
   return `<!DOCTYPE html>
@@ -605,8 +620,7 @@ body {
     </div>
   </div>
 
-  ${supersededSection}
-  ${unlocatedSection}
+  ${appendixSection}
 
   <div class="page seal-page">
     <h2>COLOPHON PROCESS LOG SEAL</h2>

@@ -140,7 +140,13 @@ export function classifyReliability(e, docLenEstimate) {
     }
     return 'length-only';
   }
-  if (e.contentAfterLength != null && Math.abs((e.posEnd - e.posStart) - e.contentAfterLength) > 2) {
+  // content_after for a paste is 300 characters of document text FOLLOWING
+  // the paste, not the pasted text itself (unlike ai_interaction/
+  // ai_suggestion/edit_block, where content_after really is the kept/
+  // generated text) — so its length is never a valid sanity check for a
+  // paste's real, accurate posStart/posEnd offset.
+  if (e.type !== 'paste' && e.contentAfterLength != null
+      && Math.abs((e.posEnd - e.posStart) - e.contentAfterLength) > 2) {
     return 'length-only';
   }
   return 'position';
@@ -148,6 +154,10 @@ export function classifyReliability(e, docLenEstimate) {
 
 // ── 4. Shift oplog + forward position mapping (drift correction) ────────
 function insertedLength(e) {
+  // Same content_after caveat as classifyReliability() above: for a paste,
+  // content_after's length is trailing context, not the pasted text, so it
+  // must never be preferred over the paste's own real charCount.
+  if (e.type === 'paste') return e.charCount ?? Math.max(0, e.lengthHint ?? (e.posEnd - e.posStart));
   // Prefer the true pre-truncation length when the producer supplied one —
   // accurate even for insertions longer than the 500-char content cap,
   // since this field is a plain integer, not text, and isn't capped.
@@ -238,8 +248,15 @@ const escapeRe = (str) => str.split(/\s+/).map((p) => p.replace(/[.*+?^${}()|[\]
 export function fuzzyLocate(finalText, needle, expectedLength, searchOriginHint, claimedRangesForNeedle) {
   const norm = normalizeWs(needle);
   if (!norm) return null;
-  for (const prefixLen of [Math.min(norm.length, 80), 60, 40, 25, 15]) {
-    if (prefixLen < 10) break;
+  // The first candidate is the full needle itself (or its 80-char cap). It must
+  // always be tried, even when the needle is under 10 characters: matching an
+  // entire short string exactly is far less ambiguous than matching an
+  // arbitrary short substring of a longer one, which is what the 10-char floor
+  // below is actually guarding against for the *shrinking* fallback prefixes.
+  const prefixLens = [Math.min(norm.length, 80), 60, 40, 25, 15];
+  for (let i = 0; i < prefixLens.length; i++) {
+    const prefixLen = prefixLens[i];
+    if (i > 0 && prefixLen < 10) break;
     const prefix = norm.slice(0, prefixLen);
     let regex;
     try {
@@ -307,6 +324,7 @@ function historyEqual(a, b) {
 export function classifyLayer(layer) {
   if (layer.type === 'edit_block' && layer.source === 'human') return 'human';
   if (layer.type === 'edit_block' && layer.source === 'external') return null; // superseded by the paired paste layer
+  if (layer.type === 'paste' && layer.source_tool) return 'paste-ai-disclosed';
   if (layer.type === 'paste') return 'paste';
   if (layer.type === 'ai_interaction' || layer.type === 'ai_suggestion') {
     return layer.acceptance === 'partially_accepted' ? 'ai-partial' : 'ai';
@@ -329,7 +347,8 @@ export function tooltipText(history) {
     const c = classifyLayer(l);
     if (c === 'ai') return `AI (${l.model ?? 'unknown model'})`;
     if (c === 'ai-partial') return `AI-suggested, partially kept (${l.model ?? 'unknown model'})`;
-    if (c === 'paste') return l.source_tool ? `Pasted (self-reported: ${l.source_tool})` : `Pasted (${l.source ?? 'external'})`;
+    if (c === 'paste-ai-disclosed') return `AI-generated content (self-reported: ${l.source_tool})`;
+    if (c === 'paste') return `Pasted (${l.source ?? 'external'})`;
     if (c === 'human') return 'Edited by author';
     return null;
   }).filter(Boolean);
@@ -337,7 +356,7 @@ export function tooltipText(history) {
 }
 
 export function cssClassFor(key) {
-  const known = new Set(['human', 'paste', 'ai', 'ai-partial', 'ai-then-edited', 'paste-then-ai', 'human-then-ai']);
+  const known = new Set(['human', 'paste', 'paste-ai-disclosed', 'ai', 'ai-partial', 'ai-then-edited', 'paste-then-ai', 'human-then-ai']);
   if (known.has(key)) return `ann-${key}`;
   return 'ann-composite';
 }
@@ -469,7 +488,12 @@ function computeStats(normEvents, ranges, docLength) {
   for (const r of ranges) {
     const key = compositeKey(r.history);
     const span = r.end - r.start;
-    if (key.startsWith('ai')) aiCoveragePct += span;
+    // paste-ai-disclosed is self-reported AI content, not independently
+    // observed/generated the way 'ai'/'ai-partial' are — but it's still AI
+    // content, and must count toward the AI-coverage stat, not just the
+    // paste-coverage one (its key starts with "paste", not "ai", purely as
+    // a classification-key naming artifact).
+    if (key.startsWith('ai') || key.includes('paste-ai-disclosed')) aiCoveragePct += span;
     if (key.includes('paste')) pasteCoveragePct += span;
   }
   if (docLength) {
