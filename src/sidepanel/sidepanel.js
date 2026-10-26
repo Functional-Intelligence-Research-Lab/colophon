@@ -670,11 +670,20 @@ const TimelineRenderer = {
       const toolLabel = evt.meta?.source_tool ? getSourceToolLabel(evt.meta.source_tool) : null;
       title = toolLabel ? `Pasted content (${toolLabel})` : 'Pasted content';
       // Always editable, not just settable once — a self-report tag made in
-      // the paste-time modal (or missed entirely, since that modal
+      // the paste-time popup (or missed entirely, since that popup
       // auto-dismisses after 10s) can be set or corrected here at any time.
-      const selfReportTag = toolLabel ? ` · Self-reported` : '';
-      const tagBtnLabel = toolLabel ? 'Change' : 'Tag AI source';
-      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'}${selfReportTag} · <button type="button" class="ecc-link-btn btn-tag-source">${tagBtnLabel}</button>`;
+      // A native <select>, always visible, rather than a text link that has
+      // to be clicked to even reveal that a choice can be changed — a plain
+      // link reads as a one-time action, not a live editable field.
+      const history = evt.meta?.source_tool_history;
+      const correctedBadge = history?.length > 1
+        ? `<span class="ecc-corrected-badge" title="Originally reported as ${esc(getSourceToolLabel(history[0].value))}">↺</span>`
+        : '';
+      const toolOptions = [
+        `<option value="" ${!evt.meta?.source_tool ? 'selected' : ''} disabled>— Tag AI source —</option>`,
+        ...SOURCE_TOOLS.map(t => `<option value="${t.id}" ${evt.meta?.source_tool === t.id ? 'selected' : ''}>${esc(t.label)}</option>`),
+      ].join('');
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'} · <select class="ecc-source-select">${toolOptions}</select>${correctedBadge}`;
       if (evt.meta?.source !== 'internal') {
         actionHTML = evt.meta?.source_url
           ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
@@ -761,25 +770,6 @@ const TimelineRenderer = {
     else if (evt.type === 'edit' || evt.type === 'edit_block') {
       authorLabel = 'You • Edited';
       contentHTML = `<div class="text-only">${evt.meta.char_delta || 0} characters</div>`;
-    }
-
-    else if (evt.type === 'paste') {
-      authorLabel = 'You • Pasted';
-      const sourceLabel = evt.meta.source === 'internal' ? 'within doc' : 'external';
-      contentHTML = `<div class="text-only">${evt.meta.char_count || 0} chars from ${sourceLabel}</div>`;
-      if (evt.meta.source_tool) {
-        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--ai-color); margin-top: 2px;">Self-reported source: <strong>${esc(getSourceToolLabel(evt.meta.source_tool))}</strong></div>`;
-      }
-      if (evt.meta.output_preview) {
-        contentHTML += `<div class="text-only" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px;">"${esc(evt.meta.output_preview)}"</div>`;
-      }
-      if (evt.meta.source !== 'internal') {
-        if (evt.meta.source_url && /^https?:\/\//i.test(evt.meta.source_url)) {
-          contentHTML += `<div class="paste-source-row"><span class="paste-source-display">Source: <a href="${esc(evt.meta.source_url)}" target="_blank" rel="noopener" style="color:var(--ai-color)">${esc(evt.meta.source_url)}</a></span></div>`;
-        } else {
-          contentHTML += `<div class="paste-source-row"><button type="button" class="btn-add-source" style="background:none;border:1px dashed var(--text-secondary);color:var(--text-secondary);padding:2px 8px;border-radius:4px;font-size:0.75rem;cursor:pointer;margin-top:4px;">+ Add source</button></div>`;
-        }
-      }
     }
 
     else if (evt.type === 'heuristic_suggestion') {
@@ -988,64 +978,6 @@ const TimelineRenderer = {
 
         saveBtn.addEventListener('click', save);
         input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') row.replaceChildren(btn); });
-        return;
-      }
-
-      // ── TAG / CHANGE AI SOURCE (paste self-report, retroactive) ──
-      // Reuses UPDATE_EVENT_METADATA, same as .btn-add-source above. Always
-      // offered, whether or not a tag already exists — the paste-time modal
-      // auto-dismisses after 10s with no fallback before this control
-      // existed, and even when a tag was set, it may be wrong (e.g. the
-      // wrong chip was clicked) and must stay changeable, not just settable
-      // once.
-      if (e.target.classList.contains('btn-tag-source')) {
-        const btn = e.target;
-        const row = btn.closest('.ecc-meta');
-        const eventCard = btn.closest('.timeline-event-compact');
-        const cardEventId = eventCard?.dataset.eventId;
-        if (!row || !cardEventId) return;
-
-        const picker = document.createElement('span');
-        picker.className = 'source-tool-picker';
-
-        SOURCE_TOOLS.forEach(tool => {
-          const chip = document.createElement('button');
-          chip.type = 'button';
-          chip.className = 'ecc-chip-btn';
-          chip.textContent = tool.label;
-          chip.addEventListener('click', async (ev2) => {
-            ev2.stopPropagation();
-            picker.querySelectorAll('button').forEach(b => { b.disabled = true; });
-            let confirmed = false;
-            try {
-              const response = await chrome.runtime.sendMessage({
-                action: 'UPDATE_EVENT_METADATA',
-                payload: { eventId: cardEventId, key: 'source_tool', value: tool.id },
-              });
-              confirmed = response?.status === 'success';
-            } catch { /* SW might be temporarily sleeping */ }
-            // On success the SW's SYNC_TIMELINE broadcast re-renders the
-            // whole panel with the new tag; nothing further to do here. On
-            // failure, surface it inline rather than leaving the picker
-            // looking like it silently did nothing.
-            if (!confirmed) {
-              picker.innerHTML = '<span style="color:#f28b82;font-size:0.72rem;">Could not save — try again</span>';
-            }
-          });
-          picker.appendChild(chip);
-        });
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.className = 'ecc-chip-btn';
-        cancelBtn.textContent = '✕';
-        cancelBtn.addEventListener('click', (ev2) => {
-          ev2.stopPropagation();
-          row.replaceChild(btn, picker);
-        });
-        picker.appendChild(cancelBtn);
-
-        row.replaceChild(picker, btn);
         return;
       }
 
@@ -1280,6 +1212,38 @@ const TimelineRenderer = {
         } catch {
           copyBtn.textContent = 'Failed';
         }
+      }
+    });
+
+    // ── TAG / CHANGE AI SOURCE (paste self-report, retroactive) ──
+    // Reuses UPDATE_EVENT_METADATA, same as .btn-add-source above. Always
+    // offered, whether or not a tag already exists — the paste-time popup
+    // auto-dismisses after 10s with no fallback, and even when a tag was
+    // set, it may be wrong (e.g. the wrong option was picked) and must
+    // stay changeable, not just settable once. A real <select> fires
+    // 'change', not 'click', so this is a separate delegated listener.
+    this.container.addEventListener('change', async (e) => {
+      if (!e.target.classList.contains('ecc-source-select')) return;
+      const select = e.target;
+      const eventCard = select.closest('.timeline-event-compact');
+      const cardEventId = eventCard?.dataset.eventId;
+      const value = select.value;
+      if (!cardEventId || !value) return;
+
+      select.disabled = true;
+      let confirmed = false;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          action: 'UPDATE_EVENT_METADATA',
+          payload: { eventId: cardEventId, key: 'source_tool', value, via: 'sidepanel' },
+        });
+        confirmed = response?.status === 'success';
+      } catch { /* SW might be temporarily sleeping */ }
+      // On success the SW's SYNC_TIMELINE broadcast re-renders the whole
+      // panel with the new tag; nothing further to do here. On failure,
+      // re-enable so the student can retry rather than leaving it stuck.
+      if (!confirmed) {
+        select.disabled = false;
       }
     });
   }

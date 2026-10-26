@@ -1163,40 +1163,27 @@ body {
 .ecc-check svg { width: 16px; height: 16px; }
 
 /* ── Retroactive source-tool tagging (paste cards) ─────────────── */
-/* A plain text-style link, inline within .ecc-meta — distinct from the
-   pill-shaped .ecc-btn used in the single-button .ecc-action slot. */
-.ecc-link-btn {
+/* A real <select>, always visible and always editable — not a text link
+   that has to be clicked to even reveal that a choice can be changed. */
+.ecc-source-select {
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--ai-color);
-  cursor: pointer;
-  text-decoration: underline;
-}
-.ecc-link-btn:hover { opacity: 0.8; }
-
-.source-tool-picker {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  margin-left: 4px;
-}
-
-.ecc-chip-btn {
-  font-size: 0.7rem;
-  padding: 1px 7px;
-  border-radius: 10px;
+  padding: 1px 4px;
+  border-radius: 6px;
   border: 1px solid var(--ai-color);
   background: transparent;
   color: var(--ai-color);
   cursor: pointer;
-  white-space: nowrap;
+  max-width: 120px;
 }
-.ecc-chip-btn:hover { background: var(--ai-color); color: white; }
-.ecc-chip-btn:disabled { opacity: 0.6; cursor: default; }
+.ecc-source-select:disabled { opacity: 0.6; cursor: default; }
+
+.ecc-corrected-badge {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: help;
+}
 
 /* ── Paraphrase card ─────────────── */
 /* No colored left-border spine — the .suggestion-tag label in the header

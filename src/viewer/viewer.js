@@ -207,7 +207,11 @@ function buildCard(evt) {
     const chars = finiteNumber(evt.meta?.char_count);
     bodyHTML = `<p class="tl-text">${chars} chars from external source</p>`;
     if (evt.meta?.source_tool) {
-      bodyHTML += `<p class="tl-source-tool" style="margin:4px 0;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:0.75rem;background:#f3f4f6;border:1px solid #d1d5db;color:#374151;">Self-reported source: ${esc(getSourceToolLabel(evt.meta.source_tool))}</span></p>`;
+      const history = evt.meta?.source_tool_history;
+      const correctedNote = history?.length > 1
+        ? `, corrected from ${esc(getSourceToolLabel(history[0].value))}`
+        : '';
+      bodyHTML += `<p class="tl-source-tool" style="margin:4px 0;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:0.75rem;background:#f3f4f6;border:1px solid #d1d5db;color:#374151;">Self-reported source: ${esc(getSourceToolLabel(evt.meta.source_tool))}${correctedNote}</span></p>`;
     }
     if (evt.meta?.output_preview) {
       bodyHTML += `<p class="tl-preview">"${esc(evt.meta.output_preview)}"</p>`;

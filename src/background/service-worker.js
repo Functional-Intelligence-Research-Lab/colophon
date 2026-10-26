@@ -865,7 +865,19 @@ const MAX_CONTENT_SNAPSHOT_CHARS = 500;
 // events with no event_id at all.
 function findEventByRef(session, ref) {
   if (!ref) return undefined;
-  return session.events.find(e => e.event_id === ref) ?? session.events.find(e => e.timestamp === ref);
+  const byId = session.events.find(e => e.event_id === ref);
+  if (byId) return byId;
+  // Legacy-data safety net only: every real caller now supplies a real
+  // event_id at creation time (see emitPaste()), so this timestamp match
+  // should never actually be exercised going forward. Timestamps aren't
+  // guaranteed unique (two pastes in the same millisecond), so warn if this
+  // path ever matches more than one event — a silent match on the wrong
+  // one would otherwise be invisible.
+  const byTimestamp = session.events.filter(e => e.timestamp === ref);
+  if (byTimestamp.length > 1) {
+    debugLog('[Colophon SW] findEventByRef: ambiguous timestamp match', { ref, count: byTimestamp.length });
+  }
+  return byTimestamp[0];
 }
 
 // Bounded retry/backoff, ~1.1s total: covers emitPaste()'s own ~1000ms delay
@@ -909,7 +921,7 @@ async function updateEventAcceptance({ eventId, acceptance, similarity_score, co
   return { status: 'error', reason: 'event not found' };
 }
 
-async function updateEventMetadata({ eventId, key, value }) {
+async function updateEventMetadata({ eventId, key, value, via }) {
   if (!key) return { status: 'error', reason: 'missing key' };
   for (const delay of METADATA_UPDATE_RETRY_DELAYS_MS) {
     if (delay) await new Promise(r => setTimeout(r, delay));
@@ -924,6 +936,16 @@ async function updateEventMetadata({ eventId, key, value }) {
       if (!session) return null;
       const event = findEventByRef(session, eventId);
       if (!event?.meta) return null;
+      // For source_tool specifically, a correction is itself a meaningful
+      // signal for a tamper-evident research instrument — record it as
+      // data instead of silently overwriting the prior self-report with no
+      // trace it ever happened. Scoped to this one key only: no other
+      // metadata field has a concrete use case for a history trail yet.
+      if (key === 'source_tool') {
+        const history = event.meta.source_tool_history ?? [];
+        history.push({ value, set_at: new Date().toISOString(), via: via ?? 'unknown' });
+        event.meta.source_tool_history = history;
+      }
       event.meta[key] = value;
       await saveSession(session);
       chrome.runtime.sendMessage({

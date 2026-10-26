@@ -134,8 +134,13 @@ describe('Paste Source Tagging UI Prompt', () => {
     expect(renderedToolIds).toEqual(SOURCE_TOOLS.map(t => t.id))
   })
 
-  it('tags paste event and sends UPDATE_EVENT_METADATA when a tool chip is clicked', () => {
+  it('tags paste event and sends UPDATE_EVENT_METADATA keyed by the real event_id, not the timestamp', () => {
+    // emitPaste() now assigns a real event_id at creation time (see
+    // content.js) specifically so this handler never needs to fall back to
+    // a timestamp match, which could collide with a different paste
+    // landing in the same millisecond.
     const pasteEvt = {
+      event_id: 'real-event-id-123',
       timestamp: '2026-10-15T10:00:00.000Z',
       type: 'paste',
       meta: { char_count: 50 },
@@ -151,9 +156,10 @@ describe('Paste Source Tagging UI Prompt', () => {
     expect(sentMessages).toContainEqual({
       type: 'UPDATE_EVENT_METADATA',
       payload: {
-        eventId: '2026-10-15T10:00:00.000Z',
+        eventId: 'real-event-id-123',
         key: 'source_tool',
         value: 'claude',
+        via: 'paste_prompt',
       },
     })
   })

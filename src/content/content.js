@@ -684,7 +684,12 @@ function bufferEdit(delta, isDelete = false, { fromKeydown = false } = {}) {
   }
   const nowMs = Date.now()
   if (!_editBuffer) {
-    _editBuffer = { timestamp: new Date().toISOString(), delta: 0, velocity: createVelocityTracker() }
+    // textBefore is captured at the START of the batch (before any of this
+    // buffer's keystrokes), so flushEdit() can later diff it against the
+    // document's state once the batch settles — the only way an ordinary
+    // human edit gets a real document position/content instead of a bare
+    // keystroke-count delta (see flushEdit() for why this matters).
+    _editBuffer = { timestamp: new Date().toISOString(), delta: 0, velocity: createVelocityTracker(), textBefore: _getDocText() }
     _bufferStartTime = Date.now();
     debugLog('[Colophon Content] edit buffer started', { delta })
   }
@@ -715,19 +720,52 @@ function flushEdit() {
   const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit_block';
   if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
 
+  // Diff the document's state now against what it was when this batch
+  // started, to recover the real position/content of the edit — the
+  // keystroke-counted delta alone (position_start:0, position_end:delta)
+  // gives the annotation engine nothing it can actually locate in the final
+  // document, so a later edit on top of previously-pasted text could never
+  // override that text's provenance. Falls back to the old delta-only shape
+  // if the document text isn't available or nothing textual changed (e.g. a
+  // pure cursor move with no net edit) — this is strictly additive, never
+  // worse than before.
+  const textBefore = _editBuffer.textBefore ?? '';
+  const textAfter = _getDocText();
+  let positionMeta = { position_start: 0, position_end: Math.max(0, _editBuffer.delta) };
+  let contentMeta = {};
+  let char_delta = _editBuffer.delta;
+  let char_count = absDelta;
+
+  if (textBefore && textAfter && textBefore !== textAfter) {
+    const { prefixLen, oldSuffixLen, newSuffixLen } = diffMiddleRegion(textBefore, textAfter);
+    const removedRaw = textBefore.slice(prefixLen, textBefore.length - oldSuffixLen);
+    const addedRaw   = textAfter.slice(prefixLen, textAfter.length - newSuffixLen);
+    if (removedRaw || addedRaw) {
+      positionMeta = { position_start: prefixLen, position_end: prefixLen + addedRaw.length };
+      contentMeta = {
+        content_before: removedRaw.slice(0, 500),
+        content_after:  addedRaw.slice(0, 500),
+        content_before_length: removedRaw.length,
+        content_after_length:  addedRaw.length,
+      };
+      char_delta = addedRaw.length - removedRaw.length;
+      char_count = addedRaw.length + removedRaw.length;
+    }
+  }
+
   send('LOG_EVENT', {
     timestamp: _editBuffer.timestamp,
     type: eventType,
     meta: {
-      position_start: 0,
-      position_end:   Math.max(0, _editBuffer.delta),
-      char_delta:     _editBuffer.delta,
-      char_count:     absDelta,
+      ...positionMeta,
+      char_delta,
+      char_count,
       source:         likely_ai ? 'ai' : 'human',
       insertion_velocity,
       likely_ai,
       ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
       churn_keys: v.churn_keys,
+      ...contentMeta,
     },
   })
   _editBuffer = null
@@ -936,18 +974,20 @@ export function showPasteSourcePrompt(event) {
       // (emitPaste's own LOG_EVENT send is itself delayed ~1s) — await the
       // real response instead of assuming success, so a genuine failure
       // (the SW's bounded retry still finds nothing) shows as a failure
-      // rather than a false "✓ Recorded". `eventId` is sent as this event's
-      // timestamp since content.js never learns the real event_id the SW
-      // assigns on storage — the SW's lookup falls back to a timestamp
-      // match for exactly this case.
+      // rather than a false "✓ Recorded". `eventId` is the real id assigned
+      // at event creation (see emitPaste()) — pushEvent() preserves it on
+      // append, so this never needs the SW's timestamp-match fallback,
+      // which could otherwise collide with a different paste landing in
+      // the same millisecond.
       let confirmed = false;
       try {
         const response = await chrome.runtime.sendMessage({
           type: 'UPDATE_EVENT_METADATA',
           payload: {
-            eventId: event.timestamp,
+            eventId: event.event_id,
             key: 'source_tool',
             value: tool.id,
+            via: 'paste_prompt',
           },
         });
         confirmed = response?.status === 'success';
@@ -961,7 +1001,7 @@ export function showPasteSourcePrompt(event) {
       const confirmRow = document.createElement('div');
       if (confirmed) {
         confirmRow.style.cssText = 'color:#81c995;font-size:12px;display:flex;align-items:center;gap:6px;';
-        confirmRow.textContent = `✓ Recorded self-report: ${tool.label}`;
+        confirmRow.textContent = `✓ Recorded: ${tool.label}. Change it anytime from the side panel.`;
       } else {
         confirmRow.style.cssText = 'color:#f28b82;font-size:12px;display:flex;align-items:center;gap:6px;';
         confirmRow.textContent = `Could not save here — you can still tag this paste from the side panel.`;
@@ -999,6 +1039,13 @@ async function emitPaste(text) {
   const charCount = text.length;
 
   const event = {
+    // A real id, assigned here rather than left for the service worker to
+    // generate on append, so the paste-source popup (which fires
+    // immediately, before that append happens) has something reliable to
+    // reference instead of falling back to a timestamp match — see the
+    // chip click handler below. pushEvent() in the service worker already
+    // preserves a pre-supplied event_id via object-spread ordering.
+    event_id: crypto.randomUUID(),
     timestamp: new Date().toISOString(),
     type: 'paste',
     meta: {
@@ -1693,18 +1740,17 @@ function findFirstDifference(oldText, newText) {
   return i; 
 }
 
-function computeDocumentDiff(oldText, newText) {
-  if (!oldText || !newText) return { addedText: '', removedText: '' };
-  if (oldText === newText) return { addedText: '', removedText: '' };
-
-  // ── Step 1: find length of shared prefix ──────────────────────────────────
+// Shared prefix/suffix scan: finds the single changed "middle" region between
+// two document snapshots. Used both for the Gemini-suggestion diff (below,
+// via computeDocumentDiff) and for giving ordinary human edit_block events a
+// real position/content instead of a bare keystroke-count delta (flushEdit).
+function diffMiddleRegion(oldText, newText) {
   let prefixLen = 0;
   const minLen = Math.min(oldText.length, newText.length);
   while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) {
     prefixLen++;
   }
 
-  // ── Step 2: find length of shared suffix (from respective ends) ────────────
   // IMPORTANT: the suffix search must not overlap the already-matched prefix.
   let oldSuffixLen = 0;
   let newSuffixLen = 0;
@@ -1721,7 +1767,15 @@ function computeDocumentDiff(oldText, newText) {
     newSuffixLen++;
   }
 
-  // ── Step 3: extract the changed middle regions ─────────────────────────────
+  return { prefixLen, oldSuffixLen, newSuffixLen };
+}
+
+function computeDocumentDiff(oldText, newText) {
+  if (!oldText || !newText) return { addedText: '', removedText: '' };
+  if (oldText === newText) return { addedText: '', removedText: '' };
+
+  const { prefixLen, oldSuffixLen, newSuffixLen } = diffMiddleRegion(oldText, newText);
+
   const removedText = oldText.slice(prefixLen, oldText.length - oldSuffixLen).trim();
   const addedText   = newText.slice(prefixLen, newText.length - newSuffixLen).trim();
 
@@ -1798,5 +1852,11 @@ export {
   bufferEdit,
   flushEdit,
   _setLastPasteAtForTest as __setLastPasteAtForTest,
+  _setDocTextForTest as __setDocTextForTest,
 };
 function _setLastPasteAtForTest(ts) { _lastPasteAt = ts; }
+// _getDocText() falls back to _rollingBaselineState when no DOM nodes match
+// (always true in this test environment, per tests/setup.js's querySelectorAll
+// stub) — setting it directly drives flushEdit()'s real diff logic without a
+// DOM.
+function _setDocTextForTest(text) { _rollingBaselineState = text; }

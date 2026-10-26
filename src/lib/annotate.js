@@ -68,6 +68,7 @@ export function normalizeEvent(raw, index) {
     type,
     source: f.source ?? null,
     source_tool: f.source_tool ?? null,
+    source_tool_history: f.source_tool_history ?? null,
     model: f.model ?? null,
     acceptance: f.acceptance ?? null, // preserved verbatim, including the real producer's non-spec "pending"
     posStart, posEnd,
@@ -133,9 +134,14 @@ export function classifyReliability(e, docLenEstimate) {
     // Paste events are the one type whose (0, N) pairs are occasionally
     // genuine (a paste at the very start of the document) — verified by
     // internal consistency with char_count. Everything else hitting this
-    // branch matches the known producer bug where position_end is really a
-    // length, not an endpoint.
+    // branch used to match the known producer bug where position_end is
+    // really a length, not an endpoint — but now that real edit_blocks can
+    // also legitimately start at document position 0 and carry a verified
+    // content_after, trust those too, the same way paste already is.
     if (e.type === 'paste' && e.charCount != null && (e.posEnd - e.posStart) === e.charCount) {
+      return 'position';
+    }
+    if (e.contentAfterLength != null && Math.abs((e.posEnd - e.posStart) - e.contentAfterLength) <= 2) {
       return 'position';
     }
     return 'length-only';
@@ -347,7 +353,15 @@ export function tooltipText(history) {
     const c = classifyLayer(l);
     if (c === 'ai') return `AI (${l.model ?? 'unknown model'})`;
     if (c === 'ai-partial') return `AI-suggested, partially kept (${l.model ?? 'unknown model'})`;
-    if (c === 'paste-ai-disclosed') return `AI-generated content (self-reported: ${l.source_tool})`;
+    if (c === 'paste-ai-disclosed') {
+      const label = `AI-generated content (self-reported: ${l.source_tool})`;
+      // "Was this corrected" is always derived from history length, never a
+      // separate flag that could drift out of sync with the array itself.
+      if (l.source_tool_history?.length > 1) {
+        return `${label}, corrected from ${l.source_tool_history[0].value}`;
+      }
+      return label;
+    }
     if (c === 'paste') return `Pasted (${l.source ?? 'external'})`;
     if (c === 'human') return 'Edited by author';
     return null;

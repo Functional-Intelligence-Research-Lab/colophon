@@ -92,6 +92,33 @@ describe('classifyReliability — paste vs. other event types', () => {
     const e = normalizeEvent(raw, 0)
     expect(classifyReliability(e, 1000)).toBe('length-only')
   })
+
+  it('trusts a real human edit_block at document position 0 when content_after confirms the length', () => {
+    // A real edit at the very start of a document (now that flushEdit()
+    // populates content_after instead of leaving it absent) must be trusted
+    // the same way a position-0 paste already is, not downgraded just
+    // because it isn't type 'paste'.
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'edit_block',
+      meta: { source: 'human', position_start: 0, position_end: 6, content_after: 'brown ' },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyReliability(e, 0)).toBe('position')
+  })
+
+  it('still downgrades a position-0 edit_block whose length does not match content_after', () => {
+    // The pre-fix producer bug shape: position_end is really a keystroke
+    // delta, not a real offset, so it won't agree with content_after's
+    // actual length when content_after happens to be absent/wrong.
+    const raw = {
+      timestamp: '2026-01-01T00:00:00.000Z',
+      type: 'edit_block',
+      meta: { source: 'human', position_start: 0, position_end: 4 },
+    }
+    const e = normalizeEvent(raw, 0)
+    expect(classifyReliability(e, 0)).toBe('length-only')
+  })
 })
 
 describe('fuzzyLocate — short needles', () => {

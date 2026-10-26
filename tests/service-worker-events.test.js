@@ -137,6 +137,48 @@ describe('updateEventMetadata retry (silent paste-tag-drop race)', () => {
   }, 10000)
 })
 
+describe('updateEventMetadata — source_tool correction history', () => {
+  it('records a history entry (not just an overwrite) the second time source_tool is set', async () => {
+    await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
+    const pasteEvent = { timestamp: '2026-02-02T00:00:00.000Z', type: 'paste', meta: { char_count: 10 } }
+    await appendEvent(pasteEvent, { tab: { id: 1 } })
+
+    await updateEventMetadata({ eventId: '2026-02-02T00:00:00.000Z', key: 'source_tool', value: 'chatgpt', via: 'paste_prompt' })
+    await updateEventMetadata({ eventId: '2026-02-02T00:00:00.000Z', key: 'source_tool', value: 'claude', via: 'sidepanel' })
+
+    const session = await getSession()
+    const stored = session.events.find(e => e.type === 'paste')
+    expect(stored.meta.source_tool).toBe('claude') // always mirrors the latest entry
+    expect(stored.meta.source_tool_history).toHaveLength(2)
+    expect(stored.meta.source_tool_history[0]).toMatchObject({ value: 'chatgpt', via: 'paste_prompt' })
+    expect(stored.meta.source_tool_history[1]).toMatchObject({ value: 'claude', via: 'sidepanel' })
+  })
+
+  it('does not create a history array on the first, one-time set', async () => {
+    await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
+    const pasteEvent = { timestamp: '2026-02-02T00:00:00.000Z', type: 'paste', meta: { char_count: 10 } }
+    await appendEvent(pasteEvent, { tab: { id: 1 } })
+
+    await updateEventMetadata({ eventId: '2026-02-02T00:00:00.000Z', key: 'source_tool', value: 'claude', via: 'paste_prompt' })
+
+    const session = await getSession()
+    const stored = session.events.find(e => e.type === 'paste')
+    expect(stored.meta.source_tool_history).toHaveLength(1)
+  })
+
+  it('does not append a history entry for an unrelated metadata key', async () => {
+    await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
+    const pasteEvent = { timestamp: '2026-02-02T00:00:00.000Z', type: 'paste', meta: { char_count: 10 } }
+    await appendEvent(pasteEvent, { tab: { id: 1 } })
+
+    await updateEventMetadata({ eventId: '2026-02-02T00:00:00.000Z', key: 'source_url', value: 'https://example.test' })
+
+    const session = await getSession()
+    const stored = session.events.find(e => e.type === 'paste')
+    expect(stored.meta.source_tool_history).toBeUndefined()
+  })
+})
+
 describe('updateEventAcceptance — honest success/failure (was always {status:"success"})', () => {
   it('succeeds and writes acceptance/similarity_score when the event exists', async () => {
     await autoStartSession({ tab: { id: 1, url: DOC_A, title: 'Doc A' } })
