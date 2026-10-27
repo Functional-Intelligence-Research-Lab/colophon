@@ -109,7 +109,13 @@ export function summariseSession(events = []) {
 
   for (const e of events) {
     const m = e?.meta ?? {}
-    if (e?.type === 'edit') {
+    // The real producer has always emitted 'edit_block' (content.js); 'edit'
+    // is only the legacy/documented-schema name (see annotate.js's own
+    // 'edit'->'edit_block' normalization) — this check matched 'edit' alone
+    // until now, which no real session's events ever actually are, so
+    // humanChars was silently 0 for every real session this function ever
+    // ran against.
+    if (e?.type === 'edit' || e?.type === 'edit_block') {
       // Only human-sourced edits count toward authored characters.
       if ((m.source ?? 'human') === 'human') {
         humanChars += Math.max(0, m.char_delta ?? 0)

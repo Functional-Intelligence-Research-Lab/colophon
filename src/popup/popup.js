@@ -16,7 +16,7 @@
  */
 
 import { exportTwff } from '../lib/export.js'
-import { classifyEuLabel, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
+import { classifyEuLabel, summariseSession, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
 import { formatDocTitle } from '../shared/doc-title.js'
 import { esc } from '../shared/esc.js'
 
@@ -205,18 +205,23 @@ function renderRecordButton(session, tab) {
 
 function renderScores(session) {
   const events = session?.events ?? []
-  const editCount = events.filter(event => event.type === 'edit' || event.type === 'edit_block').length
-  const aiCount = events.filter(
-    event => event.type === 'ai_interaction' &&
-    (event.meta?.acceptance === 'fully_accepted' || event.meta?.acceptance === 'partially_accepted' || event.meta?.acceptance === 'modified')
-  ).length
-  const sourceCount = events.filter(event => event.type === 'paste' || event.type === 'source').length
-  const hasData = editCount + aiCount + sourceCount > 0
-  const total = Math.max(1, editCount + aiCount + sourceCount)
+  // Character-weighted, not event-counted: a single one-character edit and a
+  // single 2,000-character accepted AI paragraph used to both count as "1"
+  // toward their bucket, so these bars could show e.g. "90% own writing"
+  // when the AI content was actually most of the document's text. summariseSession()
+  // already does this correctly for the EU-label math below (ai_chars kept,
+  // scaled by similarity_score when the author reworded it) — reuse the
+  // same numbers here instead of a second, cruder count.
+  const { humanChars, aiChars } = summariseSession(events)
+  const sourceChars = events
+    .filter(event => event.type === 'paste' || event.type === 'source')
+    .reduce((sum, event) => sum + Math.max(0, event.meta?.char_count ?? 0), 0)
+  const hasData = humanChars + aiChars + sourceChars > 0
+  const total = Math.max(1, humanChars + aiChars + sourceChars)
 
-  const own = session ? clampPercent(Math.round((editCount / total) * 100)) : 0
-  const ai = session ? clampPercent(Math.round((aiCount / total) * 100)) : 0
-  const source = session ? clampPercent(Math.round((sourceCount / total) * 100)) : 0
+  const own = session ? clampPercent(Math.round((humanChars / total) * 100)) : 0
+  const ai = session ? clampPercent(Math.round((aiChars / total) * 100)) : 0
+  const source = session ? clampPercent(Math.round((sourceChars / total) * 100)) : 0
 
   setScore('own', own)
   setScore('ai', ai)

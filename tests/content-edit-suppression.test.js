@@ -31,25 +31,28 @@ describe('bufferEdit — paste-suppression exemption for real keystrokes', () =>
     expect(sent).toHaveLength(0)
   })
 
-  it('does NOT suppress a real keydown-sourced delta during the same window', () => {
+  it('does NOT suppress a real keydown-sourced delta during the same window', async () => {
     __setLastPasteAtForTest(Date.now())
     const sent = []
     global.chrome.runtime.sendMessage = (msg) => { sent.push(msg); return Promise.resolve({}) }
 
     bufferEdit(1, false, { fromKeydown: true })
-    vi.advanceTimersByTime(1100)
+    // No document text set here, so flushEdit()'s diff can't resolve on the
+    // first try — the debounce (1000ms) plus the one-shot retry
+    // (FLUSH_RETRY_MS) both need to fire before the event ships.
+    await vi.advanceTimersByTimeAsync(1200)
 
     expect(sent).toHaveLength(1)
     expect(sent[0].payload.meta.char_delta).toBe(1)
   })
 
-  it('resumes buffering mutation-sourced deltas once the window has passed', () => {
+  it('resumes buffering mutation-sourced deltas once the window has passed', async () => {
     __setLastPasteAtForTest(Date.now() - 2000) // well past PASTE_SUPPRESSION_MS (1500ms)
     const sent = []
     global.chrome.runtime.sendMessage = (msg) => { sent.push(msg); return Promise.resolve({}) }
 
     bufferEdit(3)
-    vi.advanceTimersByTime(1100)
+    await vi.advanceTimersByTimeAsync(1200)
 
     expect(sent).toHaveLength(1)
     expect(sent[0].payload.meta.char_delta).toBe(3)

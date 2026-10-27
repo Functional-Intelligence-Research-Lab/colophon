@@ -171,10 +171,50 @@ function insertedLength(e) {
   return e.charCount ?? Math.max(0, e.lengthHint ?? (e.posEnd - e.posStart));
 }
 
+// How many characters this event's edit REMOVED from the document -- a
+// quantity entirely independent of posEnd-posStart. The producer defines
+// position_end as prefixLen + addedRaw.length (see content.js's flushEdit),
+// i.e. posEnd-posStart is always the INSERTED length, never the deleted
+// one -- buildOplog() used to read deleted straight off that difference,
+// which silently made every edit's net shift (inserted-deleted) collapse to
+// zero regardless of whether it was an insertion, a deletion, or a
+// different-length replacement. Only same-length replacements were ever
+// correct by coincidence. content_before_length (when the producer supplied
+// it) is the real, independent answer.
+function deletedLength(e) {
+  // A bare paste event has no content_before concept at all (not part of
+  // its schema) -- its own posStart/posEnd describe where the INSERTED text
+  // now sits, not anything removed. When a paste replaced a selection, that
+  // real deleted amount only exists on its paired edit_block(source:
+  // 'external') companion (see buildOplog()'s pairing de-dup below), so a
+  // bare, unpaired paste is safest treated as a pure insertion.
+  if (e.type === 'paste') return 0;
+  if (e.contentBeforeLength != null) return e.contentBeforeLength;
+  // No true length available (older producer output) -- 0 is a neutral,
+  // honest "unknown, assume nothing was removed" rather than reintroducing
+  // the old posEnd-posStart bug (which always equals insertedLength and so
+  // always zeroed out the net shift, even for pure insertions/deletions).
+  return 0;
+}
+
 export function buildOplog(normEvents, reliability) {
+  // A clipboard paste paired with its spec-mandated companion
+  // edit_block(source:'external') at the same timestamp (see
+  // classifyLayer()'s 'external' case) describes the exact same physical
+  // edit twice. The edit_block carries the more reliable
+  // content_before_length/content_after_length, so once a pairing exists,
+  // only it should contribute a drift op -- otherwise the same insertion
+  // gets counted twice and later events get shifted by roughly double the
+  // real paste length. Older files with no paired edit_block (the producer
+  // gap this is matched against) still get drift correction from the paste
+  // event alone, unaffected.
+  const pairedExternalTsMs = new Set(
+    normEvents.filter((e) => e.type === 'edit_block' && e.source === 'external').map((e) => e.tsMs)
+  );
   const oplog = [];
   for (const e of normEvents) {
     if (!LENGTH_CHANGING_TYPES.has(e.type)) continue;
+    if (e.type === 'paste' && pairedExternalTsMs.has(e.tsMs)) continue;
     if (reliability.get(e.id) !== 'position') continue;
     if (e.type === 'ai_interaction' || e.type === 'ai_suggestion') {
       if (!['fully_accepted', 'partially_accepted', 'modified'].includes(e.acceptance)) continue;
@@ -182,7 +222,7 @@ export function buildOplog(normEvents, reliability) {
     oplog.push({
       tsMs: e.tsMs,
       atPosition: e.posStart,
-      deleted: e.posEnd - e.posStart,
+      deleted: deletedLength(e),
       inserted: insertedLength(e),
       eventId: e.id,
     });
@@ -330,7 +370,10 @@ function historyEqual(a, b) {
 export function classifyLayer(layer) {
   if (layer.type === 'edit_block' && layer.source === 'human') return 'human';
   if (layer.type === 'edit_block' && layer.source === 'external') return null; // superseded by the paired paste layer
-  if (layer.type === 'paste' && layer.source_tool) return 'paste-ai-disclosed';
+  // 'not_ai' is itself a self-report -- the student affirmatively said this
+  // paste ISN'T AI-generated, so it must stay plain 'paste', not flip the
+  // honest "not AI" tag into an AI-disclosure label.
+  if (layer.type === 'paste' && layer.source_tool && layer.source_tool !== 'not_ai') return 'paste-ai-disclosed';
   if (layer.type === 'paste') return 'paste';
   if (layer.type === 'ai_interaction' || layer.type === 'ai_suggestion') {
     return layer.acceptance === 'partially_accepted' ? 'ai-partial' : 'ai';
@@ -370,20 +413,34 @@ export function tooltipText(history) {
 }
 
 export function cssClassFor(key) {
-  const known = new Set(['human', 'paste', 'paste-ai-disclosed', 'ai', 'ai-partial', 'ai-then-edited', 'paste-then-ai', 'human-then-ai']);
+  // compositeKey() can never actually produce 'ai-then-edited' (classifyLayer
+  // only ever tags a layer 'human', never 'edited') -- AI-content-later-
+  // edited-by-hand always composites to 'ai-then-human', which this set
+  // used to be missing entirely, silently falling through to the generic
+  // 'ann-composite' for one of the most important histories this product
+  // exists to show. 'paste-then-human' (pasted content later typed over) is
+  // the other common case worth its own label, not the generic fallback.
+  const known = new Set(['human', 'paste', 'paste-ai-disclosed', 'ai', 'ai-partial', 'ai-then-human', 'paste-then-ai', 'human-then-ai', 'paste-then-human']);
   if (known.has(key)) return `ann-${key}`;
   return 'ann-composite';
 }
 
 // ── 8. Top-level orchestration ────────────────────────────────────────────
 export function computeAnnotations(xhtmlStr, log) {
-  const dom = new DOMParser().parseFromString(xhtmlStr, 'text/html');
   // xhtmlStr is untrusted (a .twff file's content/document.xhtml can be
   // hand-crafted by anyone — this is a user-facing file-load feature, not a
-  // Google-Docs-only path) — sanitize before any offset math runs, so every
-  // downstream consumer (oplog, verify, fuzzyLocate, wrapRange) only ever
-  // sees cleaned content. A no-op for real Google-Docs-exported XHTML.
-  DOMPurify.sanitize(dom.body, { IN_PLACE: true });
+  // Google-Docs-only path) — sanitize the raw STRING before it's ever
+  // parsed into a DOM, not the parsed DOM afterward: parsing untrusted
+  // markup first and sanitizing in-place after is the exact mutation-XSS
+  // (mXSS) pattern DOMPurify's own docs warn against, and ported the
+  // weaker default allowlist along with it (colophon-web's copy already
+  // had this fixed — this file hadn't been, confirmed by the two copies'
+  // drift-detector test, colophon-web/tests/test_annotate_js_parity.py).
+  const safeHtml = DOMPurify.sanitize(xhtmlStr, {
+    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'],
+    ALLOW_DATA_ATTR: false,
+  });
+  const dom = new DOMParser().parseFromString(safeHtml, 'text/html');
   const { text: finalText, nodes, offsets } = linearizeDom(dom.body);
   const docLength = finalText.length;
 
@@ -399,7 +456,7 @@ export function computeAnnotations(xhtmlStr, log) {
   for (const e of normEvents) {
     reliability.set(e.id, classifyReliability(e, docLenEstimate));
     if (LENGTH_CHANGING_TYPES.has(e.type) && reliability.get(e.id) !== 'none') {
-      docLenEstimate += insertedLength(e) - (e.posEnd - e.posStart >= 0 ? (e.posEnd - e.posStart) : 0);
+      docLenEstimate += insertedLength(e) - deletedLength(e);
       docLenEstimate = Math.max(0, docLenEstimate);
     }
   }
@@ -455,13 +512,14 @@ export function computeAnnotations(xhtmlStr, log) {
     }
 
     if (!range) {
-      unlocatedList.push({ event: e, reason: snapshot ? 'no matching text found in final document' : 'no snapshot text to search for' });
+      unlocatedList.push({ event: e, reason: snapshot ? 'unlocated-no-match' : 'unlocated-no-snapshot' });
       continue;
     }
 
     applyProvenance(ranges, range.start, range.end, {
       eventId: e.id, timestamp: e.raw.timestamp, type: e.type, source: e.source,
       model: e.model, acceptance: e.acceptance, locatedVia,
+      source_tool: e.source_tool, source_tool_history: e.source_tool_history,
     });
   }
 
@@ -473,7 +531,7 @@ export function computeAnnotations(xhtmlStr, log) {
     deletionLog,
     supersededList,
     unlocatedList,
-    stats: computeStats(normEvents, ranges, docLength),
+    stats: computeStats(normEvents, ranges, docLength, unlocatedList),
   };
 }
 
@@ -487,11 +545,26 @@ function unlocatedAwareOrigin(ranges, _e) {
   return tagged[tagged.length - 1].end;
 }
 
-function computeStats(normEvents, ranges, docLength) {
+// Best-known character magnitude for an event with no confirmed location --
+// the same fallback chain insertedLength() uses for located events, since an
+// unlocated event has exactly the same fields available, just nothing to
+// verify them against.
+function bestKnownCharMagnitude(e) {
+  return e.charCount ?? e.contentAfterLength ?? Math.abs(e.lengthHint ?? 0);
+}
+
+export function computeStats(normEvents, ranges, docLength, unlocatedList) {
   const wordCount = docLength ? Math.round(docLength / 5.5) : 0; // rough estimate, refined below if content available
   let editCount = 0, aiAccepted = 0, aiDismissed = 0, pasteCount = 0;
   for (const e of normEvents) {
-    if (e.type === 'edit_block') editCount++;
+    // An edit_block(source:'external') is the paired companion a paste now
+    // emits alongside itself (TWFF spec's paste/edit_block pairing
+    // requirement) -- plumbing that lets the position-drift math reuse the
+    // same verified-content machinery as human edits, not a reader-facing
+    // "edit" of its own. Counting it would inflate "Edits" by one per
+    // paste, double-counting the exact same action the paste event already
+    // represents.
+    if (e.type === 'edit_block' && e.source !== 'external') editCount++;
     if (e.type === 'paste') pasteCount++;
     if (e.type === 'ai_interaction' || e.type === 'ai_suggestion') {
       if (['fully_accepted', 'partially_accepted', 'modified'].includes(e.acceptance)) aiAccepted++;
@@ -514,7 +587,51 @@ function computeStats(normEvents, ranges, docLength) {
     aiCoveragePct = Math.round((aiCoveragePct / docLength) * 100);
     pasteCoveragePct = Math.round((pasteCoveragePct / docLength) * 100);
   }
-  return { wordCount, editCount, aiAccepted, aiDismissed, pasteCount, aiCoveragePct, pasteCoveragePct };
+
+  // Bounded-uncertainty range: an event the engine couldn't locate (no
+  // confirmed position in the final document) contributes NOTHING to the
+  // coverage sums above -- the text it touched silently keeps whatever an
+  // earlier, already-located layer said, with no numeric trace. That's
+  // fine when nothing was unlocated, but presenting aiCoveragePct/
+  // pasteCoveragePct as flat, single numbers while real editing activity
+  // went untracked overstates how much this report actually knows. Each
+  // unlocated event's TYPE is still known even when its location isn't, so
+  // the direction of its possible effect is known even without knowing
+  // exactly where: a human edit can only ever have REPLACED ai/paste text
+  // (pulling both coverages down), never added more of it; an accepted AI
+  // interaction or a paste can only ever have ADDED to its own coverage
+  // (pulling it up), never erased a human-written span. See the header
+  // comment on computeAnnotations() -- this never touches buildOplog()'s
+  // own 'position'-only filter, it only widens how the final two
+  // percentages are reported.
+  let humanUntrackedChars = 0, aiUntrackedChars = 0, pasteUntrackedChars = 0, pasteAiDisclosedUntrackedChars = 0;
+  for (const u of unlocatedList ?? []) {
+    const e = u.event;
+    const chars = bestKnownCharMagnitude(e);
+    if (chars <= 0) continue;
+    if (e.type === 'edit_block' && e.source === 'human') {
+      humanUntrackedChars += chars;
+    } else if ((e.type === 'ai_interaction' || e.type === 'ai_suggestion')
+        && ['fully_accepted', 'partially_accepted', 'modified'].includes(e.acceptance)) {
+      aiUntrackedChars += chars;
+    } else if (e.type === 'paste') {
+      if (e.source_tool && e.source_tool !== 'not_ai') pasteAiDisclosedUntrackedChars += chars;
+      else pasteUntrackedChars += chars;
+    }
+  }
+  const untrackedChars = humanUntrackedChars + aiUntrackedChars + pasteUntrackedChars + pasteAiDisclosedUntrackedChars;
+  const pct = (chars) => (docLength ? Math.round((chars / docLength) * 100) : 0);
+  const clamp = (n) => Math.max(0, Math.min(100, n));
+  const pasteCoverageMin = clamp(pasteCoveragePct - pct(humanUntrackedChars));
+  const pasteCoverageMax = clamp(pasteCoveragePct + pct(pasteUntrackedChars) + pct(pasteAiDisclosedUntrackedChars));
+  const aiCoverageMin = clamp(aiCoveragePct - pct(humanUntrackedChars));
+  const aiCoverageMax = clamp(aiCoveragePct + pct(aiUntrackedChars) + pct(pasteAiDisclosedUntrackedChars));
+
+  return {
+    wordCount, editCount, aiAccepted, aiDismissed, pasteCount, aiCoveragePct, pasteCoveragePct,
+    pasteCoverageMin, pasteCoverageMax, aiCoverageMin, aiCoverageMax,
+    untrackedChars, untrackedCount: (unlocatedList ?? []).length,
+  };
 }
 
 // ── DOM wrapping ──────────────────────────────────────────────────────────

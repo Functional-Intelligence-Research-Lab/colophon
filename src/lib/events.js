@@ -214,19 +214,3 @@ export function sessionEndEvent() {
   }
 }
 
-export function geminiSuggestionEvent({ char_count = 0, output_preview = '', insertion_velocity = 0, content_before = '', content_after = '', hash = '' } = {}) {
-  return {
-    type: 'gemini_suggestion',
-    timestamp: now(),
-    meta: {
-      char_count,
-      output_preview: clip(output_preview, 100),
-      insertion_velocity,
-      content_before: clip(content_before, 500),
-      content_after: clip(content_after, 500),
-      content_before_length: trueLength(content_before),
-      content_after_length: trueLength(content_after),
-      _hash: hash,
-    },
-  }
-}

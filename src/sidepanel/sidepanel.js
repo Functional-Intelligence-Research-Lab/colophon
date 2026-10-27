@@ -667,8 +667,14 @@ const TimelineRenderer = {
     if (evt.type === 'paste') {
       const wordCount = Math.round((evt.meta?.char_count ?? 0) / 5);
       iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
-      const toolLabel = evt.meta?.source_tool ? getSourceToolLabel(evt.meta.source_tool) : null;
-      title = toolLabel ? `Pasted content (${toolLabel})` : 'Pasted content';
+      // The title deliberately never names the tool: render() is incremental
+      // (see updateEventState()) and never rebuilds an already-rendered
+      // card's title on a later correction, so a name baked in here at
+      // first render would go stale the moment it's corrected. The <select>
+      // below is the single place the current value is shown, and its own
+      // change handler keeps itself in sync directly — nothing to
+      // duplicate, nothing to go stale.
+      title = 'Pasted content';
       // Always editable, not just settable once — a self-report tag made in
       // the paste-time popup (or missed entirely, since that popup
       // auto-dismisses after 10s) can be set or corrected here at any time.
@@ -676,14 +682,21 @@ const TimelineRenderer = {
       // to be clicked to even reveal that a choice can be changed — a plain
       // link reads as a one-time action, not a live editable field.
       const history = evt.meta?.source_tool_history;
+      const originalValue = history?.[0]?.value ?? evt.meta?.source_tool ?? '';
       const correctedBadge = history?.length > 1
-        ? `<span class="ecc-corrected-badge" title="Originally reported as ${esc(getSourceToolLabel(history[0].value))}">↺</span>`
+        ? `<span class="ecc-corrected-badge" title="Originally reported as ${esc(getSourceToolLabel(originalValue))}">↺</span>`
         : '';
       const toolOptions = [
         `<option value="" ${!evt.meta?.source_tool ? 'selected' : ''} disabled>— Tag AI source —</option>`,
         ...SOURCE_TOOLS.map(t => `<option value="${t.id}" ${evt.meta?.source_tool === t.id ? 'selected' : ''}>${esc(t.label)}</option>`),
       ].join('');
-      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'} · <select class="ecc-source-select">${toolOptions}</select>${correctedBadge}`;
+      // data-original-value/data-has-been-set let the change handler below
+      // decide whether a later selection is a first-time report or a
+      // correction, and what to show in the corrected-badge's tooltip —
+      // render() is incremental and never revisits this card on its own
+      // (see updateEventState()), so the change handler has to track and
+      // update this state itself rather than relying on a future re-render.
+      meta = `${time} · ${wordCount > 0 ? wordCount + ' words' : (evt.meta?.char_count ?? 0) + ' chars'} · <select class="ecc-source-select" data-original-value="${esc(originalValue)}" data-has-been-set="${evt.meta?.source_tool ? 'true' : 'false'}">${toolOptions}</select>${correctedBadge}`;
       if (evt.meta?.source !== 'internal') {
         actionHTML = evt.meta?.source_url
           ? `<span class="ecc-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg></span>`
@@ -1230,6 +1243,7 @@ const TimelineRenderer = {
       const value = select.value;
       if (!cardEventId || !value) return;
 
+      const wasAlreadySet = select.dataset.hasBeenSet === 'true';
       select.disabled = true;
       let confirmed = false;
       try {
@@ -1239,11 +1253,27 @@ const TimelineRenderer = {
         });
         confirmed = response?.status === 'success';
       } catch { /* SW might be temporarily sleeping */ }
-      // On success the SW's SYNC_TIMELINE broadcast re-renders the whole
-      // panel with the new tag; nothing further to do here. On failure,
-      // re-enable so the student can retry rather than leaving it stuck.
-      if (!confirmed) {
-        select.disabled = false;
+
+      // render() is incremental: once this card has been drawn once, a
+      // metadata-only SYNC_TIMELINE broadcast never revisits it (see
+      // updateEventState(), which only acts on evt.meta.status changes) —
+      // so this has to update the DOM itself rather than waiting for a
+      // re-render that will never come for this specific card.
+      select.disabled = false;
+      if (confirmed) {
+        if (wasAlreadySet) {
+          let badge = eventCard.querySelector('.ecc-corrected-badge');
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'ecc-corrected-badge';
+            select.insertAdjacentElement('afterend', badge);
+          }
+          badge.textContent = '↺';
+          badge.title = `Originally reported as ${getSourceToolLabel(select.dataset.originalValue || '')}`;
+        } else {
+          select.dataset.originalValue = value;
+          select.dataset.hasBeenSet = 'true';
+        }
       }
     });
   }

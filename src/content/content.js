@@ -36,6 +36,11 @@ const TEXT_EVENT_IFRAME_SELECTOR = 'iframe.docs-texteventtarget-iframe'
 const EDITOR_POLL_MS  = 800
 const PREVIEW_LIMIT   = 100
 const PASTE_SUPPRESSION_MS = 1500
+// One short re-read of the document before flushEdit() gives up and falls
+// back to the position/content-less shape — absorbs a possible DOM-repaint
+// race (the debounce firing just before Google Docs finishes painting the
+// edit) without meaningfully delaying the event.
+const FLUSH_RETRY_MS = 120
 
 // Keys that don't produce or remove characters — skip these
 const SKIP_KEYS = new Set([
@@ -707,68 +712,112 @@ function flushEdit() {
   const elapsed = Math.max((Date.now() - _bufferStartTime) / 1000, 0.1);
   const absDelta = Math.abs(_editBuffer.delta);
   // insertion_velocity is a cruder rate than edit-velocity.js's cpm (no
-  // pause-exclusion, whole-buffer average) — used only to route a suspiciously
-  // fast, large insertion to the gemini_suggestion event type instead of edit.
-  // Like chars_per_min/too_fast_for_human below, this is a weak plausibility
-  // signal, not a detector of any specific behavior — see edit-velocity.js's
-  // header comment for what it can and cannot tell us.
+  // pause-exclusion, whole-buffer average). Like chars_per_min/
+  // too_fast_for_human below, this is a weak plausibility signal, not a
+  // detector of any specific behavior — see edit-velocity.js's header
+  // comment for what it can and cannot tell us. _geminiPanelActive is
+  // similarly weak (a MutationObserver watching for generic Google Docs UI
+  // markers, not a confirmed AI interaction — see initGeminiObserver()).
+  // Neither signal, alone or stacked together, is a confirmed AI
+  // interaction (no model identity, no prompt, no real accept/reject) — this
+  // used to promote the edit's source to 'ai', or swap its type to a
+  // separate 'gemini_suggestion' the viewer doesn't even recognize, making
+  // a stacked guess look like a direct observation. Both stay plain
+  // metadata a researcher can filter by at their own discretion; they never
+  // drive the event's own type or source.
   const insertion_velocity = Math.round(absDelta / elapsed);
   const likely_ai = insertion_velocity > 150 && absDelta > 80;
+  const gemini_panel_context = likely_ai && _geminiPanelActive;
+  if (gemini_panel_context) _geminiPanelActive = false;
 
-  debugLog('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai })
-
-  const eventType = (likely_ai && _geminiPanelActive) ? 'gemini_suggestion' : 'edit_block';
-  if (eventType === 'gemini_suggestion') _geminiPanelActive = false;
+  debugLog('[Colophon Content] edit flush', { delta: _editBuffer.delta, cpm, insertion_velocity, likely_ai, gemini_panel_context })
 
   // Diff the document's state now against what it was when this batch
   // started, to recover the real position/content of the edit — the
-  // keystroke-counted delta alone (position_start:0, position_end:delta)
-  // gives the annotation engine nothing it can actually locate in the final
-  // document, so a later edit on top of previously-pasted text could never
-  // override that text's provenance. Falls back to the old delta-only shape
-  // if the document text isn't available or nothing textual changed (e.g. a
-  // pure cursor move with no net edit) — this is strictly additive, never
-  // worse than before.
+  // keystroke-counted delta alone gives the annotation engine nothing it
+  // can actually locate in the final document, so a later edit on top of
+  // previously-pasted text could never override that text's provenance.
+  // Captured here (not read fresh inside the retry closure below) because
+  // it's a snapshot of the buffer's own start state, not something a later
+  // DOM read could ever improve on.
   const textBefore = _editBuffer.textBefore ?? '';
-  const textAfter = _getDocText();
-  let positionMeta = { position_start: 0, position_end: Math.max(0, _editBuffer.delta) };
-  let contentMeta = {};
-  let char_delta = _editBuffer.delta;
-  let char_count = absDelta;
+  // Reference, not the delta/timestamp values, so the retry below can tell
+  // whether THIS buffer is still the live one by the time it runs — a new
+  // bufferEdit() call during the retry window replaces `_editBuffer` with a
+  // different object, and finishFlush() must never clear that newer buffer
+  // out from under it.
+  const thisBuffer = _editBuffer;
 
-  if (textBefore && textAfter && textBefore !== textAfter) {
-    const { prefixLen, oldSuffixLen, newSuffixLen } = diffMiddleRegion(textBefore, textAfter);
-    const removedRaw = textBefore.slice(prefixLen, textBefore.length - oldSuffixLen);
-    const addedRaw   = textAfter.slice(prefixLen, textAfter.length - newSuffixLen);
-    if (removedRaw || addedRaw) {
-      positionMeta = { position_start: prefixLen, position_end: prefixLen + addedRaw.length };
-      contentMeta = {
-        content_before: removedRaw.slice(0, 500),
-        content_after:  addedRaw.slice(0, 500),
-        content_before_length: removedRaw.length,
-        content_after_length:  addedRaw.length,
-      };
-      char_delta = addedRaw.length - removedRaw.length;
-      char_count = addedRaw.length + removedRaw.length;
+  function finishFlush(textAfter, diffOutcome) {
+    let positionMeta = {};
+    let contentMeta = {};
+    let char_delta = thisBuffer.delta;
+    let char_count = absDelta;
+
+    if (diffOutcome === 'pending' && textBefore && textAfter && textBefore !== textAfter) {
+      const { prefixLen, oldSuffixLen, newSuffixLen } = diffMiddleRegion(textBefore, textAfter);
+      const removedRaw = textBefore.slice(prefixLen, textBefore.length - oldSuffixLen);
+      const addedRaw   = textAfter.slice(prefixLen, textAfter.length - newSuffixLen);
+      if (removedRaw || addedRaw) {
+        positionMeta = { position_start: prefixLen, position_end: prefixLen + addedRaw.length };
+        contentMeta = {
+          content_before: removedRaw.slice(0, 500),
+          content_after:  addedRaw.slice(0, 500),
+          content_before_length: removedRaw.length,
+          content_after_length:  addedRaw.length,
+        };
+        char_delta = addedRaw.length - removedRaw.length;
+        char_count = addedRaw.length + removedRaw.length;
+        diffOutcome = 'ok';
+      } else {
+        diffOutcome = 'diff_found_nothing';
+      }
+    } else if (diffOutcome === 'pending') {
+      diffOutcome = !textBefore ? 'no_text_before' : !textAfter ? 'no_text_after' : 'no_change_detected';
     }
+
+    // Telemetry for diagnosing a future real-world fallback without having
+    // to re-derive theories from scratch (see FLUSH_RETRY_MS above and this
+    // round's post-mortem): which exact precondition failed, so a repeat
+    // occurrence is evidence, not a guess.
+    debugLog('[Colophon Content] edit flush diff outcome', { diffOutcome })
+
+    send('LOG_EVENT', {
+      timestamp: thisBuffer.timestamp,
+      type: 'edit_block',
+      meta: {
+        ...positionMeta,
+        char_delta,
+        char_count,
+        source: 'human',
+        insertion_velocity,
+        likely_ai,
+        gemini_panel_context,
+        ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
+        churn_keys: v.churn_keys,
+        ...contentMeta,
+      },
+    })
+    // Only this buffer's own flush may clear it — a retry that resolves
+    // after a newer bufferEdit() has already started must not null out the
+    // in-progress buffer out from under it.
+    if (_editBuffer === thisBuffer) _editBuffer = null
   }
 
-  send('LOG_EVENT', {
-    timestamp: _editBuffer.timestamp,
-    type: eventType,
-    meta: {
-      ...positionMeta,
-      char_delta,
-      char_count,
-      source:         likely_ai ? 'ai' : 'human',
-      insertion_velocity,
-      likely_ai,
-      ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
-      churn_keys: v.churn_keys,
-      ...contentMeta,
-    },
-  })
-  _editBuffer = null
+  const firstTextAfter = _getDocText();
+  if (textBefore && firstTextAfter && textBefore !== firstTextAfter) {
+    finishFlush(firstTextAfter, 'pending');
+  } else {
+    // One short re-read before giving up — absorbs a possible DOM-repaint
+    // race (the debounce firing just before Google Docs finishes painting
+    // the edit), which would otherwise send a position/content-less event
+    // for a perfectly ordinary edit. Best-effort: the actual trigger for
+    // this fallback couldn't be confirmed without a live session, so this
+    // is a plausibility improvement, not a guaranteed fix.
+    setTimeout(() => {
+      finishFlush(_getDocText(), 'pending');
+    }, FLUSH_RETRY_MS);
+  }
 }
 
 // ── Paste capture ─────────────────────────────────────────────────────────────
@@ -1064,12 +1113,11 @@ async function emitPaste(text) {
   const docStateBefore = _rollingBaselineState;
 
   setTimeout(async () => {
-    
+
     const docStateAfter = await getDocumentText();
+    let startIndex = -1;
 
     if (docStateAfter) {
-      let startIndex = -1;
-
       // Diff Engine vs. Race Condition Fallback
       if (docStateBefore && docStateBefore.length !== docStateAfter.length) {
         startIndex = findFirstDifference(docStateBefore, docStateAfter);
@@ -1077,15 +1125,26 @@ async function emitPaste(text) {
         console.warn("[Colophon Content] Baseline sync missed. Falling back to index search.");
         startIndex = docStateAfter.lastIndexOf(text);
       }
+    }
 
-      // Context Extraction
-      if (startIndex >= 0) {
-        event.meta.content_before = docStateAfter.slice(Math.max(0, startIndex - 300), startIndex).trim();
-        const endIndex = startIndex + charCount;
-        event.meta.content_after = docStateAfter.slice(endIndex, endIndex + 300).trim();
-        event.meta.position_start = startIndex;
-        event.meta.position_end = endIndex;
-      }
+    // Context Extraction
+    if (startIndex >= 0) {
+      event.meta.content_before = docStateAfter.slice(Math.max(0, startIndex - 300), startIndex).trim();
+      const endIndex = startIndex + charCount;
+      event.meta.content_after = docStateAfter.slice(endIndex, endIndex + 300).trim();
+      event.meta.position_start = startIndex;
+      event.meta.position_end = endIndex;
+    } else {
+      // The diff genuinely couldn't locate this paste (docStateAfter never
+      // arrived, or neither the length-diff nor the lastIndexOf fallback
+      // found it) -- position_start:0 (the pre-diff placeholder set above)
+      // would otherwise masquerade as a real, confirmed position at the
+      // start of the document. Omitting the keys lets the viewer's
+      // classifyReliability() treat this honestly as "position unknown"
+      // (posStart==null -> 'none') instead of silently trusting a wrong
+      // offset.
+      delete event.meta.position_start;
+      delete event.meta.position_end;
     }
 
     // Check if this paste matches a pending AI output (e.g. from Paraphrase quick action)
@@ -1130,9 +1189,41 @@ async function emitPaste(text) {
     debugLog("[Colophon Content] Final Event Ready:", event);
     send('LOG_EVENT', event);
 
+    // TWFF spec (§ edit_block, "Relationship with paste"): a clipboard
+    // paste MUST emit both a paste event (clipboard metadata) AND an
+    // edit_block with source:'external' (the content change itself) at the
+    // same timestamp -- the edit_block is not a substitute for paste, nor
+    // paste for it. The viewer's classifyLayer() already expects this
+    // pairing (an edit_block/external layer defers its classification to
+    // the paired paste layer) and uses the edit_block's
+    // content_before_length/content_after_length for real position-drift
+    // tracking -- a bare paste has no "content_before" concept of its own
+    // to offer that math. Only sent when the paste is still a plain paste
+    // (not reclassified to ai_interaction above, which is self-sufficient
+    // and needs no edit_block companion) and only when a real position was
+    // actually located -- pairing a confirmed paste with an edit_block that
+    // has no confirmed location of its own would just add log volume with
+    // nothing useful in it.
+    if (event.type === 'paste' && startIndex >= 0) {
+      send('LOG_EVENT', {
+        timestamp: event.timestamp,
+        type: 'edit_block',
+        meta: {
+          source: 'external',
+          position_start: event.meta.position_start,
+          position_end: event.meta.position_end,
+          content_before: '',
+          content_after: text.slice(0, 500),
+          content_before_length: 0,
+          content_after_length: text.length,
+          char_count: charCount,
+        },
+      });
+    }
+
     _rollingBaselineState = docStateAfter;
 
-  }, 1000); 
+  }, 1000);
 }
 
 // ── Focus tracking ────────────────────────────────────────────────────────────
@@ -1851,8 +1942,10 @@ if (typeof document !== 'undefined' && document.addEventListener) {
 export {
   bufferEdit,
   flushEdit,
+  emitPaste,
   _setLastPasteAtForTest as __setLastPasteAtForTest,
   _setDocTextForTest as __setDocTextForTest,
+  _setGeminiPanelActiveForTest as __setGeminiPanelActiveForTest,
 };
 function _setLastPasteAtForTest(ts) { _lastPasteAt = ts; }
 // _getDocText() falls back to _rollingBaselineState when no DOM nodes match
@@ -1860,3 +1953,7 @@ function _setLastPasteAtForTest(ts) { _lastPasteAt = ts; }
 // stub) — setting it directly drives flushEdit()'s real diff logic without a
 // DOM.
 function _setDocTextForTest(text) { _rollingBaselineState = text; }
+// Normally only set by initGeminiObserver()'s MutationObserver — lets
+// flushEdit()'s gemini_panel_context metadata be tested directly without
+// simulating a real DOM mutation.
+function _setGeminiPanelActiveForTest(active) { _geminiPanelActive = active; }

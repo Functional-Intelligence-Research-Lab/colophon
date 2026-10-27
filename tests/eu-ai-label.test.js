@@ -93,6 +93,14 @@ describe('summariseSession', () => {
     expect(summariseSession(events)).toEqual({ humanChars: 100, aiChars: 200 })
   })
 
+  it('recognizes edit_block — the real producer type (content.js has never emitted the legacy "edit" name)', () => {
+    const events = [
+      { type: 'edit_block', meta: { char_delta: 100, source: 'human' } },
+      { type: 'ai_interaction', meta: { acceptance: 'fully_accepted', ai_chars: 200 } },
+    ]
+    expect(summariseSession(events)).toEqual({ humanChars: 100, aiChars: 200 })
+  })
+
   it('scales AI characters by similarity_score when the author reworded', () => {
     // AI produced 200 chars but only half its wording survived
     const events = [
