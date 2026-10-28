@@ -1065,7 +1065,63 @@ export function showPasteSourcePrompt(event) {
     chipContainer.append(btn);
   });
 
-  host.append(topRow, chipContainer);
+  // Independent of the AI-source chips above: marks this specific paste as
+  // a study-provided stimulus passage (meta.purpose = 'study_stimulus_seed'),
+  // not who pasted it or where the content came from -- those are already
+  // the chip row's job. Deliberately its own row, not a chip, so it can be
+  // checked in either order relative to a chip click, and checking it never
+  // dismisses the prompt the way a chip click does (the chips still need to
+  // be answerable afterward). See twff/spec/SPEC.md's `purpose` field.
+  const purposeRow = document.createElement('label');
+  purposeRow.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #bdc1c6;
+    cursor: pointer;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 8px;
+  `;
+  const purposeCheckbox = document.createElement('input');
+  purposeCheckbox.type = 'checkbox';
+  purposeCheckbox.style.cssText = 'margin:0;cursor:pointer;';
+  const purposeLabelText = document.createElement('span');
+  purposeLabelText.textContent = 'This is the study-provided passage, not my own content';
+  purposeRow.append(purposeCheckbox, purposeLabelText);
+
+  purposeCheckbox.addEventListener('change', async () => {
+    if (!purposeCheckbox.checked) return; // one-way: see note below, no uncheck support yet
+    purposeCheckbox.disabled = true;
+    event.meta.purpose = 'study_stimulus_seed';
+
+    // Same confirmed-write pattern as the source_tool chips above -- the SW
+    // hasn't necessarily stored this event yet (emitPaste's own LOG_EVENT
+    // send is itself delayed ~1s).
+    let confirmed = false;
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'UPDATE_EVENT_METADATA',
+        payload: {
+          eventId: event.event_id,
+          key: 'purpose',
+          value: 'study_stimulus_seed',
+          via: 'paste_prompt',
+        },
+      });
+      confirmed = response?.status === 'success';
+    } catch {
+      // SW might be temporarily sleeping
+    }
+
+    debugLog('[Colophon Content] Paste self-reported purpose: study_stimulus_seed', { confirmed });
+    purposeLabelText.textContent = confirmed
+      ? 'Marked as the study passage.'
+      : 'Could not save here — this paste is still flagged locally, but try the side panel.';
+    purposeLabelText.style.color = confirmed ? '#81c995' : '#f28b82';
+  });
+
+  host.append(topRow, chipContainer, purposeRow);
   document.body.appendChild(host);
   _activePastePrompt = host;
 

@@ -164,6 +164,74 @@ describe('Paste Source Tagging UI Prompt', () => {
     })
   })
 
+  it('marks the paste as the study stimulus seed independently of any source_tool chip, keyed by the real event_id', () => {
+    // purpose answers "why was this pasted," not "where did it come from"
+    // (source_tool's job) -- a separate row, not a chip, so it's checkable
+    // in either order relative to a source_tool pick. See twff/spec/
+    // SPEC.md's `purpose` field.
+    const pasteEvt = {
+      event_id: 'real-event-id-456',
+      timestamp: '2026-10-15T10:00:00.000Z',
+      type: 'paste',
+      meta: { char_count: 50 },
+    }
+
+    const host = showPasteSourcePrompt(pasteEvt)
+    const purposeRow = host.children[2]
+    const purposeCheckbox = purposeRow.children[0]
+
+    purposeCheckbox.checked = true
+    purposeCheckbox.dispatchEvent({ type: 'change' })
+
+    expect(pasteEvt.meta.purpose).toBe('study_stimulus_seed')
+    expect(sentMessages).toContainEqual({
+      type: 'UPDATE_EVENT_METADATA',
+      payload: {
+        eventId: 'real-event-id-456',
+        key: 'purpose',
+        value: 'study_stimulus_seed',
+        via: 'paste_prompt',
+      },
+    })
+    // Independent of source_tool -- neither chip-click nor checkbox should
+    // ever set the other field.
+    expect(pasteEvt.meta.source_tool).toBeUndefined()
+  })
+
+  it('a source_tool chip click never sets purpose, and checking the purpose box never sets source_tool', () => {
+    const pasteEvt = {
+      event_id: 'real-event-id-789',
+      timestamp: '2026-10-15T10:00:00.000Z',
+      type: 'paste',
+      meta: { char_count: 50 },
+    }
+
+    const host = showPasteSourcePrompt(pasteEvt)
+    const chipsContainer = host.children[1]
+    const claudeBtn = chipsContainer.children.find(b => b.dataset.toolId === 'claude')
+    claudeBtn.click()
+
+    expect(pasteEvt.meta.source_tool).toBe('claude')
+    expect(pasteEvt.meta.purpose).toBeUndefined()
+  })
+
+  it('does not re-send purpose if the checkbox change fires again without being unchecked first', () => {
+    const pasteEvt = {
+      event_id: 'real-event-id-999',
+      timestamp: '2026-10-15T10:00:00.000Z',
+      type: 'paste',
+      meta: { char_count: 50 },
+    }
+
+    const host = showPasteSourcePrompt(pasteEvt)
+    const purposeRow = host.children[2]
+    const purposeCheckbox = purposeRow.children[0]
+
+    purposeCheckbox.checked = true
+    purposeCheckbox.dispatchEvent({ type: 'change' })
+    expect(purposeCheckbox.disabled).toBe(true)
+  })
+
   it('omits source_tool when dismissed via close button (skipped tagging)', () => {
     const pasteEvt = {
       timestamp: '2026-10-15T10:00:00.000Z',
