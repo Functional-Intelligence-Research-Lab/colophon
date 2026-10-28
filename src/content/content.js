@@ -926,7 +926,7 @@ export function dismissPasteSourcePrompt() {
   }, 250);
 }
 
-export function showPasteSourcePrompt(event) {
+export function showPasteSourcePrompt(event, pairedEditBlockId) {
   if (typeof document === 'undefined' || !document.body) return null;
 
   dismissPasteSourcePrompt();
@@ -1095,10 +1095,17 @@ export function showPasteSourcePrompt(event) {
     purposeCheckbox.disabled = true;
     event.meta.purpose = 'study_stimulus_seed';
 
-    // Same confirmed-write pattern as the source_tool chips above -- the SW
-    // hasn't necessarily stored this event yet (emitPaste's own LOG_EVENT
-    // send is itself delayed ~1s).
-    let confirmed = false;
+    // Updates BOTH the paste and its (not-yet-necessarily-emitted) paired
+    // edit_block, atomically from the user's point of view -- same
+    // confirmed-write pattern as the source_tool chips above, relying on
+    // UPDATE_EVENT_METADATA's own bounded retry (service-worker.js) to
+    // catch either event whether it's already logged or still ~1000ms
+    // away. If the paired edit_block never actually gets emitted (no
+    // position was located, or the paste got reclassified to an
+    // ai_interaction instead), its update simply exhausts the retry and
+    // reports not-found -- harmless, and `pasteConfirmed` alone still
+    // reflects whether the paste itself (which always exists) was marked.
+    let pasteConfirmed = false;
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'UPDATE_EVENT_METADATA',
@@ -1109,16 +1116,32 @@ export function showPasteSourcePrompt(event) {
           via: 'paste_prompt',
         },
       });
-      confirmed = response?.status === 'success';
+      pasteConfirmed = response?.status === 'success';
     } catch {
       // SW might be temporarily sleeping
     }
 
-    debugLog('[Colophon Content] Paste self-reported purpose: study_stimulus_seed', { confirmed });
-    purposeLabelText.textContent = confirmed
+    if (pairedEditBlockId) {
+      chrome.runtime.sendMessage({
+        type: 'UPDATE_EVENT_METADATA',
+        payload: {
+          eventId: pairedEditBlockId,
+          key: 'purpose',
+          value: 'study_stimulus_seed',
+          via: 'paste_prompt',
+        },
+      }).catch(() => {
+        // SW unavailable, or (expected and harmless) this paste never got
+        // a paired edit_block at all -- either way, nothing to surface to
+        // the user beyond what pasteConfirmed below already shows.
+      })
+    }
+
+    debugLog('[Colophon Content] Paste self-reported purpose: study_stimulus_seed', { pasteConfirmed })
+    purposeLabelText.textContent = pasteConfirmed
       ? 'Marked as the study passage.'
       : 'Could not save here — this paste is still flagged locally, but try the side panel.';
-    purposeLabelText.style.color = confirmed ? '#81c995' : '#f28b82';
+    purposeLabelText.style.color = pasteConfirmed ? '#81c995' : '#f28b82';
   });
 
   host.append(topRow, chipContainer, purposeRow);
@@ -1164,7 +1187,20 @@ async function emitPaste(text) {
     },
   };
 
-  showPasteSourcePrompt(event);
+  // Pre-assigned now, atomically with the paste's own id, so the purpose
+  // checkbox below can address this event before it necessarily exists.
+  // The paired edit_block (sent conditionally, ~1000ms below, only when a
+  // position was actually located and the paste wasn't reclassified) uses
+  // this exact id when it's built — UPDATE_EVENT_METADATA's own bounded
+  // retry (METADATA_UPDATE_RETRY_DELAYS_MS, up to ~1.1s, service-worker.js)
+  // already covers "update arrives before the event is logged" for the
+  // paste's own purpose/source_tool updates; reusing the same id + the same
+  // retry path for the paired edit_block means no new pending-state
+  // machinery is needed, and no race between the checkbox and the delayed
+  // emission — whichever happens first, the retry catches the other.
+  const pairedEditBlockId = crypto.randomUUID();
+
+  showPasteSourcePrompt(event, pairedEditBlockId);
 
   const docStateBefore = _rollingBaselineState;
 
@@ -1262,6 +1298,10 @@ async function emitPaste(text) {
     // nothing useful in it.
     if (event.type === 'paste' && startIndex >= 0) {
       send('LOG_EVENT', {
+        // Same pre-assigned id the purpose checkbox already addresses (see
+        // emitPaste's own comment above) -- an UPDATE_EVENT_METADATA call
+        // that arrived before this point retries until this append lands.
+        event_id: pairedEditBlockId,
         timestamp: event.timestamp,
         type: 'edit_block',
         meta: {

@@ -288,9 +288,32 @@ export function verify(finalText, start, end, snapshot) {
 
 const escapeRe = (str) => str.split(/\s+/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
 
+// Fraction of the needle's own length two candidates' distance-to-origin
+// must differ by before the better one is trusted over the other — a
+// frozen, documented constant (not a loose heuristic) so "ambiguous" is a
+// deterministic outcome, not a judgment call made differently each time.
+// Below this margin, two (or more) candidates are genuinely too close to
+// call, and NEITHER is silently chosen.
+export const AMBIGUITY_MARGIN_FRACTION = 0.20;
+
 // Adapted from the prior orphaned viewer's _fuzzyFind: ranked, whitespace-
 // tolerant prefix search, disambiguated by proximity to a search-origin
 // hint rather than always taking the first match in the document.
+//
+// Returns one of three shapes:
+//   null                                        — no candidate at all (unlocated)
+//   { ambiguous: true, candidates }              — 2+ candidates too close to call; NEVER resolved to one
+//   { start, end, confidence: 'high'|'medium' }  — a single, confidently-chosen match
+//
+// Confidence depends on WHICH prefix tier produced the match, not just
+// candidate count: `tier 0` (the full needle, up to the 80-char cap) is a
+// genuinely full-text match — a single candidate there is 'high'. Every
+// shorter fallback tier (60/40/25/15 chars) is matching only a PIECE of the
+// needle, inherently less reliable even with exactly one candidate — those
+// are 'medium'. Distance-to-origin alone was never a safe disambiguator for
+// repeated phrases (the exact case this exists to catch); candidates are
+// now also scored by which tier found them, and the ambiguity check
+// compares same-tier candidates jointly with distance.
 export function fuzzyLocate(finalText, needle, expectedLength, searchOriginHint, claimedRangesForNeedle) {
   const norm = normalizeWs(needle);
   if (!norm) return null;
@@ -322,7 +345,25 @@ export function fuzzyLocate(finalText, needle, expectedLength, searchOriginHint,
     if (!candidates.length) continue;
     const origin = searchOriginHint ?? 0;
     candidates.sort((x, y) => Math.abs(x.start - origin) - Math.abs(y.start - origin));
-    return candidates[0];
+
+    if (candidates.length >= 2) {
+      const bestDist = Math.abs(candidates[0].start - origin);
+      const secondDist = Math.abs(candidates[1].start - origin);
+      const margin = norm.length * AMBIGUITY_MARGIN_FRACTION;
+      if (secondDist - bestDist < margin) {
+        // Two or more real candidates at this SAME tier, too close to call
+        // — never silently resolved to one. All candidates within the
+        // margin of the best are reported, not just the top two, so the
+        // caller can list every genuinely-live option.
+        const withinMargin = candidates.filter(
+          (c) => Math.abs(c.start - origin) - bestDist < margin
+        );
+        return { ambiguous: true, candidates: withinMargin };
+      }
+    }
+
+    const confidence = (i === 0 && candidates.length === 1) ? 'high' : 'medium';
+    return { start: candidates[0].start, end: candidates[0].end, confidence, ambiguous: false };
   }
   return null;
 }
@@ -391,6 +432,20 @@ export function compositeKey(history) {
   return tags.join('-then-');
 }
 
+// Plain-language name for how a range's CURRENT (most recent) layer was
+// located — part of the two-dimensional model (what was observed × how
+// certain is the placement): this is the "how certain" half, stated as
+// text so it survives print/PDF export and screen readers, not just a
+// hover color. Mirrors fuzzyLocate()'s/verify()'s own locatedVia/
+// confidence vocabulary.
+export function certaintyText(locatedVia, confidence) {
+  if (confidence === 'high' && locatedVia === 'offset') return 'exact position match';
+  if (confidence === 'high') return 'exact text match';
+  if (confidence === 'medium' && locatedVia === 'offset') return 'inferred — position recorded but text only approximately matched; review';
+  if (confidence === 'medium') return 'inferred by text similarity; review';
+  return null;
+}
+
 export function tooltipText(history) {
   const parts = history.map((l) => {
     const c = classifyLayer(l);
@@ -409,10 +464,17 @@ export function tooltipText(history) {
     if (c === 'human') return 'Edited by author';
     return null;
   }).filter(Boolean);
-  return parts.join(' → ') || 'Original authorship';
+  const base = parts.join(' → ') || 'Original authorship';
+  // Only the LAST (current) layer's certainty is relevant to display — a
+  // prior, superseded layer's own confidence isn't what the reader is
+  // looking at now. A plain 'human' range (no history at all) has no
+  // event-location concept, so no certainty line is added.
+  const current = history[history.length - 1];
+  const certainty = current ? certaintyText(current.locatedVia, current.confidence) : null;
+  return certainty ? `${base} (${certainty})` : base;
 }
 
-export function cssClassFor(key) {
+export function cssClassFor(key, confidence) {
   // compositeKey() can never actually produce 'ai-then-edited' (classifyLayer
   // only ever tags a layer 'human', never 'edited') -- AI-content-later-
   // edited-by-hand always composites to 'ai-then-human', which this set
@@ -421,8 +483,14 @@ export function cssClassFor(key) {
   // exists to show. 'paste-then-human' (pasted content later typed over) is
   // the other common case worth its own label, not the generic fallback.
   const known = new Set(['human', 'paste', 'paste-ai-disclosed', 'ai', 'ai-partial', 'ai-then-human', 'paste-then-ai', 'human-then-ai', 'paste-then-human']);
-  if (known.has(key)) return `ann-${key}`;
-  return 'ann-composite';
+  const base = known.has(key) ? `ann-${key}` : 'ann-composite';
+  // Certainty is a SEPARATE visual dimension from provenance-type color
+  // (ann-ai/ann-paste/etc.) — a second class, not a swap, so the two
+  // layer independently (viewer.css: a dashed/patterned border, not a
+  // different fill color). 'high' confidence (or no confidence concept at
+  // all, e.g. the plain 'human' baseline) gets no modifier — the existing,
+  // unmodified look already means "placed with confidence."
+  return confidence === 'medium' ? `${base} ann-certainty-inferred` : base;
 }
 
 // ── 8. Top-level orchestration ────────────────────────────────────────────
@@ -466,6 +534,10 @@ export function computeAnnotations(xhtmlStr, log) {
   const deletionLog = [];
   const supersededList = [];
   const unlocatedList = [];
+  // Ambiguous matches NEVER become a provenance range (never auto-picked,
+  // never drawn as if confirmed) — they only ever live here, as their own
+  // explicit evidence-list entry naming every candidate location.
+  const ambiguousList = [];
   const claimedByNeedle = new Map();
 
   for (const e of normEvents) {
@@ -478,6 +550,8 @@ export function computeAnnotations(xhtmlStr, log) {
     const expectedLength = e.charCount ?? e.contentAfterLength ?? (e.posEnd != null && e.posStart != null ? e.posEnd - e.posStart : null);
     let range = null;
     let locatedVia = null;
+    let confidence = null;
+    let wasAmbiguous = false;
 
     const rel = reliability.get(e.id);
     if (rel === 'position') {
@@ -491,12 +565,17 @@ export function computeAnnotations(xhtmlStr, log) {
       if (v.ok) {
         range = { start: startMap.pos, end: endMap.pos };
         locatedVia = 'offset';
+        confidence = v.confidence; // 'high' (exact) or 'medium' (>=0.85 similarity at the claimed position)
       } else if (snapshot) {
         const needleList = claimedByNeedle.get(snapshot) ?? [];
         const found = fuzzyLocate(finalText, snapshot, expectedLength, startMap.pos, needleList);
-        if (found) {
+        if (found?.ambiguous) {
+          wasAmbiguous = true;
+          ambiguousList.push({ event: e, candidates: found.candidates, reason: 'ambiguous-match' });
+        } else if (found) {
           range = found;
           locatedVia = 'fuzzy-after-offset-mismatch';
+          confidence = found.confidence;
           claimedByNeedle.set(snapshot, [...needleList, found]);
         }
       }
@@ -504,12 +583,18 @@ export function computeAnnotations(xhtmlStr, log) {
       const needleList = claimedByNeedle.get(snapshot) ?? [];
       const originHint = unlocatedAwareOrigin(ranges, e);
       const found = fuzzyLocate(finalText, snapshot, expectedLength, originHint, needleList);
-      if (found) {
+      if (found?.ambiguous) {
+        wasAmbiguous = true;
+        ambiguousList.push({ event: e, candidates: found.candidates, reason: 'ambiguous-match' });
+      } else if (found) {
         range = found;
         locatedVia = 'fuzzy';
+        confidence = found.confidence;
         claimedByNeedle.set(snapshot, [...needleList, found]);
       }
     }
+
+    if (wasAmbiguous) continue;
 
     if (!range) {
       unlocatedList.push({ event: e, reason: snapshot ? 'unlocated-no-match' : 'unlocated-no-snapshot' });
@@ -518,7 +603,7 @@ export function computeAnnotations(xhtmlStr, log) {
 
     applyProvenance(ranges, range.start, range.end, {
       eventId: e.id, timestamp: e.raw.timestamp, type: e.type, source: e.source,
-      model: e.model, acceptance: e.acceptance, locatedVia,
+      model: e.model, acceptance: e.acceptance, locatedVia, confidence,
       source_tool: e.source_tool, source_tool_history: e.source_tool_history,
     });
   }
@@ -531,7 +616,8 @@ export function computeAnnotations(xhtmlStr, log) {
     deletionLog,
     supersededList,
     unlocatedList,
-    stats: computeStats(normEvents, ranges, docLength, unlocatedList),
+    ambiguousList,
+    stats: computeStats(normEvents, ranges, docLength, unlocatedList, ambiguousList),
   };
 }
 
@@ -553,7 +639,7 @@ function bestKnownCharMagnitude(e) {
   return e.charCount ?? e.contentAfterLength ?? Math.abs(e.lengthHint ?? 0);
 }
 
-export function computeStats(normEvents, ranges, docLength, unlocatedList) {
+export function computeStats(normEvents, ranges, docLength, unlocatedList, ambiguousList) {
   const wordCount = docLength ? Math.round(docLength / 5.5) : 0; // rough estimate, refined below if content available
   let editCount = 0, aiAccepted = 0, aiDismissed = 0, pasteCount = 0;
   for (const e of normEvents) {
@@ -571,17 +657,33 @@ export function computeStats(normEvents, ranges, docLength, unlocatedList) {
       else if (e.acceptance === 'rejected') aiDismissed++;
     }
   }
+
+  // Confidence changes what counts toward the EXACT point estimate, not
+  // just how a range is drawn: only 'high'-confidence ranges (the current/
+  // most-recent layer touching that span, matching what's actually there
+  // now) count toward aiCoveragePct/pasteCoveragePct directly. 'medium'
+  // (genuinely placed, but inferred rather than verified exactly) widens
+  // the uncertainty range below instead of inflating the headline number.
   let aiCoveragePct = 0, pasteCoveragePct = 0;
+  let aiMediumChars = 0, pasteMediumChars = 0;
   for (const r of ranges) {
     const key = compositeKey(r.history);
     const span = r.end - r.start;
+    const currentConfidence = r.history.length ? r.history[r.history.length - 1].confidence : null;
     // paste-ai-disclosed is self-reported AI content, not independently
     // observed/generated the way 'ai'/'ai-partial' are — but it's still AI
     // content, and must count toward the AI-coverage stat, not just the
     // paste-coverage one (its key starts with "paste", not "ai", purely as
     // a classification-key naming artifact).
-    if (key.startsWith('ai') || key.includes('paste-ai-disclosed')) aiCoveragePct += span;
-    if (key.includes('paste')) pasteCoveragePct += span;
+    const isAi = key.startsWith('ai') || key.includes('paste-ai-disclosed');
+    const isPaste = key.includes('paste');
+    if (currentConfidence === 'medium') {
+      if (isAi) aiMediumChars += span;
+      if (isPaste) pasteMediumChars += span;
+      continue; // not in the exact point estimate
+    }
+    if (isAi) aiCoveragePct += span;
+    if (isPaste) pasteCoveragePct += span;
   }
   if (docLength) {
     aiCoveragePct = Math.round((aiCoveragePct / docLength) * 100);
@@ -603,7 +705,10 @@ export function computeStats(normEvents, ranges, docLength, unlocatedList) {
   // (pulling it up), never erased a human-written span. See the header
   // comment on computeAnnotations() -- this never touches buildOplog()'s
   // own 'position'-only filter, it only widens how the final two
-  // percentages are reported.
+  // percentages are reported. Ambiguous matches widen it the same
+  // direction as unlocated (their true location, and therefore effect, is
+  // just as unknown) -- 'high'-confidence ranges only, which is why
+  // mediumChars gets its own separate addition on the Max side.
   let humanUntrackedChars = 0, aiUntrackedChars = 0, pasteUntrackedChars = 0, pasteAiDisclosedUntrackedChars = 0;
   for (const u of unlocatedList ?? []) {
     const e = u.event;
@@ -619,18 +724,47 @@ export function computeStats(normEvents, ranges, docLength, unlocatedList) {
       else pasteUntrackedChars += chars;
     }
   }
+  for (const a of ambiguousList ?? []) {
+    const e = a.event;
+    const chars = bestKnownCharMagnitude(e);
+    if (chars <= 0) continue;
+    if ((e.type === 'ai_interaction' || e.type === 'ai_suggestion')
+        && ['fully_accepted', 'partially_accepted', 'modified'].includes(e.acceptance)) {
+      aiUntrackedChars += chars;
+    } else if (e.type === 'paste') {
+      if (e.source_tool && e.source_tool !== 'not_ai') pasteAiDisclosedUntrackedChars += chars;
+      else pasteUntrackedChars += chars;
+    }
+  }
   const untrackedChars = humanUntrackedChars + aiUntrackedChars + pasteUntrackedChars + pasteAiDisclosedUntrackedChars;
   const pct = (chars) => (docLength ? Math.round((chars / docLength) * 100) : 0);
   const clamp = (n) => Math.max(0, Math.min(100, n));
   const pasteCoverageMin = clamp(pasteCoveragePct - pct(humanUntrackedChars));
-  const pasteCoverageMax = clamp(pasteCoveragePct + pct(pasteUntrackedChars) + pct(pasteAiDisclosedUntrackedChars));
+  const pasteCoverageMax = clamp(pasteCoveragePct + pct(pasteUntrackedChars) + pct(pasteAiDisclosedUntrackedChars) + pct(pasteMediumChars));
   const aiCoverageMin = clamp(aiCoveragePct - pct(humanUntrackedChars));
-  const aiCoverageMax = clamp(aiCoveragePct + pct(aiUntrackedChars) + pct(pasteAiDisclosedUntrackedChars));
+  const aiCoverageMax = clamp(aiCoveragePct + pct(aiUntrackedChars) + pct(pasteAiDisclosedUntrackedChars) + pct(aiMediumChars));
+
+  // Per-event evidence summary -- "N recorded, X placed exactly, Y inferred,
+  // Z ambiguous, W couldn't be placed" -- built from counts, not prose; the
+  // viewer composes the actual sentence from these.
+  let placedExact = 0, placedInferred = 0;
+  for (const r of ranges) {
+    if (!r.history.length) continue;
+    const confidence = r.history[r.history.length - 1].confidence;
+    if (confidence === 'high') placedExact++;
+    else if (confidence === 'medium') placedInferred++;
+  }
 
   return {
     wordCount, editCount, aiAccepted, aiDismissed, pasteCount, aiCoveragePct, pasteCoveragePct,
     pasteCoverageMin, pasteCoverageMax, aiCoverageMin, aiCoverageMax,
     untrackedChars, untrackedCount: (unlocatedList ?? []).length,
+    ambiguousCount: (ambiguousList ?? []).length,
+    evidenceSummary: {
+      placedExact, placedInferred,
+      ambiguous: (ambiguousList ?? []).length,
+      unlocated: (unlocatedList ?? []).length,
+    },
   };
 }
 
@@ -644,7 +778,12 @@ function buildAnnotatedFragment(dom, nodes, offsets, ranges) {
   // offsets table for ranges processed later.
   for (let i = taggedRanges.length - 1; i >= 0; i--) {
     const r = taggedRanges[i];
-    wrapRange(dom, nodes, offsets, r.start, r.end, cssClassFor(compositeKey(r.history)), tooltipText(r.history));
+    const currentConfidence = r.history.length ? r.history[r.history.length - 1].confidence : null;
+    wrapRange(
+      dom, nodes, offsets, r.start, r.end,
+      cssClassFor(compositeKey(r.history), currentConfidence),
+      tooltipText(r.history),
+    );
   }
   return dom.body;
 }

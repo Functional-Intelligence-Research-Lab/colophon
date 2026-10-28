@@ -56,27 +56,65 @@ export const FULLY_AI_THRESHOLD = 0.995
  */
 export const MODIFIED_MIN_THRESHOLD = 0.02
 
+/** Where the AI-involvement evidence behind a suggested label actually came
+ * from — a distinction the label itself doesn't carry, but the UI copy
+ * must, since the two have very different evidentiary weight. */
+export const EVIDENCE_BASIS = {
+  NONE: 'none',
+  // Colophon directly watched this happen (ai_interaction/ai_suggestion).
+  SYSTEM_OBSERVED: 'system_observed',
+  // Only ever a paste's own self-reported source_tool disclosure — proves
+  // "the participant said this came from AI," nothing stronger. Never
+  // auto-escalated to read like a verified finding.
+  SELF_REPORTED: 'self_reported',
+}
+
+/** Hedged reason text used whenever a label's evidence is self-report-only
+ * — deliberately the SAME wording regardless of which label/share it is,
+ * so the hedge can never be confused with a confident, share-specific
+ * claim. Matches the EU's own guidance: these icons disclose, they don't
+ * verify authorship, determine misconduct, or establish Act compliance. */
+export const SELF_REPORTED_ONLY_REASON =
+  'AI involvement was disclosed or recorded. Review the evidence before applying any institutional label.'
+
 /**
  * Decide which EU icon a session suggests.
  *
  * @param {object} stats
- * @param {number} stats.humanChars  characters attributable to the author
- * @param {number} stats.aiChars     AI characters retained in the document
- * @returns {{label: string, reason: string, aiShare: number}}
+ * @param {number} stats.humanChars         characters attributable to the author
+ * @param {number} stats.observedAiChars    AI characters Colophon directly observed
+ * @param {number} stats.selfReportedAiChars AI characters only ever self-reported (a paste's source_tool)
+ * @returns {{label: string, reason: string, aiShare: number, evidenceBasis: string}}
  */
-export function classifyEuLabel({ humanChars = 0, aiChars = 0 } = {}) {
+export function classifyEuLabel({ humanChars = 0, observedAiChars = 0, selfReportedAiChars = 0 } = {}) {
+  const aiChars = observedAiChars + selfReportedAiChars
   const total = humanChars + aiChars
+  const evidenceBasis = observedAiChars > 0
+    ? EVIDENCE_BASIS.SYSTEM_OBSERVED
+    : (selfReportedAiChars > 0 ? EVIDENCE_BASIS.SELF_REPORTED : EVIDENCE_BASIS.NONE)
+
   if (total <= 0 || aiChars <= 0) {
-    return { label: EU_LABEL.NONE, reason: 'No AI contribution recorded.', aiShare: 0 }
+    return { label: EU_LABEL.NONE, reason: 'No AI contribution recorded.', aiShare: 0, evidenceBasis: EVIDENCE_BASIS.NONE }
   }
 
   const aiShare = aiChars / total
+
+  // The hedge applies to EVERY label at this evidence basis, not just the
+  // strongest one — even the plain "AI" mark implies something Colophon
+  // itself verified, which a bare self-report never does.
+  if (evidenceBasis === EVIDENCE_BASIS.SELF_REPORTED) {
+    const label = aiShare >= FULLY_AI_THRESHOLD ? EU_LABEL.AI_GENERATED
+      : aiShare >= MODIFIED_MIN_THRESHOLD ? EU_LABEL.AI_MODIFIED
+      : EU_LABEL.AI
+    return { label, reason: SELF_REPORTED_ONLY_REASON, aiShare, evidenceBasis }
+  }
 
   if (aiShare >= FULLY_AI_THRESHOLD) {
     return {
       label: EU_LABEL.AI_GENERATED,
       reason: 'Effectively all recorded content came from AI output.',
       aiShare,
+      evidenceBasis,
     }
   }
 
@@ -85,6 +123,7 @@ export function classifyEuLabel({ humanChars = 0, aiChars = 0 } = {}) {
       label: EU_LABEL.AI_MODIFIED,
       reason: 'Human-written content was partially produced or altered using AI.',
       aiShare,
+      evidenceBasis,
     }
   }
 
@@ -92,20 +131,34 @@ export function classifyEuLabel({ humanChars = 0, aiChars = 0 } = {}) {
     label: EU_LABEL.AI,
     reason: 'AI was used, but its contribution to the final text is minimal.',
     aiShare,
+    evidenceBasis,
   }
 }
 
 /**
- * Derive {humanChars, aiChars} from a session's event list.
+ * Derive {humanChars, observedAiChars, selfReportedAiChars} from a
+ * session's event list.
  *
  * AI characters count only what was actually KEPT: rejected suggestions
  * contribute nothing, and where a similarity_score is available (how much of
  * the AI's wording survived the author's edits) we scale by it rather than
  * crediting the AI with text the author rewrote.
+ *
+ * A `paste` was previously never handled here at all — a session that was
+ * entirely one disclosed-AI paste (source_tool set to a real tool, no other
+ * events) computed humanChars=0, aiChars=0 and returned EU_LABEL.NONE ("no
+ * AI contribution"), the opposite problem from overclaiming. Fixed: a paste
+ * with a disclosed (non-'not_ai') source_tool counts its char_count toward
+ * `selfReportedAiChars`, kept entirely separate from system-observed
+ * `aiChars` so classifyEuLabel can hedge appropriately. A paste with no
+ * disclosure, or an explicit 'not_ai' self-report, counts toward neither
+ * bucket — its provenance is genuinely unknown, and assuming it either way
+ * would be its own overclaim.
  */
 export function summariseSession(events = []) {
   let humanChars = 0
-  let aiChars = 0
+  let observedAiChars = 0
+  let selfReportedAiChars = 0
 
   for (const e of events) {
     const m = e?.meta ?? {}
@@ -128,11 +181,21 @@ export function summariseSession(events = []) {
       const survived = typeof m.similarity_score === 'number'
         ? Math.max(0, Math.min(1, m.similarity_score))
         : 1
-      aiChars += kept * survived
+      observedAiChars += kept * survived
+    } else if (e?.type === 'paste') {
+      if (m.source_tool && m.source_tool !== 'not_ai') {
+        selfReportedAiChars += Math.max(0, m.char_count ?? 0)
+      }
+      // No disclosure, or an explicit 'not_ai' self-report: genuinely
+      // unknown provenance, counted toward neither bucket.
     }
   }
 
-  return { humanChars: Math.round(humanChars), aiChars: Math.round(aiChars) }
+  return {
+    humanChars: Math.round(humanChars),
+    observedAiChars: Math.round(observedAiChars),
+    selfReportedAiChars: Math.round(selfReportedAiChars),
+  }
 }
 
 /** Convenience: classify straight from an event list. */

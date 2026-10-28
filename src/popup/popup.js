@@ -16,7 +16,7 @@
  */
 
 import { exportTwff } from '../lib/export.js'
-import { classifyEuLabel, summariseSession, euIconPath, euLabelText, EU_LABEL } from '../lib/eu-ai-label.js'
+import { classifyEuLabel, summariseSession, euIconPath, euLabelText, EU_LABEL, EVIDENCE_BASIS, SELF_REPORTED_ONLY_REASON } from '../lib/eu-ai-label.js'
 import { formatDocTitle } from '../shared/doc-title.js'
 import { esc } from '../shared/esc.js'
 
@@ -208,29 +208,42 @@ function renderScores(session) {
   // Character-weighted, not event-counted: a single one-character edit and a
   // single 2,000-character accepted AI paragraph used to both count as "1"
   // toward their bucket, so these bars could show e.g. "90% own writing"
-  // when the AI content was actually most of the document's text. summariseSession()
-  // already does this correctly for the EU-label math below (ai_chars kept,
-  // scaled by similarity_score when the author reworded it) — reuse the
-  // same numbers here instead of a second, cruder count.
-  const { humanChars, aiChars } = summariseSession(events)
+  // when the AI content was actually most of the document's text.
+  // summariseSession() already does this correctly for the EU-label math
+  // below (ai_chars kept, scaled by similarity_score when the author
+  // reworded it) — reuse the same numbers here instead of a second, cruder
+  // count.
+  const { humanChars, observedAiChars, selfReportedAiChars } = summariseSession(events)
+  // The "source" bar is deliberately broader than selfReportedAiChars above:
+  // it's every pasted character regardless of disclosure (a mechanism
+  // question — "how much was pasted in" — not a disclosure question), so a
+  // paste with no source_tool at all, or an explicit 'not_ai' self-report,
+  // still shows up here even though it contributes to neither EU-label
+  // bucket.
   const sourceChars = events
     .filter(event => event.type === 'paste' || event.type === 'source')
     .reduce((sum, event) => sum + Math.max(0, event.meta?.char_count ?? 0), 0)
-  const hasData = humanChars + aiChars + sourceChars > 0
-  const total = Math.max(1, humanChars + aiChars + sourceChars)
+  const hasData = humanChars + observedAiChars + sourceChars > 0
+  const total = Math.max(1, humanChars + observedAiChars + sourceChars)
 
   const own = session ? clampPercent(Math.round((humanChars / total) * 100)) : 0
-  const ai = session ? clampPercent(Math.round((aiChars / total) * 100)) : 0
+  const ai = session ? clampPercent(Math.round((observedAiChars / total) * 100)) : 0
   const source = session ? clampPercent(Math.round((sourceChars / total) * 100)) : 0
 
   setScore('own', own)
   setScore('ai', ai)
   setScore('source', source)
   renderSummaryBanner(hasData)
-  // Derive the EU label from the SAME rounded percentages the bars display, so
-  // the suggestion can never contradict what the user sees (e.g. "AI 0%" must
-  // not produce an "AI" label).
-  renderEuLabel({ hasSession: !!session, own, ai, source })
+  // The EU label is classified from the real underlying character counts
+  // (including disclosed-AI paste content via selfReportedAiChars), not
+  // from the three bars' own rounded percentages — those bars answer "how
+  // was this text produced" (typed / quick-action / pasted), a different
+  // question from "was AI involvement disclosed," and conflating the two
+  // was the exact bug this fixes: a session that's entirely one disclosed
+  // AI paste used to show "source: 100%, ai: 0%" on the bars AND "no AI
+  // contribution recorded" from the label — both technically following
+  // from the old numbers, neither true.
+  renderEuLabel({ hasSession: !!session, humanChars, observedAiChars, selfReportedAiChars })
 }
 
 // Informational EU AI-disclosure label. Suggests the European Commission's
@@ -238,7 +251,7 @@ function renderScores(session) {
 // suggestion only — Colophon can't know whether a document falls within AI Act
 // Article 50 scope, so the author decides whether to apply it. Never written to
 // the log or auto-applied here.
-function renderEuLabel({ hasSession, own, ai, source }) {
+function renderEuLabel({ hasSession, humanChars, observedAiChars, selfReportedAiChars }) {
   const wrap = $('eu-label')
   if (!wrap) return
   const icon = $('eu-label-icon')
@@ -253,12 +266,10 @@ function renderEuLabel({ hasSession, own, ai, source }) {
   }
   wrap.hidden = false
 
-  // Classify from the displayed percentages: aiShare = ai / (own + ai + source)
-  // matches the AI bar exactly, so label and bars always agree.
-  const { label, aiShare } = classifyEuLabel({ humanChars: own + source, aiChars: ai })
+  const { label, aiShare, evidenceBasis } = classifyEuLabel({ humanChars, observedAiChars, selfReportedAiChars })
   const aiPct = Math.round(aiShare * 100)
 
-  wrap.title = euLabelReason(label, aiPct)
+  wrap.title = euLabelReason(label, aiPct, evidenceBasis)
 
   if (label === EU_LABEL.NONE) {
     // Session recorded, but no AI in the breakdown — muted "no label" state
@@ -276,11 +287,21 @@ function renderEuLabel({ hasSession, own, ai, source }) {
     icon.alt = euLabelText(label)
     icon.hidden = false
   }
-  if (text) text.textContent = euLabelText(label)
+  // Self-report-only evidence gets the hedged text in place of the plain
+  // label name, so a bare "AI generated" never appears without the caveat
+  // that it rests on a self-report, not anything Colophon verified.
+  if (text) text.textContent = evidenceBasis === EVIDENCE_BASIS.SELF_REPORTED
+    ? euLabelText(label) + ' (self-reported)'
+    : euLabelText(label)
 }
 
 // Plain-language "why" for the hover tooltip on the suggested-label row.
-function euLabelReason(label, aiPct) {
+// evidenceBasis === SELF_REPORTED gets the SAME frozen hedge regardless of
+// label/share — see eu-ai-label.js's SELF_REPORTED_ONLY_REASON — precisely
+// so a stronger-sounding label never comes with a more confident-sounding
+// reason just because the share happened to be higher.
+function euLabelReason(label, aiPct, evidenceBasis) {
+  if (evidenceBasis === EVIDENCE_BASIS.SELF_REPORTED) return SELF_REPORTED_ONLY_REASON
   const tail = ' This is a suggestion from your recorded session — you decide whether it applies.'
   switch (label) {
     case EU_LABEL.AI_GENERATED:
