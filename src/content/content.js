@@ -519,10 +519,14 @@ function attachTextEventIframe() {
   }
 }
 
-// Always-on recording (spike). When true, a Doc load auto-starts a session so
-// text written before any "Start recording" click is still captured — closing
-// the opt-in blind spot. Flip to false to revert to manual/opt-in recording.
-const AUTO_RECORD = true
+// Always-on recording (spike, reverted). When true, a Doc load auto-starts a
+// session so text written before any "Start recording" click is still
+// captured — closing the opt-in blind spot, at the cost of recording (and
+// persisting paste/edit events) before the user has clicked anything, while
+// the UI still reads as opt-in. That mismatch is exactly what the manual path
+// avoids, so this stays false until the UI itself is redesigned to show
+// "recording active" from doc-open — see firl-infra/TASKS.md.
+const AUTO_RECORD = false
 
 async function syncRecordingState() {
   try {
@@ -749,7 +753,13 @@ function flushEdit() {
   const thisBuffer = _editBuffer;
 
   function finishFlush(textAfter, diffOutcome) {
-    let positionMeta = {};
+    // 'unknown' by default, not merely absent: an omitted position_reliability
+    // reads as "exact" per the schema, which would be wrong the moment this
+    // stays the default and no diff branch below overwrites it. Explicitly
+    // marking "we don't know where this happened" is what lets the schema
+    // accept this event without position_start/position_end at all, instead
+    // of forcing a fabricated offset that would misrepresent a real location.
+    let positionMeta = { position_reliability: 'unknown' };
     let contentMeta = {};
     let char_delta = thisBuffer.delta;
     let char_count = absDelta;
@@ -759,7 +769,7 @@ function flushEdit() {
       const removedRaw = textBefore.slice(prefixLen, textBefore.length - oldSuffixLen);
       const addedRaw   = textAfter.slice(prefixLen, textAfter.length - newSuffixLen);
       if (removedRaw || addedRaw) {
-        positionMeta = { position_start: prefixLen, position_end: prefixLen + addedRaw.length };
+        positionMeta = { position_start: prefixLen, position_end: prefixLen + addedRaw.length, position_reliability: 'exact' };
         contentMeta = {
           content_before: removedRaw.slice(0, 500),
           content_after:  addedRaw.slice(0, 500),
@@ -1177,13 +1187,14 @@ async function emitPaste(text) {
     timestamp: new Date().toISOString(),
     type: 'paste',
     meta: {
-      char_count:     charCount,
-      source:         'external',
-      position_start: 0,
-      position_end:   charCount,
-      output_preview: formatPreview(text),
-      content_before: "",
-      content_after:  ""
+      char_count:          charCount,
+      source:              'external',
+      position_start:      0,
+      position_end:        charCount,
+      position_reliability: 'exact',
+      content_preview:     formatPreview(text),
+      content_before:      "",
+      content_after:       ""
     },
   };
 
@@ -1226,6 +1237,7 @@ async function emitPaste(text) {
       event.meta.content_after = docStateAfter.slice(endIndex, endIndex + 300).trim();
       event.meta.position_start = startIndex;
       event.meta.position_end = endIndex;
+      event.meta.position_reliability = 'exact';
     } else {
       // The diff genuinely couldn't locate this paste (docStateAfter never
       // arrived, or neither the length-diff nor the lastIndexOf fallback
@@ -1234,7 +1246,9 @@ async function emitPaste(text) {
       // start of the document. Omitting the keys lets the viewer's
       // classifyReliability() treat this honestly as "position unknown"
       // (posStart==null -> 'none') instead of silently trusting a wrong
-      // offset.
+      // offset. position_reliability:'unknown' is what now lets the schema
+      // accept this event without position_start/position_end present at all.
+      event.meta.position_reliability = 'unknown';
       delete event.meta.position_start;
       delete event.meta.position_end;
     }
@@ -1308,6 +1322,7 @@ async function emitPaste(text) {
           source: 'external',
           position_start: event.meta.position_start,
           position_end: event.meta.position_end,
+          position_reliability: 'exact',
           content_before: '',
           content_after: text.slice(0, 500),
           content_before_length: 0,

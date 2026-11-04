@@ -46,6 +46,7 @@ export function normalizeEvent(raw, index) {
 
   const posStart = numOrNull(f.position_start);
   const posEnd = numOrNull(f.position_end);
+  const positionReliability = f.position_reliability ?? null;
   const contentBefore = desentinel(f.content_before);
   const contentAfter = desentinel(f.content_after);
 
@@ -71,7 +72,7 @@ export function normalizeEvent(raw, index) {
     source_tool_history: f.source_tool_history ?? null,
     model: f.model ?? null,
     acceptance: f.acceptance ?? null, // preserved verbatim, including the real producer's non-spec "pending"
-    posStart, posEnd,
+    posStart, posEnd, positionReliability,
     contentBefore, contentAfter,
     contentBeforeLength, contentAfterLength,
     preview: f.output_preview ?? f.content_preview ?? null,
@@ -124,6 +125,11 @@ export function linearizeDom(bodyEl) {
 // Three outcomes: 'position' (trust the offset), 'length-only' (offset is
 // garbage, but the length/char count is usable for bookkeeping), 'none'.
 export function classifyReliability(e, docLenEstimate) {
+  // An explicit 'unknown' marker is checked first and independent of
+  // whatever posStart/posEnd happen to hold — a producer that ever sends
+  // both (a stray leftover offset alongside an honest "I don't know"
+  // marker) must not have the offset silently win.
+  if (e.positionReliability === 'unknown') return 'none';
   if (e.posStart == null || e.posEnd == null) return 'none';
   if (e.posStart < 0 || e.posEnd < e.posStart) return 'none';
 

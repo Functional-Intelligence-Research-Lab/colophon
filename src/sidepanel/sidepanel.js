@@ -1,4 +1,4 @@
-import { complete } from '../lib/ai/ollama-client.js';
+import { complete, DATA_FENCE_OPEN as _DATA_FENCE_OPEN, DATA_FENCE_CLOSE as _DATA_FENCE_CLOSE } from '../lib/ai/ollama-client.js';
 import { esc } from '../shared/esc.js';
 import {aiInteractionEvent} from '../lib/events.js'
 import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.js';
@@ -18,14 +18,15 @@ let _assignmentPrompt = '';
 let _docContext = null;
 let _lastScanTime = 0;
 
-// Delimiter wrapped around doc/selection text sent to the model. This is a
-// prompt-injection speed bump, not a guarantee: a small local model has no
-// airtight defense against text that impersonates an instruction. The real
-// backstop is that every AI response still requires an explicit user click
-// (Insert/Accept) before it touches the document — an injected reply can be
-// misleading, but it can't silently edit the doc or exfiltrate anything.
-const _DATA_FENCE_OPEN = '<<<COLOPHON_DATA_START>>>';
-const _DATA_FENCE_CLOSE = '<<<COLOPHON_DATA_END>>>';
+// Fence constants imported from ollama-client.js (aliased above) rather than
+// defined here a second time — cleanResponse() over there has to recognize
+// these exact strings if a model echoes part of its prompt back, so there's
+// only one place that pair is allowed to live. This is a prompt-injection
+// speed bump, not a guarantee: a small local model has no airtight defense
+// against text that impersonates an instruction. The real backstop is that
+// every AI response still requires an explicit user click (Insert/Accept)
+// before it touches the document — an injected reply can be misleading, but
+// it can't silently edit the doc or exfiltrate anything.
 
 // Wrap untrusted text (doc content, selections) so it reads as clearly-bounded
 // data rather than free-form text that could blend into the surrounding
@@ -76,46 +77,11 @@ async function _triggerManualScan() {
   }
 }
 
-function _cleanAIResponse(text) {
-  if (!text) return text;
-  let t = text.trim();
-
-  // Unwrap JSON-formatted responses (small models sometimes output {"key": "value"})
-  if (t.startsWith('{') || t.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(t);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        const strVal = Object.values(parsed).find(v => typeof v === 'string' && v.length > 5);
-        if (strVal) t = strVal.trim();
-      }
-    } catch { /* not valid JSON */ }
-  }
-
-  // Remove any stray [CURSOR] tokens the model may echo back
-  t = t.replace(/\[CURSOR\]/gi, '').trim();
-
-  // Strip meta-commentary prefixes that small models prepend
-  const prefixes = [
-    /^the user wants me to\b[\s\S]*?\.\s*/i,
-    /^i (?:will|should|need to) treat [\s\S]*?\.\s*/i,
-    /^\[cursor\]\s*/i,
-    /^the user(?:'s)? (?:writing|text) is:\s*/i,
-    /^the completed sentence is:\s*/i,
-    /^here is (?:the )?(?:paraphras\w*|revis\w*|rewritten) (?:text|version|sentence)?:?\s*/i,
-    /^paraphras\w* version:?\s*/i,
-    /^revis\w* version:?\s*/i,
-    /^here'?s? (?:a |the )?(?:suggestion|revision|paraphrase):?\s*/i,
-    /^(?:rewritten|revised|paraphrased):\s*/i,
-  ];
-  for (const re of prefixes) t = t.replace(re, '');
-
-  // Strip surrounding quotation marks added by the model
-  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
-    t = t.slice(1, -1).trim();
-  }
-
-  return t;
-}
+// Response cleanup (ChatML tokens, <think> blocks, echoed data fences,
+// JSON-wrapped replies, meta-commentary prefixes, wrapping quotes) now
+// happens once, centrally, in ollama-client.js's complete() — every call
+// site below gets already-sanitized text back instead of calling a second,
+// locally-duplicated cleanup pass that could drift from the shared one.
 
 document.addEventListener('DOMContentLoaded', async () => {
   const logoEl = document.getElementById('colophon-logo');
@@ -814,7 +780,7 @@ const TimelineRenderer = {
         : esc(fullText);
 
       contentHTML = `
-        <div class="card suggestion-card" data-gemini="${isGemini}" data-interaction-subtype="${esc(evt.meta.interaction_subtype || '')}">
+        <div class="card suggestion-card" data-gemini="${isGemini}" data-interaction-subtype="${esc(evt.meta.interaction_subtype || '')}" data-model="${esc(evt.meta.model || '')}">
           <p data-full-text="${esc(fullText)}" data-expanded="false">${preview}</p>
           <div class="actions">
             <button type="button" class="btn-insert">${isGemini ? 'Accept' : 'Insert'}</button>
@@ -1047,6 +1013,13 @@ const TimelineRenderer = {
         const textPreview = p.dataset.fullText ? p.dataset.fullText : p.textContent;
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
         const subtype = eventCard.querySelector('[data-interaction-subtype]')?.dataset.interactionSubtype || null;
+        // The real model string, exactly as complete() composed it
+        // ("provider/name"), threaded from render time into the DOM --
+        // not re-guessed here. A card that somehow never got one (e.g. the
+        // "...thinking" placeholder, if it's ever dismissed before being
+        // replaced) falls back to an honest "unknown", never a fabricated
+        // specific model name.
+        const model = eventCard.querySelector('[data-model]')?.dataset.model || 'unknown';
 
         TimelineRenderer.updateEventState({ event_id: cardEventId, meta: { status: 'dismissed' } });
         chrome.runtime.sendMessage({
@@ -1065,7 +1038,7 @@ const TimelineRenderer = {
           chrome.runtime.sendMessage({
           action: 'LOG_EVENT',
           payload: aiInteractionEvent({
-            model: 'local/unknown',
+            model,
             output_preview: textPreview,
             position_start: 0,
             position_end: 0,
@@ -1088,6 +1061,10 @@ const TimelineRenderer = {
         const p = eventCard.querySelector('p');
         const isGemini = eventCard.querySelector('[data-gemini="true"]') !== null;
         const subtype = eventCard.querySelector('[data-interaction-subtype]')?.dataset.interactionSubtype || null;
+        // Same real model string threaded from render time, not re-guessed
+        // -- the Gemini branch already has its own real, fixed identifier
+        // and never reads this.
+        const model = eventCard.querySelector('[data-model]')?.dataset.model || 'unknown';
 
         let textToInsert = p.dataset.fullText || p.textContent;
         textToInsert = textToInsert.replace(/Show$|Hide$/, '').replace(/\.\.\.$/,'').trim();
@@ -1110,7 +1087,7 @@ const TimelineRenderer = {
           // keys on this timestamp string. Using the real event's own value
           // eliminates the race instead of just retrying around it.
           const event = aiInteractionEvent({
-            model: isGemini ? 'google/gemini' : 'local/llama-3.2-1b',
+            model: isGemini ? 'google/gemini' : model,
             output_preview: textToInsert,
             position_start: 0,
             position_end: textToInsert.length,
@@ -1453,8 +1430,36 @@ const ChatInput = {
 
     try {
       const systemPrompt = await _buildSystemPrompt();
-      const { text: rawReply, model } = await complete(text, { endpoint: this._endpoint, systemPrompt });
-      const reply = _cleanAIResponse(rawReply);
+      const { text: reply, model, empty } = await complete(text, { endpoint: this._endpoint, systemPrompt });
+
+      if (empty) {
+        // Nothing usable survived cleanup (e.g. the model only echoed
+        // protocol tokens or its own prompt back) -- show this honestly,
+        // the same inline-card way the catch block below shows a real
+        // error, instead of logging/rendering a blank suggestion card.
+        const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
+        if (existing) existing.remove();
+        TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
+
+        const errCard = document.createElement('div');
+        errCard.className = 'timeline-event-compact ecc-error-card';
+        errCard.dataset.timestamp = new Date().toISOString();
+        errCard.innerHTML = `
+          <div class="ecc-icon ecc-warn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="ecc-body">
+            <div class="ecc-title">${esc('Empty response')}</div>
+            <div class="ecc-meta">${esc("The model didn't return anything usable. Try again.")}</div>
+          </div>
+          <div class="ecc-action" style="gap:4px;display:flex;">
+            <button type="button" class="ecc-btn-close-err" title="Dismiss" aria-label="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+        `;
+        errCard.querySelector('.ecc-btn-close-err')?.addEventListener('click', () => errCard.remove());
+        TimelineRenderer.container.appendChild(errCard);
+        return;
+      }
 
       // Capture which quick action (if any) produced this before
       // notifyAIResponse() reads-then-clears it — needed below so the
@@ -1905,15 +1910,21 @@ const SelectionContext = {
     if (askBtn) { askBtn.disabled = true; askBtn.textContent = '…'; }
 
     try {
-      const { text: rawReply, model } = await complete(userMessage, {
+      const { text: reply, model, empty } = await complete(userMessage, {
         endpoint: ChatInput._endpoint,
         systemPrompt,
       });
-      const reply = _cleanAIResponse(rawReply);
 
       const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
       if (existing) existing.remove();
       TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
+
+      if (empty) {
+        // Nothing usable survived cleanup -- show this honestly instead of
+        // logging/rendering a blank suggestion card.
+        ModelStatus._onError("The model didn't return anything usable. Try again.");
+        return;
+      }
 
       // Build the event first and reuse its own timestamp everywhere below —
       // same fix as logAcceptance() above: an independently-captured
