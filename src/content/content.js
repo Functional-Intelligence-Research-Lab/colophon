@@ -8,6 +8,7 @@ import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.j
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 import { debugLog } from '../shared/debug.js'
 import { SOURCE_TOOLS } from '../shared/source-tools.js'
+import { editEvent } from '../lib/events.js'
 
 /**
  * content.js — Colophon content script
@@ -705,6 +706,10 @@ function bufferEdit(delta, isDelete = false, { fromKeydown = false } = {}) {
   _debounce = setTimeout(flushEdit, DEBOUNCE_MS)
 }
 
+function countWords(text = '') {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
 function flushEdit() {
   if (!_editBuffer) return
   const v = _editBuffer.velocity.summary()
@@ -753,6 +758,7 @@ function flushEdit() {
     let contentMeta = {};
     let char_delta = thisBuffer.delta;
     let char_count = absDelta;
+    const delta_words = countWords(textAfter) - countWords(textBefore);
 
     if (diffOutcome === 'pending' && textBefore && textAfter && textBefore !== textAfter) {
       const { prefixLen, oldSuffixLen, newSuffixLen } = diffMiddleRegion(textBefore, textAfter);
@@ -782,22 +788,65 @@ function flushEdit() {
     // occurrence is evidence, not a guess.
     debugLog('[Colophon Content] edit flush diff outcome', { diffOutcome })
 
-    send('LOG_EVENT', {
-      timestamp: thisBuffer.timestamp,
-      type: 'edit_block',
-      meta: {
-        ...positionMeta,
-        char_delta,
-        char_count,
-        source: 'human',
-        insertion_velocity,
-        likely_ai,
-        gemini_panel_context,
-        ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
-        churn_keys: v.churn_keys,
-        ...contentMeta,
-      },
-    })
+    // send('LOG_EVENT', {
+    //   timestamp: thisBuffer.timestamp,
+    //   type: 'edit_block',
+    //   meta: {
+    //     ...positionMeta,
+    //     char_delta,
+    //     char_count,
+    //     source: 'human',
+    //     insertion_velocity,
+    //     likely_ai,
+    //     gemini_panel_context,
+    //     ...(cpm !== null ? { chars_per_min: cpm, too_fast_for_human: isTooFastForHuman(cpm) } : {}),
+    //     churn_keys: v.churn_keys,
+    //     ...contentMeta,
+    //   },
+    // })
+
+    // Generate the canonical event structure
+const event = editEvent({
+  source: 'human',
+
+  position_start: positionMeta.position_start,
+  position_end: positionMeta.position_end,
+
+  content_before: contentMeta.content_before,
+  content_after: contentMeta.content_after,
+
+  delta_words,
+});
+
+// Send the canonical event with additional telemetry
+send('LOG_EVENT', {
+  ...event,
+
+  timestamp: thisBuffer.timestamp || event.timestamp,
+
+  meta: {
+    ...event.meta,
+
+    // Preserve additional content metadata
+    ...contentMeta,
+
+    // Editing telemetry
+    char_delta,
+    char_count,
+    insertion_velocity,
+    likely_ai,
+    gemini_panel_context,
+
+    ...(cpm !== null
+      ? {
+          chars_per_min: cpm,
+          too_fast_for_human: isTooFastForHuman(cpm),
+        }
+      : {}),
+
+    churn_keys: v.churn_keys,
+  },
+});
     // Only this buffer's own flush may clear it — a retry that resolves
     // after a newer bufferEdit() has already started must not null out the
     // in-progress buffer out from under it.
@@ -1235,8 +1284,8 @@ async function emitPaste(text) {
       // classifyReliability() treat this honestly as "position unknown"
       // (posStart==null -> 'none') instead of silently trusting a wrong
       // offset.
-      delete event.meta.position_start;
-      delete event.meta.position_end;
+      // delete event.meta.position_start;
+      // delete event.meta.position_end;
     }
 
     // Check if this paste matches a pending AI output (e.g. from Paraphrase quick action)
@@ -1326,7 +1375,7 @@ async function emitPaste(text) {
 
 function formatPreview(text) {
   return text.length > PREVIEW_LIMIT
-    ? text.slice(0, PREVIEW_LIMIT) + '...'
+    ? text.slice(0, PREVIEW_LIMIT - 3) + '...'
     : text
 }
 
