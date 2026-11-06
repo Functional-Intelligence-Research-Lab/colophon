@@ -1341,7 +1341,7 @@ async function emitPaste(text) {
 
 function formatPreview(text) {
   return text.length > PREVIEW_LIMIT
-    ? text.slice(0, PREVIEW_LIMIT) + '...'
+    ? text.slice(0, PREVIEW_LIMIT - 3) + '...'
     : text
 }
 
