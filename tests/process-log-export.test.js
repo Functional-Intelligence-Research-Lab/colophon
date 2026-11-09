@@ -18,6 +18,56 @@ import { describe, it, expect } from 'vitest'
 import { ProcessLog } from '../src/lib/process-log.js'
 import { computeEventHash } from '../src/shared/process-log.js'
 
+describe('ProcessLog._ensureFinalized() — export must produce a structurally valid log', () => {
+  it('appends session_end when the user exports without stopping first', () => {
+    const log = new ProcessLog('anon-test')
+    log.events.push({
+      timestamp: '2026-04-29T10:01:00.000Z',
+      type: 'edit_block',
+      meta: { source: 'human', position_start: 0, position_end: 5 },
+    })
+    expect(log.events[log.events.length - 1].type).toBe('edit_block')
+
+    log._ensureFinalized()
+
+    expect(log.events[log.events.length - 1].type).toBe('session_end')
+  })
+
+  it('does not append a second session_end when the session was already stopped', () => {
+    const log = new ProcessLog('anon-test')
+    log.endSession()
+    const lengthBefore = log.events.length
+
+    log._ensureFinalized()
+
+    expect(log.events.length).toBe(lengthBefore)
+    expect(log.events.filter(e => e.type === 'session_end').length).toBe(1)
+  })
+
+  it('is called by export() itself, so a mid-recording export still ends in session_end', async () => {
+    const log = new ProcessLog('anon-test')
+    log.events.push({
+      timestamp: '2026-04-29T10:01:00.000Z',
+      type: 'edit_block',
+      meta: { source: 'human', position_start: 0, position_end: 5 },
+    })
+
+    global.JSZip = class {
+      file() {}
+      async generateAsync() { return 'base64data' }
+    }
+    global.chrome = { downloads: { download: async () => {} } }
+    // Bypass the real EPUB fetch -- this test only cares whether export()
+    // finalizes this.events before building the dict, not how the document
+    // content is fetched.
+    log.getXhtmlContentEpub = async () => '<html></html>'
+
+    await log.export('fake-doc-id')
+
+    expect(log.events[log.events.length - 1].type).toBe('session_end')
+  })
+})
+
 describe('ProcessLog.toDict() — export sanitization', () => {
   it('clips an unbounded meta.text field to 500 chars', () => {
     const log = new ProcessLog('anon-test')

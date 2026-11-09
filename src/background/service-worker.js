@@ -744,11 +744,19 @@ async function getState() {
   return { session, stats: { editCount, aiCount, elapsed }, docContext: _lastDocContext };
 }
 
-// tabIndependent=true skips the active-tab requirement (needed when this is
-// triggered from a background check, e.g. the storage-quota auto-export,
-// rather than a user clicking "Export") — requires session.googleDocId to
-// have been captured at startSession() time; older sessions without it fall
-// back to the normal active-tab path and will throw if no Docs tab is open.
+// The stored googleDocId (captured at startSession()/autoStartSession() time
+// for every normal session, see startSession() above) is preferred whenever
+// it exists, regardless of who's calling — a button click is no less
+// entitled to a reliable export than the background auto-export is. Without
+// this, exporting via the popup button after switching away from, or
+// closing, the Google Docs tab used to fail outright: it always passed
+// docId=null, forcing getXhtmlContentEpub() to fall back to a live
+// chrome.tabs.query({active:true}) that assumes the Doc is still the
+// foreground tab. tabIndependent now only controls whether the *lack* of a
+// stored docId is tolerated: the background auto-export genuinely has no
+// tab to fall back to and must throw; a user-initiated export from the
+// button can still fall back to the active-tab query for a true legacy
+// session that predates this field.
 async function exportSession({ tabIndependent = false } = {}) {
   const session = await getSession();
   if (!session) throw new Error("No active session to export.");
@@ -766,7 +774,7 @@ async function exportSession({ tabIndependent = false } = {}) {
   logger.startTime = session.startedAt;
   logger.events = session.events;
 
-  const docId = tabIndependent ? (session.googleDocId ?? null) : null;
+  const docId = session.googleDocId ?? null;
   if (tabIndependent && !docId) {
     throw new Error("No stored Google Doc id for this session — cannot export without an active tab.");
   }

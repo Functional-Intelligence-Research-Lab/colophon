@@ -176,6 +176,24 @@ export class ProcessLog {
     }
 
     /**
+     * Append session_end if it isn't already the last event. Export must
+     * always produce a structurally valid log (schema and verify_process_log()
+     * both require the last event to be session_end) even when the user
+     * exports mid-recording without clicking "stop" first -- but calling
+     * endSession() unconditionally would append a second session_end on a
+     * re-export of an already-stopped session. Safe to mutate `this.events`
+     * here: exportSession() (service-worker.js) never persists this object
+     * back to storage, so this only affects the local copy built for this
+     * one export, never the live recording session.
+     */
+    _ensureFinalized() {
+        const lastEvent = this.events[this.events.length - 1];
+        if (!lastEvent || lastEvent.type !== "session_end") {
+            this.endSession();
+        }
+    }
+
+    /**
      * @param {*} endTime
      * @returns Return the process log as a spec-compliant object
      */
@@ -424,7 +442,7 @@ export class ProcessLog {
      * @returns {Promise<Blob>} A Blob representing the ZIP file.
      */
     async export(docId = null) {
-        //const endTime = this.endSession();
+        this._ensureFinalized();
         const processLogDict = this.toDict();
         await this._applyIntegrityChain(processLogDict);
         const xhtmlContent = await this.getXhtmlContentEpub(docId)
