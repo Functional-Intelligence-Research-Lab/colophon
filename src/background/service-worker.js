@@ -30,7 +30,7 @@ import { formatDocTitle } from "../shared/doc-title.js";
 
 const NATIVE_HOST = 'com.colophon.llamahost';
 let _nativePort = null;
-let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'
+let _modelStatus = 'unknown'; // 'unknown'|'host_not_installed'|'no_model'|'available'|'running'|'port_conflict'
 let _llamafilePort = 8080;
 let _lastSelection = { text: '' };
 let _lastDocContext = null;
@@ -96,6 +96,21 @@ function onNativeMessage(msg) {
         message: msg.message,
       }).catch(() => {});
       break;
+  }
+}
+
+// llama.cpp/llamafile's bundled server always answers /health with a 200
+// JSON body shaped { "status": "ok", ... } once a model is loaded (503/500
+// with a different status for "loading"/"error", both already excluded by
+// the resp.ok check at the call site). Checking this specific shape, not
+// just that *something* answered 2xx, is what tells a stale stored port
+// apart from an unrelated local service that happens to also be listening.
+async function isLlamafileHealthResponse(resp) {
+  try {
+    const body = await resp.json();
+    return body?.status === 'ok';
+  } catch {
+    return false;
   }
 }
 
@@ -249,12 +264,26 @@ async function handleMessage(msg, _sender) {
       try {
         const healthUrl = `http://127.0.0.1:${_llamafilePort}/health`;
         const resp = await fetch(healthUrl, { method: 'GET', signal: AbortSignal.timeout(1000) });
-        if (resp.ok) {
+        if (resp.ok && await isLlamafileHealthResponse(resp)) {
           _modelStatus = 'running';
           return { ok: true, status: 'running', port: _llamafilePort };
         }
+        if (resp.ok) {
+          // Something answered 2xx on this port, but not llamafile's own
+          // /health shape -- the stored port is stale (e.g. an unrelated
+          // program claimed 8080 after a reboot, before llamafile relaunched
+          // there). Trusting it as "running" would have the extension
+          // confidently talk to the wrong server. Ask the native host to
+          // relaunch: handle_launch_model() always calls find_free_port()
+          // fresh and kills any process it previously started first, so
+          // this is safe to request repeatedly, not just on the first miss.
+          _modelStatus = 'port_conflict';
+          const nativePort = getNativePort();
+          if (nativePort) nativePort.postMessage({ action: 'LAUNCH_MODEL' });
+          return { ok: true, status: 'port_conflict', port: _llamafilePort };
+        }
       } catch {
-        if (_modelStatus === 'running') {
+        if (_modelStatus === 'running' || _modelStatus === 'port_conflict') {
           _modelStatus = 'available';
         }
       }

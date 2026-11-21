@@ -154,7 +154,7 @@ export function looksLikePromptEcho(responseText, originalPrompt) {
  * @param {string} [opts.model]        - Model name (passed to the server; ignored by llamafile)
  * @param {string} [opts.systemPrompt] - Override default system prompt
  * @param {number} [opts.maxTokens]    - Max tokens to generate (default 256)
- * @returns {Promise<{text: string, model: string, empty: boolean}>}
+ * @returns {Promise<{text: string, model: string, empty: boolean, malformed: boolean}>}
  */
 export async function complete(userMessage, opts = {}) {
   const endpoint = opts.endpoint || 'http://127.0.0.1:8080';
@@ -190,7 +190,14 @@ export async function complete(userMessage, opts = {}) {
     }
 
     const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content ?? '';
+    // A 2xx response with no `choices` array at all isn't an OpenAI-
+    // compatible chat-completion reply -- it's a strong signal that
+    // whatever answered on this port isn't really llamafile/Ollama (a
+    // stale, now-reassigned port, or an unrelated local service). Flagging
+    // this distinctly from a genuine empty reply lets the caller show a
+    // "wrong server" message instead of "the model returned nothing."
+    const malformed = !Array.isArray(data.choices);
+    const raw = malformed ? '' : (data.choices[0]?.message?.content ?? '');
     const cleaned = cleanResponse(raw);
     // An echo isn't "nothing," textually -- it's real-looking text that
     // happens to be the model repeating its own input back. Treat it the
@@ -198,7 +205,7 @@ export async function complete(userMessage, opts = {}) {
     // rendering, or letting a user insert into their document.
     const text = looksLikePromptEcho(cleaned, userMessage) ? '' : cleaned;
     const modelName = data.model || model;
-    return { text, model: `${inferProvider(endpoint)}/${modelName}`, empty: text.length === 0 };
+    return { text, model: `${inferProvider(endpoint)}/${modelName}`, empty: text.length === 0, malformed };
   } finally {
     clearTimeout(timeout);
   }

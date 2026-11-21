@@ -135,6 +135,24 @@ describe('complete', () => {
     const result = await complete('hello', { endpoint: 'http://127.0.0.1:8080' })
     expect(result.text).toBe('The real answer.')
     expect(result.empty).toBe(false)
+    expect(result.malformed).toBe(false)
+  })
+
+  it('flags malformed when a 2xx response has no choices array at all (wrong server on this port)', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ hello: 'world' }), // some unrelated local service, not OpenAI-shaped
+    }))
+    const result = await complete('hello', { endpoint: 'http://127.0.0.1:8080' })
+    expect(result.malformed).toBe(true)
+    expect(result.empty).toBe(true)
+    expect(result.text).toBe('')
+  })
+
+  it('does not flag malformed for a real, well-shaped response', async () => {
+    mockServer('A normal reply.')
+    const result = await complete('hello', { endpoint: 'http://127.0.0.1:8080' })
+    expect(result.malformed).toBe(false)
   })
 
   it('flags empty when nothing survives cleanup', async () => {

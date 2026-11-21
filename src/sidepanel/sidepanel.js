@@ -110,6 +110,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error("Could not initialize tab data:", e);
   }
 
+  // activeTabId was previously set only once, here at init. The side panel
+  // is a single global panel (not scoped per-tab), so leaving it open while
+  // switching between two Google Docs tabs left every action keyed on it
+  // (GEMINI_REJECT/GEMINI_ACCEPT/APPLY_SUGGESTION/CLEAR_SELECTION) silently
+  // targeting whichever doc happened to be active when the panel first
+  // opened, not the one actually on screen now. Only follow the switch onto
+  // an actual Google Doc -- switching to an unrelated tab (email, another
+  // site) should leave activeTabId pointing at the last real Doc, since
+  // these actions have nowhere valid to go on a non-Doc page anyway.
+  chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.url && /^https:\/\/docs\.google\.com\/document\//.test(tab.url)) {
+        activeTabId = tabId;
+      }
+    } catch {
+      // Tab closed/inaccessible between the event firing and this lookup -- ignore.
+    }
+  });
+
   // Assignment Prompt Editable Logic
   const promptElement = document.getElementById('assignment-brief-text');
   if (promptElement) {
@@ -1430,13 +1450,17 @@ const ChatInput = {
 
     try {
       const systemPrompt = await _buildSystemPrompt();
-      const { text: reply, model, empty } = await complete(text, { endpoint: this._endpoint, systemPrompt });
+      const { text: reply, model, empty, malformed } = await complete(text, { endpoint: this._endpoint, systemPrompt });
 
       if (empty) {
         // Nothing usable survived cleanup (e.g. the model only echoed
         // protocol tokens or its own prompt back) -- show this honestly,
         // the same inline-card way the catch block below shows a real
         // error, instead of logging/rendering a blank suggestion card.
+        // `malformed` means the response wasn't even OpenAI-shaped at all --
+        // a real sign of a port conflict (something other than llamafile/
+        // Ollama answering on this port), distinct from the model genuinely
+        // having nothing to say.
         const existing = document.querySelector(`.timeline-event[data-timestamp="${pendingTimestamp}"]`);
         if (existing) existing.remove();
         TimelineRenderer.renderedTimestamps.delete(pendingTimestamp);
@@ -1449,8 +1473,10 @@ const ChatInput = {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           </div>
           <div class="ecc-body">
-            <div class="ecc-title">${esc('Empty response')}</div>
-            <div class="ecc-meta">${esc("The model didn't return anything usable. Try again.")}</div>
+            <div class="ecc-title">${esc(malformed ? 'Wrong server on this port' : 'Empty response')}</div>
+            <div class="ecc-meta">${esc(malformed
+              ? "Something else is using the model's port. Relaunching on a different port…"
+              : "The model didn't return anything usable. Try again.")}</div>
           </div>
           <div class="ecc-action" style="gap:4px;display:flex;">
             <button type="button" class="ecc-btn-close-err" title="Dismiss" aria-label="Dismiss" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:2px 4px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="width:14px;height:14px;"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
@@ -1589,6 +1615,16 @@ const ModelStatus = {
         this._setFooter('disconnected', 'No model');
         this._showBanner('download');
         break;
+      case 'port_conflict':
+        // Something else answered on the stored port with a non-llamafile
+        // shape (service-worker.js's CHECK_MODEL_STATUS handler already
+        // asked the native host to relaunch on a fresh port when it
+        // detected this) -- distinct from "AI setup needed" so the user
+        // isn't told to redo setup for what's actually a transient port
+        // collision that's already being resolved.
+        this._setFooter('available', 'Port busy, relaunching…');
+        this._showBanner('port_conflict');
+        break;
       case 'host_not_installed':
       case 'disconnected':
       default:
@@ -1638,6 +1674,11 @@ const ModelStatus = {
           }
           chrome.runtime.sendMessage({ action: 'REQUEST_LAUNCH_MODEL' }).catch(() => {});
         },
+      },
+      port_conflict: {
+        text: "Something else is using the model's usual port. Relaunching on a different one.",
+        actionLabel: 'Check again',
+        actionFn: () => chrome.runtime.sendMessage({ action: 'CHECK_MODEL_STATUS' }).catch(() => {}),
       },
     };
 
@@ -1910,7 +1951,7 @@ const SelectionContext = {
     if (askBtn) { askBtn.disabled = true; askBtn.textContent = '…'; }
 
     try {
-      const { text: reply, model, empty } = await complete(userMessage, {
+      const { text: reply, model, empty, malformed } = await complete(userMessage, {
         endpoint: ChatInput._endpoint,
         systemPrompt,
       });
@@ -1921,8 +1962,12 @@ const SelectionContext = {
 
       if (empty) {
         // Nothing usable survived cleanup -- show this honestly instead of
-        // logging/rendering a blank suggestion card.
-        ModelStatus._onError("The model didn't return anything usable. Try again.");
+        // logging/rendering a blank suggestion card. `malformed` means the
+        // response wasn't even OpenAI-shaped -- a port conflict, not the
+        // model genuinely having nothing to say.
+        ModelStatus._onError(malformed
+          ? "Something else is using the model's port. Relaunching on a different port…"
+          : "The model didn't return anything usable. Try again.");
         return;
       }
 
