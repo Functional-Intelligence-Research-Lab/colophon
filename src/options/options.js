@@ -21,6 +21,7 @@ async function init() {
   document.getElementById('gemini-key').value      = settings.geminiApiKey
   document.getElementById('user-id').textContent   = session?.userId
     ?? 'No active session — an ID is generated automatically once you start recording'
+  document.getElementById('auto-record-toggle').checked = settings.autoRecord === true
 
   updateConditionalSections(settings.aiPath)
 
@@ -30,6 +31,10 @@ async function init() {
       updateConditionalSections(el.value)
       save({ aiPath: el.value })
     })
+  )
+
+  document.getElementById('auto-record-toggle').addEventListener('change', e =>
+    save({ autoRecord: e.target.checked })
   )
 
   document.querySelectorAll('input[name="outputFormat"]').forEach(el =>

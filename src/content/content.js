@@ -8,6 +8,7 @@ import { jaccardSimilarity, acceptanceFromSimilarity } from '../lib/similarity.j
 import { isMetaCommentary, GEMINI_MODEL_ID, extractGeminiProposedDiff } from './gemini-selectors.js'
 import { debugLog } from '../shared/debug.js'
 import { SOURCE_TOOLS } from '../shared/source-tools.js'
+import { getSettings } from '../shared/storage.js'
 
 /**
  * content.js — Colophon content script
@@ -519,26 +520,48 @@ function attachTextEventIframe() {
   }
 }
 
-// Always-on recording (spike, reverted). When true, a Doc load auto-starts a
-// session so text written before any "Start recording" click is still
-// captured — closing the opt-in blind spot, at the cost of recording (and
-// persisting paste/edit events) before the user has clicked anything, while
-// the UI still reads as opt-in. That mismatch is exactly what the manual path
-// avoids, so this stays false until the UI itself is redesigned to show
-// "recording active" from doc-open — see firl-infra/TASKS.md.
-const AUTO_RECORD = false
+// Automatic recording (user-configurable through Colophon Settings).
+// When true, a Doc load auto-starts a session so text written before any
+// "Start recording" click is still captured — closing the opt-in blind spot,
+// at the cost of recording (and persisting paste/edit events) before the
+// user has clicked anything.
+//
+// Unlike the previous always-on spike, this behavior now requires the user
+// to explicitly enable it through the settings UI. The UI should clearly
+// communicate when automatic recording is enabled.
+let AUTO_RECORD = false
+
+async function startAutoRecordForCurrentDoc() {
+  try {
+    // Always send AUTO_SESSION_START so the SW can reattach to the new tab
+    // context after a page reload. The startSession guard in the SW ensures
+    // that an already-recording session for this doc is never clobbered —
+    // it simply updates the tabId and re-sends ACTIVATE without adding any
+    // new events to the timeline.
+    const res = await chrome.runtime.sendMessage({
+      type: 'AUTO_SESSION_START'
+    })
+
+    debugLog('[Colophon Content] auto-record requested', res)
+
+    if (res?.ok) activate()
+
+  } catch (err) {
+    debugLog('[Colophon Content] auto-record failed', err.message)
+  }
+}
 
 async function syncRecordingState() {
   try {
+    // Read the user's saved automatic recording preference.
+    const settings = await getSettings()
+
+    AUTO_RECORD = settings.autoRecord === true
+    
+    debugLog('[Colophon Content] auto-record preference:', AUTO_RECORD)
+
     if (AUTO_RECORD) {
-      // Always send AUTO_SESSION_START so the SW can reattach to the new tab
-      // context after a page reload. The startSession guard in the SW ensures
-      // that an already-recording session for this doc is never clobbered —
-      // it simply updates the tabId and re-sends ACTIVATE without adding any
-      // new events to the timeline.
-      const res = await chrome.runtime.sendMessage({ type: 'AUTO_SESSION_START' })
-      debugLog('[Colophon Content] auto-record requested', res)
-      if (res?.ok) activate()
+      await startAutoRecordForCurrentDoc()
     } else {
       // Manual mode: only activate if the SW says we're already recording.
       const state = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
@@ -554,6 +577,25 @@ async function syncRecordingState() {
     // Popup activation remains the fallback path if the service worker is waking.
   }
 }
+
+// Watch for changes to automatic recording preference.
+// This allows the setting to take effect without reloading Google Docs.
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes.settings) return
+
+  const newValue = changes.settings.newValue?.autoRecord === true
+
+  if (newValue === AUTO_RECORD) return
+
+  AUTO_RECORD = newValue
+
+  debugLog('[Colophon Content] auto-record preference changed:', AUTO_RECORD)
+
+  // When enabled, immediately start recording the currently open document.
+  if (AUTO_RECORD) {
+    startAutoRecordForCurrentDoc()
+  }
+})
 
 function deactivate() {
   if (!_active) return

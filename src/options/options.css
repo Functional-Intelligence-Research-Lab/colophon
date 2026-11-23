@@ -197,6 +197,83 @@ button {
 }
 button:hover { background: #f3f4f6; }
 
+/* ── Automatic recording toggle ── */
+.auto-record-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.auto-record-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.auto-record-copy strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auto-record-copy span {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Toggle */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #d1d5db;
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+
+.toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggle-track {
+  background: #111;
+}
+
+.toggle input:checked + .toggle-track::before {
+  transform: translateX(18px);
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid #6b7280;
+  outline-offset: 3px;
+}
+
 /* ── Privacy list ── */
 .privacy-list {
   list-style: none;

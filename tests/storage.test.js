@@ -27,6 +27,22 @@ describe('getSettings', () => {
     expect(s.aiPath).toBe('ollama')
     expect(s.ollamaEndpoint).toBe('http://localhost:11434')
     expect(s.outputFormat).toBe('twff')
+    expect(s.autoRecord).toBe(false)
+  })
+  it('defaults autoRecord to false when not previously configured', async () => {
+    await saveSettings({ aiPath: 'gemini-native' })
+
+    const s = await getSettings()
+
+    expect(s.autoRecord).toBe(false)
+  })
+
+  it('returns the persisted automatic recording preference', async () => {
+    await saveSettings({ autoRecord: true })
+
+    const s = await getSettings()
+
+    expect(s.autoRecord).toBe(true)
   })
 })
 
@@ -36,6 +52,7 @@ describe('saveSettings', () => {
     const s = await getSettings()
     expect(s.aiPath).toBe('gemini-native')
     expect(s.ollamaEndpoint).toBe('http://localhost:11434') // unchanged default
+    expect(s.autoRecord).toBe(false)
   })
 
   it('successive saves accumulate correctly', async () => {
@@ -43,6 +60,31 @@ describe('saveSettings', () => {
     await saveSettings({ ollamaModel: 'qwen2.5:0.5b' })
     const s = await getSettings()
     expect(s.aiPath).toBe('gemini-native')
+    expect(s.ollamaModel).toBe('qwen2.5:0.5b')
+  })
+
+  it('enables and disables automatic recording correctly', async () => {
+    // Enable automatic recording
+    await saveSettings({ autoRecord: true })
+
+    let s = await getSettings()
+    expect(s.autoRecord).toBe(true)
+
+    // Disable automatic recording
+    await saveSettings({ autoRecord: false })
+
+    s = await getSettings()
+    expect(s.autoRecord).toBe(false)
+  })
+
+  it('preserves automatic recording preference when other settings change', async () => {
+    await saveSettings({ autoRecord: true })
+
+    await saveSettings({ ollamaModel: 'qwen2.5:0.5b' })
+
+    const s = await getSettings()
+
+    expect(s.autoRecord).toBe(true)
     expect(s.ollamaModel).toBe('qwen2.5:0.5b')
   })
 })

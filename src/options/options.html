@@ -44,6 +44,35 @@
       </div>
     </section>
 
+        <!-- ── Automatic Recording ─────────────────────────────── -->
+    <section>
+      <h2>Recording behavior</h2>
+
+      <label class="auto-record-setting" for="auto-record-toggle">
+        <span class="auto-record-copy">
+          <strong>Automatically start sessions</strong>
+          <span>
+            Start a Colophon recording session whenever a Google Doc is opened.
+          </span>
+        </span>
+
+        <span class="toggle">
+          <input
+            type="checkbox"
+            id="auto-record-toggle"
+            role="switch"
+          >
+          <span class="toggle-track"></span>
+        </span>
+      </label>
+
+      <p class="note">
+        When enabled, recording starts automatically without clicking
+        Start Session. Turning this off prevents future automatic starts;
+        an existing session will continue until stopped normally.
+      </p>
+    </section>
+
     <!-- ── Ollama ───────────────────────────────────────────── -->
     <section id="section-ollama">
       <h2>Ollama settings</h2>

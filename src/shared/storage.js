@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   ollamaModel:     '',
   outputFormat:    'twff',
   geminiApiKey:    '',
+  autoRecord:      false,
 }
 
 export async function getSettings() {
